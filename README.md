@@ -2,6 +2,14 @@
 
 Tuya Local Key helps you retrieve the local keys for devices in your Smart Life / Tuya account, along with device ID, UUID, product details, category, IP address, online status, and timestamps.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/header-devices-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/header-devices-light.png">
+  <img alt="Tuya Local Key device list preview with 60 demo devices" src="docs/screenshots/header-devices-light.png">
+</picture>
+
+<br>
+
 It uses QR-code login through Tuya's official [`tuya-device-sharing-sdk`](https://github.com/tuya/tuya-device-sharing-sdk), using Home Assistant's public device-sharing app registration. You do not need a Tuya IoT developer account, cloud project, Access ID, or Access Secret.
 
 Use it as a self-hosted web UI with Docker or as a local CLI tool.
@@ -110,6 +118,41 @@ In the Smart Life app, tap + > Scan, point at the QR code, and tap Confirm login
 The app may ask you to confirm login for "Home Assistant". That is expected because this tool signs in through Home Assistant's Tuya app registration. Only confirm if you started the login.
 
 The QR code expires within a minute or two. If it times out, start the login again.
+
+
+## Demo Screenshots
+
+### Login
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/login-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/login-light.png">
+  <img alt="Login screen" src="docs/screenshots/login-light.png">
+</picture>
+
+### QR Login
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/qr-login-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/qr-login-light.png">
+  <img alt="QR login screen" src="docs/screenshots/qr-login-light.png">
+</picture>
+
+### Device Table
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/devices-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/devices-light.png">
+  <img alt="Device table with 60 demo devices" src="docs/screenshots/devices-light.png">
+</picture>
+
+### Filtering
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/filter-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/filter-light.png">
+  <img alt="Filtered device table" src="docs/screenshots/filter-light.png">
+</picture>
 
 ## Troubleshooting
 
