@@ -58,7 +58,9 @@ def test_github_workflow_runs_tests_and_only_publishes_on_tags():
 
     text = (ROOT / ".github" / "workflows" / "docker-publish.yml").read_text()
     assert "pytest" in text
-    assert "BUILD_VERSION=${{ steps.meta.outputs.version }}" in text
+    assert "value=${GITHUB_REF_NAME#v}" in text
+    assert "type=raw,value=${{ steps.version.outputs.value }}" in text
+    assert "BUILD_VERSION=${{ steps.version.outputs.value }}" in text
     assert "push: false" in text
     assert "push: true" in text
 
