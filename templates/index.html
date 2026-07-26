@@ -289,15 +289,7 @@ function esc(s) {
   return String(s ?? "-").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 }
 
-async function copyText(text) {
-  if (navigator.clipboard && window.isSecureContext) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch (err) {
-      // Fall through to the older user-gesture copy path below.
-    }
-  }
+function copyWithTextArea(text) {
   const ta = document.createElement("textarea");
   ta.value = text;
   ta.setAttribute("readonly", "");
@@ -312,6 +304,16 @@ async function copyText(text) {
   } finally {
     ta.remove();
   }
+}
+
+async function copyText(text) {
+  try {
+    copyWithTextArea(text);
+    return;
+  } catch (err) {
+    if (!navigator.clipboard || !window.isSecureContext) throw err;
+  }
+  await navigator.clipboard.writeText(text);
 }
 
 function cmp(a, b) {
