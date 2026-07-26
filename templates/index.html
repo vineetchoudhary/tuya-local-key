@@ -208,7 +208,7 @@ function banner(msg) {
   b.textContent = msg; b.classList.remove("hidden");
 }
 async function api(path, opts) {
-  const r = await fetch(path, opts);
+  const r = await fetch(path.replace(/^\/+/, ""), opts);
   let body = {};
   try { body = await r.json(); } catch (e) {}
   return { ok: r.ok, status: r.status, body };

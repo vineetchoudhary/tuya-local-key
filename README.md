@@ -20,7 +20,24 @@ Use it as a self-hosted web UI with Docker or as a local CLI tool.
 - CLI with the same QR login flow for terminal use.
 - Session caching so you do not need to scan a QR code every time.
 - Docker and Docker Compose support.
+- Home Assistant app support.
 - GHCR publishing workflow for multi-architecture images.
+
+## Home Assistant App
+
+Home Assistant OS users can install Tuya Local Key as a Home Assistant app, formerly called an add-on.
+
+1. Go to Settings > Apps > App Store.
+2. Open the menu in the top-right and choose Repositories.
+3. Add this repository URL:
+
+```text
+https://github.com/vineetchoudhary/tuya-local-key
+```
+
+4. Install Tuya Local Key from the app store and open it from the sidebar.
+
+The app uses Home Assistant ingress by default. The direct `8000/tcp` port is disabled unless you explicitly enable it in the app network settings.
 
 ## Web UI with Docker Compose
 
