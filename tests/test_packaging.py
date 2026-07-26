@@ -42,7 +42,7 @@ def test_dockerfile_has_home_assistant_labels_and_runtime_contract():
     assert 'io.hass.type="app"' in dockerfile
     assert 'io.hass.arch="aarch64|amd64"' in dockerfile
     assert "PYTHONDONTWRITEBYTECODE=1" in dockerfile
-    assert "USER appuser" in dockerfile
+    assert "USER appuser" not in dockerfile
     assert "SESSION_FILE=/data/session.json" in dockerfile
     assert "waitress-serve --listen=0.0.0.0:${PORT:-8000}" in dockerfile
 

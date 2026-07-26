@@ -95,6 +95,34 @@ def test_login_poll_saves_confirmed_session(webapp, monkeypatch):
         assert "demo-token" not in webapp._pending
 
 
+def test_login_poll_returns_json_when_session_save_fails(webapp, monkeypatch):
+    session = {
+        "user_code": "user-code",
+        "terminal_id": "terminal",
+        "endpoint": "endpoint",
+        "token_info": {"access_token": "token"},
+    }
+    monkeypatch.setattr(webapp.core, "poll_login", lambda token, user_code: session)
+
+    def fail_save(path, data):
+        raise PermissionError("cannot write session")
+
+    monkeypatch.setattr(webapp.core, "save_session", fail_save)
+    with webapp._lock:
+        webapp._pending["demo-token"] = {
+            "user_code": "user-code",
+            "created_at": time.time(),
+        }
+
+    response = webapp.app.test_client().post(
+        "/api/login/poll", json={"token": "demo-token"}
+    )
+
+    assert response.status_code == 500
+    assert response.content_type == "application/json"
+    assert response.json["error"].startswith("session_save_failed:")
+
+
 def test_devices_requires_session(webapp):
     response = webapp.app.test_client().get("/api/devices")
 

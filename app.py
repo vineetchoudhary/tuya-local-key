@@ -99,7 +99,10 @@ def login_poll():
 
     session = core.poll_login(token, user_code)
     if session:
-        core.save_session(SESSION_FILE, session)
+        try:
+            core.save_session(SESSION_FILE, session)
+        except Exception as e:
+            return jsonify({"error": f"session_save_failed: {e}"}), 500
         with _lock:
             _pending.pop(token, None)
         return jsonify({"status": "confirmed"})
