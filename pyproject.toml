@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
+tuya-local-key = "tuya_devices:main"
 tuya-devices = "tuya_devices:main"
 
 [tool.setuptools]
