@@ -25,4 +25,4 @@ EXPOSE 8000
 VOLUME ["/data"]
 
 # Production WSGI server (waitress) — threaded, handles the login polling fine.
-CMD ["waitress-serve", "--listen=0.0.0.0:8000", "--threads=8", "app:app"]
+CMD ["sh", "-c", "exec waitress-serve --listen=0.0.0.0:${PORT:-8000} --threads=8 app:app"]
