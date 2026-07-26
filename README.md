@@ -25,7 +25,7 @@ Use it as a self-hosted web UI with Docker or as a local CLI tool.
 
 ## Home Assistant App
 
-Home Assistant OS users can install Tuya Local Key as a Home Assistant app, formerly called an add-on.
+Home Assistant OS users can install Tuya Local Key as a Home Assistant app.
 
 1. Go to Settings > Apps > App Store.
 2. Open the menu in the top-right and choose Repositories.
