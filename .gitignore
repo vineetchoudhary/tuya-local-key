@@ -13,4 +13,11 @@ dist/
 tuya-login-qr.png
 *.csv
 session.json
+*session*.json
 .env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.claude/

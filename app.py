@@ -6,7 +6,7 @@ Endpoints (JSON unless noted):
   GET  /                    -> the single-page UI (HTML)
   GET  /api/state           -> {"logged_in": bool}
   POST /api/login/start     -> {"token", "qr"} (qr is a data: PNG) | {"error"}
-  GET  /api/login/poll      -> {"status": "pending"|"confirmed"|"expired"}
+  POST /api/login/poll      -> {"status": "pending"|"confirmed"|"expired"}
   GET  /api/devices         -> {"devices": [...]} | 401 {"error"}
   POST /api/logout          -> {"ok": true}
 
@@ -17,6 +17,7 @@ restarts; mount it on a volume in Docker.
 import base64
 import os
 import threading
+import time
 
 from flask import Flask, jsonify, render_template, request
 
@@ -29,14 +30,32 @@ QR_SCHEME = os.environ.get("QR_SCHEME", "tuyaSmart")
 
 app = Flask(__name__)
 
-# token -> user_code, for in-flight logins (single-process; guarded by a lock).
+# token -> login info, for in-flight logins (single-process; guarded by a lock).
 _pending = {}
 _lock = threading.Lock()
+PENDING_LOGIN_TTL_SECONDS = 180
+
+
+def _cleanup_pending(now=None):
+    now = now or time.time()
+    expired = [
+        token for token, info in _pending.items()
+        if now - info["created_at"] > PENDING_LOGIN_TTL_SECONDS
+    ]
+    for token in expired:
+        _pending.pop(token, None)
 
 
 @app.get("/")
 def index():
     return render_template("index.html")
+
+
+@app.after_request
+def no_store_api_responses(response):
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/api/state")
@@ -58,7 +77,8 @@ def login_start():
         return jsonify({"error": f"Could not reach Tuya: {e}"}), 502
 
     with _lock:
-        _pending[token] = user_code
+        _cleanup_pending()
+        _pending[token] = {"user_code": user_code, "created_at": time.time()}
 
     png = base64.b64encode(
         core.qr_png_bytes(f"{QR_SCHEME}--qrLogin?token={token}")
@@ -66,11 +86,14 @@ def login_start():
     return jsonify({"token": token, "qr": f"data:image/png;base64,{png}"})
 
 
-@app.get("/api/login/poll")
+@app.post("/api/login/poll")
 def login_poll():
-    token = request.args.get("token", "")
+    data = request.get_json(silent=True) or {}
+    token = (data.get("token") or "").strip()
     with _lock:
-        user_code = _pending.get(token)
+        _cleanup_pending()
+        login = _pending.get(token)
+        user_code = login["user_code"] if login else None
     if not user_code:
         return jsonify({"status": "expired"}), 404
 

@@ -242,7 +242,10 @@ function startPolling(token) {
     if (Date.now() - started > 180000) { // 3 min safety
       stopPolling(); banner("QR expired — try again."); show("login"); return;
     }
-    const { status, body } = await api("/api/login/poll?token=" + encodeURIComponent(token));
+    const { status, body } = await api("/api/login/poll", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
     if (body.status === "confirmed") { stopPolling(); banner(""); loadDevices(); }
     else if (status === 404 || body.status === "expired") { stopPolling(); banner("QR expired — try again."); show("login"); }
   }, 2000);
