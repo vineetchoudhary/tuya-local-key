@@ -80,6 +80,13 @@ Run the CLI:
 .venv/bin/python tuya_devices.py
 ```
 
+Install the CLI command into the virtualenv:
+
+```bash
+.venv/bin/python -m pip install -e .
+.venv/bin/tuya-local-key
+```
+
 First run prompts for your Smart Life user code, prints a QR code in the terminal, saves `tuya-login-qr.png` as a fallback, waits for confirmation, and then lists devices. The session is cached at `~/.config/tuya-smartlife/session.json`.
 
 | Flag | Description |
