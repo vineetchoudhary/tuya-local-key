@@ -190,7 +190,7 @@ const COLUMNS = [
   { key: "online",       label: "Status",       sortable: true, render: d => badge(d.online) },
   { key: "id",           label: "ID",           cls: "mono" },
   { key: "uuid",         label: "UUID",         cls: "mono" },
-  { key: "local_key",    label: "Local Key",    render: d => `<span class="key mono" title="Click to copy" data-copy="${esc(d.local_key)}">${esc(d.local_key)}</span>` },
+  { key: "local_key",    label: "Local Key",    render: d => `<span class="key mono" title="Click to copy" data-copy="${encodeURIComponent(d.local_key ?? "")}">${esc(d.local_key)}</span>` },
   { key: "product_id",   label: "Product ID",   cls: "mono" },
   { key: "product_name", label: "Product Name" },
   { key: "category",     label: "Category" },
@@ -289,6 +289,31 @@ function esc(s) {
   return String(s ?? "-").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 }
 
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (err) {
+      // Fall through to the older user-gesture copy path below.
+    }
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  ta.setSelectionRange(0, ta.value.length);
+  try {
+    if (!document.execCommand("copy")) throw new Error("copy failed");
+  } finally {
+    ta.remove();
+  }
+}
+
 function cmp(a, b) {
   // Booleans (Status): online sorts first when ascending.
   if (typeof a === "boolean" || typeof b === "boolean") return (a === b) ? 0 : (a ? -1 : 1);
@@ -341,9 +366,17 @@ $("thead").addEventListener("click", (e) => {
 });
 
 // copy local key
-$("rows").addEventListener("click", (e) => {
+$("rows").addEventListener("click", async (e) => {
   const el = e.target.closest("[data-copy]");
-  if (el) { navigator.clipboard?.writeText(el.dataset.copy); const t = el.textContent; el.textContent = "copied!"; setTimeout(() => el.textContent = t, 800); }
+  if (!el) return;
+  const t = el.textContent;
+  try {
+    await copyText(decodeURIComponent(el.dataset.copy));
+    el.textContent = "copied!";
+  } catch (err) {
+    el.textContent = "copy failed";
+  }
+  setTimeout(() => el.textContent = t, 800);
 });
 
 // filter
