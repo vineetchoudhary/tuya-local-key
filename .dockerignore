@@ -1,0 +1,27 @@
+# VCS & CI
+.git/
+.github/
+
+# Python / local env
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# macOS
+.DS_Store
+
+# Dev-only files (not needed in the image)
+README.md
+setup.sh
+docker-compose.yml
+.gitignore
+.dockerignore
+
+# Local artifacts / secrets
+tuya-login-qr.png
+*.csv
+session.json
+.env

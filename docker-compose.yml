@@ -1,0 +1,14 @@
+services:
+  tuya-local-key:
+    image: ghcr.io/vineetchoudhary/tuya-local-key:latest
+    container_name: tuya-local-key
+    ports:
+      - "8000:8000"
+    volumes:
+      - tuya-session:/data
+    environment:
+      - QR_SCHEME=smartlife      # or "tuyaSmart"
+    restart: unless-stopped
+
+volumes:
+  tuya-session:

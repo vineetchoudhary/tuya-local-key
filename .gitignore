@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# macOS
+.DS_Store
+
+# Local artifacts / secrets
+tuya-login-qr.png
+*.csv
+session.json
+.env

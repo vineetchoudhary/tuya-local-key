@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tuya Local Key</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --fg: #1c2530; --muted: #6b7684;
+    --border: #e3e7ec; --accent: #2f6fed; --accent-fg: #fff;
+    --ok: #1a9d51; --off: #b03a3a; --code-bg: #f0f2f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161c; --card: #1b2129; --fg: #e6eaef; --muted: #9aa5b1;
+      --border: #2b333d; --accent: #4d86ff; --accent-fg: #fff;
+      --ok: #38c172; --off: #e06666; --code-bg: #232b34;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+  header {
+    padding: 18px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  main { max-width: 1100px; margin: 0 auto; padding: 22px 16px 60px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 22px; margin: 0 auto; max-width: 540px;
+  }
+  h2 { font-size: 16px; margin: 0 0 14px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input[type=text] {
+    width: 100%; padding: 10px 12px; font-size: 15px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+  }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border: 1px solid var(--border);
+    background: var(--card); color: var(--fg); padding: 9px 14px; border-radius: 8px;
+  }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button:disabled { opacity: .55; cursor: default; }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 14px; }
+  .hint b { color: var(--fg); }
+  .qr-wrap { text-align: center; }
+  .qr-wrap img { width: 260px; height: 260px; image-rendering: pixelated; border-radius: 8px; background:#fff; padding:8px; }
+  .spinner {
+    display:inline-block; width:15px; height:15px; border:2px solid var(--border);
+    border-top-color: var(--accent); border-radius:50%; animation: spin 1s linear infinite; vertical-align:-3px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* Big centered spinner for the loading screen */
+  .big-spinner {
+    width: 44px; height: 44px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 1s linear infinite; margin: 6px auto 0;
+  }
+  /* Numbered step-by-step guide */
+  .steps-title { font-size: 15px; font-weight: 650; margin: 22px 0 12px; }
+  ol.steps { list-style: none; counter-reset: step; margin: 0; padding: 0; }
+  ol.steps li {
+    counter-increment: step; position: relative; padding: 9px 0 9px 44px;
+    font-size: 15px; line-height: 1.55;
+  }
+  ol.steps li + li { border-top: 1px solid var(--border); }
+  ol.steps li::before {
+    content: counter(step); position: absolute; left: 0; top: 8px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-fg);
+    font-size: 14px; font-weight: 700; display: grid; place-items: center;
+  }
+  ol.steps b { color: var(--fg); font-weight: 650; }
+  /* Info callout (e.g. the "Home Assistant" heads-up on the QR screen) */
+  .note {
+    margin-top: 16px; padding: 11px 13px; border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    font-size: 13.5px; line-height: 1.55; color: var(--muted);
+  }
+  .note b { color: var(--fg); font-weight: 650; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
+  .toolbar .grow { flex: 1 1 auto; }
+  .count { font-weight:600; }
+  .count .muted { color: var(--muted); font-weight: 400; }
+  .updated { font-size: 12px; color: var(--muted); }
+  .table-scroll { overflow-x: auto; border:1px solid var(--border); border-radius:12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; white-space: nowrap; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  th { position: sticky; top: 0; background: var(--card); font-weight: 600; color: var(--muted); }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--fg); }
+  th.active { color: var(--fg); }
+  th .arrow { font-size: 10px; margin-left: 3px; }
+  tr:last-child td { border-bottom: none; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .key { background: var(--code-bg); padding: 2px 6px; border-radius: 6px; cursor: pointer; }
+  .key:hover { outline: 1px solid var(--accent); }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .badge.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+  .badge.off { color: var(--off); background: color-mix(in srgb, var(--off) 14%, transparent); }
+  .banner { background: color-mix(in srgb, var(--off) 14%, transparent); color: var(--off);
+            border:1px solid var(--off); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:14px; }
+  .hidden { display: none; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tuya Local Key</h1>
+</header>
+<main>
+  <div id="banner" class="banner hidden"></div>
+
+  <!-- LOGIN -->
+  <section id="login" class="card hidden">
+    <h2>Log in</h2>
+    <label for="usercode">Smart Life user code</label>
+    <input id="usercode" type="text" placeholder="e.g. abcdef123456" autocomplete="off" spellcheck="false">
+    <div style="margin-top:14px"><button id="startBtn" class="primary">Get QR code</button></div>
+
+    <div class="steps-title">Where to find your user code</div>
+    <ol class="steps">
+      <li>Open the <b>Smart Life</b> app on your phone</li>
+      <li>Tap <b>Me</b> in the bottom-right</li>
+      <li>Tap the <b>⚙️ Settings</b> gear in the top-right</li>
+      <li>Tap <b>Account and Security</b></li>
+      <li>Scroll to the bottom and copy your <b>User Code</b>, then paste it above</li>
+    </ol>
+  </section>
+
+  <!-- QR -->
+  <section id="qr" class="card hidden">
+    <h2>Scan to confirm</h2>
+    <div class="qr-wrap"><img id="qrImg" alt="Login QR code"></div>
+
+    <div class="steps-title">How to scan the QR code</div>
+    <ol class="steps">
+      <li>Open the <b>Smart Life</b> app on your phone</li>
+      <li>Tap the <b>➕</b> in the top-right, then tap <b>Scan</b></li>
+      <li>Point your phone at the QR code above</li>
+      <li>Tap <b>Confirm login</b> in the app</li>
+    </ol>
+    <div class="note">
+      ℹ️ The app will ask you to confirm login for <b>“Home Assistant”</b> — that's expected. This tool signs in through Home Assistant's Tuya app, so please make sure it was <b>you</b> who started this.
+    </div>
+    <p class="hint" style="text-align:center; margin-top:18px"><span class="spinner"></span> Waiting for you to confirm…</p>
+    <div style="text-align:center; margin-top:8px"><button id="cancelBtn">Cancel</button></div>
+  </section>
+
+  <!-- LOADING -->
+  <section id="loading" class="card hidden" style="text-align:center">
+    <div class="big-spinner"></div>
+    <p id="loadingMsg" style="font-size:16px; font-weight:600; margin:18px 0 4px">Loading your devices…</p>
+    <p class="hint" style="margin-top:0">This can take a moment if you have a lot of devices.</p>
+  </section>
+
+  <!-- DEVICES -->
+  <section id="devices" class="hidden">
+    <div class="toolbar">
+      <span class="count" id="count"></span>
+      <span class="updated" id="updated"></span>
+      <span class="grow"></span>
+      <input id="filter" type="text" placeholder="Filter…" style="max-width:200px" autocomplete="off">
+      <button id="csvBtn">Export CSV</button>
+      <button id="refreshBtn">Refresh</button>
+      <button id="logoutBtn">Log out</button>
+    </div>
+    <div class="table-scroll">
+      <table id="table">
+        <thead id="thead"></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const views = { login: $("login"), qr: $("qr"), loading: $("loading"), devices: $("devices") };
+let pollTimer = null, deviceData = [], filterText = "";
+let sortState = { key: null, dir: 1 };   // dir: 1 = ascending, -1 = descending
+
+// Column definitions drive both the header and the rows (kept in sync).
+const COLUMNS = [
+  { key: "name",         label: "Name",         sortable: true },
+  { key: "online",       label: "Status",       sortable: true, render: d => badge(d.online) },
+  { key: "id",           label: "ID",           cls: "mono" },
+  { key: "uuid",         label: "UUID",         cls: "mono" },
+  { key: "local_key",    label: "Local Key",    render: d => `<span class="key mono" title="Click to copy" data-copy="${esc(d.local_key)}">${esc(d.local_key)}</span>` },
+  { key: "product_id",   label: "Product ID",   cls: "mono" },
+  { key: "product_name", label: "Product Name" },
+  { key: "category",     label: "Category" },
+  { key: "ip",           label: "IP",           cls: "mono" },
+  { key: "update_time",  label: "Update Time",  sortable: true },
+  { key: "active_time",  label: "Active Time",  sortable: true },
+];
+
+function show(name) {
+  for (const k in views) views[k].classList.toggle("hidden", k !== name);
+}
+function banner(msg) {
+  const b = $("banner");
+  if (!msg) { b.classList.add("hidden"); return; }
+  b.textContent = msg; b.classList.remove("hidden");
+}
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  let body = {};
+  try { body = await r.json(); } catch (e) {}
+  return { ok: r.ok, status: r.status, body };
+}
+
+async function boot() {
+  const { body } = await api("/api/state");
+  if (body.logged_in) loadDevices(); else show("login");
+}
+
+// ---- login ----
+$("startBtn").onclick = async () => {
+  const code = $("usercode").value.trim();
+  if (!code) { banner("Enter your user code first."); return; }
+  banner(""); $("startBtn").disabled = true;
+  const { ok, body } = await api("/api/login/start", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_code: code }),
+  });
+  $("startBtn").disabled = false;
+  if (!ok) { banner(body.error || "Login failed to start."); return; }
+  $("qrImg").src = body.qr;
+  show("qr");
+  startPolling(body.token);
+};
+
+function startPolling(token) {
+  stopPolling();
+  const started = Date.now();
+  pollTimer = setInterval(async () => {
+    if (Date.now() - started > 180000) { // 3 min safety
+      stopPolling(); banner("QR expired — try again."); show("login"); return;
+    }
+    const { status, body } = await api("/api/login/poll?token=" + encodeURIComponent(token));
+    if (body.status === "confirmed") { stopPolling(); banner(""); loadDevices(); }
+    else if (status === 404 || body.status === "expired") { stopPolling(); banner("QR expired — try again."); show("login"); }
+  }, 2000);
+}
+function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+$("cancelBtn").onclick = () => { stopPolling(); show("login"); };
+
+// ---- devices ----
+// inline=true keeps the table visible and just disables Refresh (used by the
+// Refresh button). inline=false shows the full loading screen (first load).
+async function loadDevices(msg, inline) {
+  banner("");
+  if (inline) {
+    $("refreshBtn").disabled = true;
+    $("refreshBtn").textContent = "Refreshing…";
+  } else {
+    $("loadingMsg").textContent = msg || "Loading your devices…";
+    show("loading");
+  }
+  try {
+    const { ok, status, body } = await api("/api/devices");
+    if (!ok) {
+      if (status === 401) { show("login"); }
+      else { banner(body.error || "Failed to load devices."); show(deviceData.length ? "devices" : "login"); }
+      return;
+    }
+    deviceData = body.devices || [];
+    render();
+    $("updated").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    show("devices");
+  } finally {
+    $("refreshBtn").disabled = false;
+    $("refreshBtn").textContent = "Refresh";
+  }
+}
+
+function badge(on) {
+  return `<span class="badge ${on ? "on" : "off"}">${on ? "online" : "offline"}</span>`;
+}
+function esc(s) {
+  return String(s ?? "-").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+}
+
+function cmp(a, b) {
+  // Booleans (Status): online sorts first when ascending.
+  if (typeof a === "boolean" || typeof b === "boolean") return (a === b) ? 0 : (a ? -1 : 1);
+  // Timestamps are "YYYY-MM-DD HH:MM:SS" strings — lexical order == chronological.
+  a = (a ?? "").toString().toLowerCase();
+  b = (b ?? "").toString().toLowerCase();
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function computeList() {
+  let list = deviceData;
+  if (filterText) list = list.filter(d => JSON.stringify(d).toLowerCase().includes(filterText));
+  if (sortState.key) {
+    const { key, dir } = sortState;
+    list = [...list].sort((a, b) => cmp(a[key], b[key]) * dir);
+  }
+  return list;
+}
+
+function renderHead() {
+  $("thead").innerHTML = "<tr>" + COLUMNS.map(c => {
+    if (!c.sortable) return `<th>${c.label}</th>`;
+    const active = sortState.key === c.key;
+    const arrow = active ? (sortState.dir === 1 ? "▲" : "▼") : "";
+    return `<th class="sortable${active ? " active" : ""}" data-key="${c.key}">${c.label}<span class="arrow">${arrow}</span></th>`;
+  }).join("") + "</tr>";
+}
+
+function renderRows(list) {
+  const online = list.filter(d => d.online).length;
+  $("count").innerHTML = `${list.length} device${list.length===1?"":"s"} ` +
+    `<span class="muted">· ${online} online · ${list.length-online} offline</span>`;
+  $("rows").innerHTML = list.map(d => "<tr>" + COLUMNS.map(c => {
+    const cls = c.cls ? ` class="${c.cls}"` : "";
+    const val = c.render ? c.render(d) : esc(d[c.key]);
+    return `<td${cls}>${val}</td>`;
+  }).join("") + "</tr>").join("");
+}
+
+function render() { renderHead(); renderRows(computeList()); }
+
+// sort on header click
+$("thead").addEventListener("click", (e) => {
+  const th = e.target.closest("th[data-key]");
+  if (!th) return;
+  const key = th.dataset.key;
+  if (sortState.key === key) sortState.dir *= -1;   // toggle direction
+  else { sortState.key = key; sortState.dir = 1; }  // new column, ascending
+  render();
+});
+
+// copy local key
+$("rows").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-copy]");
+  if (el) { navigator.clipboard?.writeText(el.dataset.copy); const t = el.textContent; el.textContent = "copied!"; setTimeout(() => el.textContent = t, 800); }
+});
+
+// filter
+$("filter").oninput = (e) => { filterText = e.target.value.toLowerCase(); renderRows(computeList()); };
+
+$("refreshBtn").onclick = () => loadDevices("Refreshing…", true);
+$("logoutBtn").onclick = async () => {
+  await api("/api/logout", { method: "POST" });
+  deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; show("login");
+};
+
+// CSV export (client-side) — respects the current filter + sort order
+$("csvBtn").onclick = () => {
+  const cols = ["name","id","uuid","local_key","product_id","product_name","category","ip","online","update_time","active_time","create_time","time_zone","sub"];
+  const rows = [cols.join(",")].concat(computeList().map(d =>
+    cols.map(c => `"${String(d[c] ?? "").replace(/"/g,'""')}"`).join(",")));
+  const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "tuya-local-key.csv"; a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+boot();
+</script>
+</body>
+</html>
