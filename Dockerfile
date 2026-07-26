@@ -1,5 +1,12 @@
 FROM python:3.12-slim
 
+ARG BUILD_VERSION=dev
+
+LABEL \
+    io.hass.version="${BUILD_VERSION}" \
+    io.hass.type="app" \
+    io.hass.arch="aarch64|amd64"
+
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     SESSION_FILE=/data/session.json \
