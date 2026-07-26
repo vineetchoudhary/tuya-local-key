@@ -7,7 +7,8 @@ LABEL \
     io.hass.type="app" \
     io.hass.arch="aarch64|amd64"
 
-ENV PYTHONUNBUFFERED=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     SESSION_FILE=/data/session.json \
     PORT=8000
