@@ -1,4 +1,5 @@
 import re
+import struct
 from pathlib import Path
 
 import yaml
@@ -13,7 +14,7 @@ def test_home_assistant_metadata_matches_release_image():
 
     assert repository["name"] == "Tuya Local Key"
     assert config["slug"] == "tuya_local_key"
-    assert config["version"] == "1.0.0"
+    assert config["version"] == "1.2"
     assert config["image"] == "ghcr.io/vineetchoudhary/tuya-local-key"
     assert "legacy" not in config
     assert config["arch"] == ["aarch64", "amd64"]
@@ -22,6 +23,15 @@ def test_home_assistant_metadata_matches_release_image():
     assert config["ports"]["8000/tcp"] is None
     assert config["environment"]["SESSION_FILE"] == "/data/session.json"
     assert config["environment"]["PORT"] == "8000"
+
+
+def test_home_assistant_app_icon_exists_and_is_square_png():
+    icon = ROOT / "tuya_local_key" / "icon.png"
+    data = icon.read_bytes()
+
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    assert icon.name == "icon.png"
+    assert struct.unpack(">II", data[16:24]) == (128, 128)
 
 
 def test_dockerfile_has_home_assistant_labels_and_runtime_contract():
