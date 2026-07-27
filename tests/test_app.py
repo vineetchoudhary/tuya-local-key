@@ -36,6 +36,16 @@ def test_app_icon_serves_home_assistant_icon(webapp):
     assert response.data == (ROOT / "tuya_local_key" / "icon.png").read_bytes()
 
 
+def test_app_icon_uses_ingress_relative_urls(webapp):
+    response = webapp.app.test_client().get("/")
+
+    assert response.status_code == 200
+    assert 'href="icon.png"' in response.text
+    assert 'src="icon.png"' in response.text
+    assert 'href="/icon.png"' not in response.text
+    assert 'src="/icon.png"' not in response.text
+
+
 def test_login_start_validates_user_code(webapp):
     response = webapp.app.test_client().post("/api/login/start", json={"user_code": ""})
 
