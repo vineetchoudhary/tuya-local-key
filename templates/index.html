@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tuya Local Key</title>
+<link rel="icon" href="{{ url_for('app_icon') }}" type="image/png">
+<link rel="apple-touch-icon" href="{{ url_for('app_icon') }}">
 <style>
   :root {
     --bg: #f6f7f9; --card: #fff; --fg: #1c2530; --muted: #6b7684;
@@ -26,6 +28,7 @@
     padding: 18px 20px; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 10px;
   }
+  .app-icon { width: 32px; height: 32px; border-radius: 7px; display: block; }
   header h1 { font-size: 17px; margin: 0; font-weight: 650; }
   main { max-width: 1100px; margin: 0 auto; padding: 22px 16px 60px; }
   .card {
@@ -86,7 +89,12 @@
   .toolbar .grow { flex: 1 1 auto; }
   .count { font-weight:600; }
   .count .muted { color: var(--muted); font-weight: 400; }
-  .updated { font-size: 12px; color: var(--muted); }
+  .updated {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px;
+    border: 1px solid var(--border); border-radius: 999px;
+    background: var(--card); color: var(--muted); font-size: 12px; font-weight: 600;
+  }
+  .updated svg { width: 13px; height: 13px; color: var(--accent); }
   .table-scroll { overflow-x: auto; border:1px solid var(--border); border-radius:12px; }
   table { border-collapse: collapse; width: 100%; font-size: 13.5px; white-space: nowrap; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
@@ -97,8 +105,19 @@
   th .arrow { font-size: 10px; margin-left: 3px; }
   tr:last-child td { border-bottom: none; }
   code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .key { background: var(--code-bg); padding: 2px 6px; border-radius: 6px; cursor: pointer; }
-  .key:hover { outline: 1px solid var(--accent); }
+  .key-heading { display: inline-flex; align-items: center; gap: 6px; }
+  .key-heading .icon-btn { width: 24px; height: 24px; }
+  .key {
+    min-width: 132px; text-align: left; background: var(--code-bg); padding: 3px 7px;
+    border-radius: 6px; cursor: pointer; border: 0; font-weight: 500;
+  }
+  .key:hover, .key:focus-visible { outline: 1px solid var(--accent); }
+  .icon-btn {
+    display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0;
+    border-radius: 7px; color: var(--muted);
+  }
+  .icon-btn:hover, .icon-btn:focus-visible { color: var(--fg); border-color: var(--accent); }
+  .icon-btn svg { width: 16px; height: 16px; }
   .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
   .badge.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
   .badge.off { color: var(--off); background: color-mix(in srgb, var(--off) 14%, transparent); }
@@ -110,6 +129,7 @@
 </head>
 <body>
 <header>
+  <img class="app-icon" src="{{ url_for('app_icon') }}" alt="" aria-hidden="true">
   <h1>Tuya Local Key</h1>
 </header>
 <main>
@@ -162,7 +182,7 @@
   <section id="devices" class="hidden">
     <div class="toolbar">
       <span class="count" id="count"></span>
-      <span class="updated" id="updated"></span>
+      <span class="updated hidden" id="updated"></span>
       <span class="grow"></span>
       <input id="filter" type="text" placeholder="Filter…" style="max-width:200px" autocomplete="off">
       <button id="csvBtn">Export CSV</button>
@@ -183,6 +203,7 @@ const $ = (id) => document.getElementById(id);
 const views = { login: $("login"), qr: $("qr"), loading: $("loading"), devices: $("devices") };
 let pollTimer = null, deviceData = [], filterText = "";
 let sortState = { key: null, dir: 1 };   // dir: 1 = ascending, -1 = descending
+let localKeysVisible = false;
 
 // Column definitions drive both the header and the rows (kept in sync).
 const COLUMNS = [
@@ -190,7 +211,7 @@ const COLUMNS = [
   { key: "online",       label: "Status",       sortable: true, render: d => badge(d.online) },
   { key: "id",           label: "ID",           cls: "mono" },
   { key: "uuid",         label: "UUID",         cls: "mono" },
-  { key: "local_key",    label: "Local Key",    render: d => `<span class="key mono" title="Click to copy" data-copy="${encodeURIComponent(d.local_key ?? "")}">${esc(d.local_key)}</span>` },
+  { key: "local_key",    label: "Local Key",    header: renderLocalKeyHeader, render: d => renderLocalKey(d.local_key) },
   { key: "product_id",   label: "Product ID",   cls: "mono" },
   { key: "product_name", label: "Product Name" },
   { key: "category",     label: "Category" },
@@ -274,7 +295,9 @@ async function loadDevices(msg, inline) {
     }
     deviceData = body.devices || [];
     render();
-    $("updated").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const updatedAt = new Date();
+    $("updated").innerHTML = `${icon("clock")} Last updated ${updatedAt.toLocaleDateString([], { month: "short", day: "numeric" })}, ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })}`;
+    $("updated").classList.remove("hidden");
     show("devices");
   } finally {
     $("refreshBtn").disabled = false;
@@ -284,6 +307,29 @@ async function loadDevices(msg, inline) {
 
 function badge(on) {
   return `<span class="badge ${on ? "on" : "off"}">${on ? "online" : "offline"}</span>`;
+}
+function icon(name) {
+  const icons = {
+    eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m3 3 18 18M10.6 10.6A3 3 0 0 0 12 15a3 3 0 0 0 2.4-1.2M9.9 4.2A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a16.8 16.8 0 0 1-2.8 4.2M6.6 6.6C3.7 8.5 2 12 2 12s3.5 8 10 8a10.7 10.7 0 0 0 4.1-.8"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 2"/></svg>',
+  };
+  return icons[name] || "";
+}
+function keyDisplay(value, visible) {
+  const text = String(value ?? "");
+  if (!text) return "-";
+  if (visible) return esc(text);
+  const length = Math.max(text.length, 12);
+  return "•".repeat(Math.min(length, 20));
+}
+function renderLocalKeyHeader() {
+  const label = localKeysVisible ? "Hide local keys" : "Show local keys";
+  return `<span class="key-heading"><span>Local Key</span><button id="localKeyToggle" class="icon-btn" type="button" data-key-toggle aria-label="${label}" aria-pressed="${localKeysVisible}" title="${label}">${icon(localKeysVisible ? "eyeOff" : "eye")}</button></span>`;
+}
+function renderLocalKey(value) {
+  const text = String(value ?? "");
+  return `<button class="key mono" type="button" title="Copy local key" aria-label="Copy local key" data-copy="${esc(text)}">${keyDisplay(text, localKeysVisible)}</button>`;
 }
 function esc(s) {
   return String(s ?? "-").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -337,10 +383,11 @@ function computeList() {
 
 function renderHead() {
   $("thead").innerHTML = "<tr>" + COLUMNS.map(c => {
-    if (!c.sortable) return `<th>${c.label}</th>`;
+    const label = c.header ? c.header() : c.label;
+    if (!c.sortable) return `<th>${label}</th>`;
     const active = sortState.key === c.key;
     const arrow = active ? (sortState.dir === 1 ? "▲" : "▼") : "";
-    return `<th class="sortable${active ? " active" : ""}" data-key="${c.key}">${c.label}<span class="arrow">${arrow}</span></th>`;
+    return `<th class="sortable${active ? " active" : ""}" data-key="${c.key}">${label}<span class="arrow">${arrow}</span></th>`;
   }).join("") + "</tr>";
 }
 
@@ -359,6 +406,11 @@ function render() { renderHead(); renderRows(computeList()); }
 
 // sort on header click
 $("thead").addEventListener("click", (e) => {
+  if (e.target.closest("[data-key-toggle]")) {
+    localKeysVisible = !localKeysVisible;
+    render();
+    return;
+  }
   const th = e.target.closest("th[data-key]");
   if (!th) return;
   const key = th.dataset.key;
@@ -371,14 +423,15 @@ $("thead").addEventListener("click", (e) => {
 $("rows").addEventListener("click", async (e) => {
   const el = e.target.closest("[data-copy]");
   if (!el) return;
-  const t = el.textContent;
   try {
-    await copyText(decodeURIComponent(el.dataset.copy));
+    await copyText(el.dataset.copy || "");
     el.textContent = "copied!";
   } catch (err) {
     el.textContent = "copy failed";
   }
-  setTimeout(() => el.textContent = t, 800);
+  setTimeout(() => {
+    if (el.isConnected) el.textContent = keyDisplay(el.dataset.copy || "", localKeysVisible);
+  }, 800);
 });
 
 // filter

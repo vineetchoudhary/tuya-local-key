@@ -23,6 +23,7 @@ RUN pip install -r requirements-web.txt
 # App
 COPY tuya_devices.py app.py ./
 COPY templates ./templates
+COPY tuya_local_key/icon.png ./tuya_local_key/icon.png
 
 # Home Assistant mounts /data at runtime
 RUN mkdir -p /data

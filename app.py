@@ -18,8 +18,9 @@ import base64
 import os
 import threading
 import time
+from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 
 import tuya_devices as core
 
@@ -27,6 +28,7 @@ SESSION_FILE = os.environ.get(
     "SESSION_FILE", os.path.expanduser("~/.config/tuya-smartlife/session.json")
 )
 QR_SCHEME = os.environ.get("QR_SCHEME", "tuyaSmart")
+APP_ICON = Path(__file__).resolve().parent / "tuya_local_key" / "icon.png"
 
 app = Flask(__name__)
 
@@ -49,6 +51,11 @@ def _cleanup_pending(now=None):
 @app.get("/")
 def index():
     return render_template("index.html")
+
+
+@app.get("/icon.png")
+def app_icon():
+    return send_file(APP_ICON, mimetype="image/png", max_age=86400)
 
 
 @app.after_request
