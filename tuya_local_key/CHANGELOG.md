@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5
+- Fixed broken app icon for Home Assistant ingress urls
+
+**Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.4...v1.5
+
 ## 1.4
 - Publishing GHCR images without Buildx provenance/SBOM attestation manifests.
 - Local keys are now hidden by default in the web UI. Use the eye toggle in the Local Key header to reveal or hide all keys, while copy-to-clipboard continues to copy the real key value.

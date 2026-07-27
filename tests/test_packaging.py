@@ -14,7 +14,7 @@ def test_home_assistant_metadata_matches_release_image():
 
     assert repository["name"] == "Tuya Local Key"
     assert config["slug"] == "tuya_local_key"
-    assert config["version"] == "1.4"
+    assert config["version"] == "1.5"
     assert config["image"] == "ghcr.io/vineetchoudhary/tuya-local-key"
     assert "legacy" not in config
     assert config["arch"] == ["aarch64", "amd64"]
