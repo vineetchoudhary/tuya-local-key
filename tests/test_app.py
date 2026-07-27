@@ -1,8 +1,12 @@
 import importlib
 import os
 import time
+from pathlib import Path
 
 import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture()
@@ -22,6 +26,14 @@ def test_api_responses_are_not_cached(webapp):
 
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_app_icon_serves_home_assistant_icon(webapp):
+    response = webapp.app.test_client().get("/icon.png")
+
+    assert response.status_code == 200
+    assert response.mimetype == "image/png"
+    assert response.data == (ROOT / "tuya_local_key" / "icon.png").read_bytes()
 
 
 def test_login_start_validates_user_code(webapp):
