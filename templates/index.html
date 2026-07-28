@@ -95,6 +95,9 @@
     background: var(--card); color: var(--muted); font-size: 12px; font-weight: 600;
   }
   .updated svg { width: 13px; height: 13px; color: var(--accent); }
+  .refresh-status { color: var(--muted); font-size: 13px; font-weight: 600; }
+  .refresh-status.ok { color: var(--ok); }
+  .refresh-status.error { color: var(--off); }
   .table-scroll { overflow-x: auto; border:1px solid var(--border); border-radius:12px; }
   table { border-collapse: collapse; width: 100%; font-size: 13.5px; white-space: nowrap; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
@@ -187,6 +190,7 @@
       <input id="filter" type="text" placeholder="Filter…" style="max-width:200px" autocomplete="off">
       <button id="csvBtn">Export CSV</button>
       <button id="refreshBtn">Refresh</button>
+      <span class="refresh-status hidden" id="refreshStatus" aria-live="polite"></span>
       <button id="logoutBtn">Log out</button>
     </div>
     <div class="table-scroll">
@@ -202,6 +206,7 @@
 const $ = (id) => document.getElementById(id);
 const views = { login: $("login"), qr: $("qr"), loading: $("loading"), devices: $("devices") };
 let pollTimer = null, deviceData = [], filterText = "";
+let refreshStatusTimer = null;
 let sortState = { key: null, dir: 1 };   // dir: 1 = ascending, -1 = descending
 let localKeysVisible = false;
 
@@ -227,6 +232,14 @@ function banner(msg) {
   const b = $("banner");
   if (!msg) { b.classList.add("hidden"); return; }
   b.textContent = msg; b.classList.remove("hidden");
+}
+function refreshStatus(msg, kind) {
+  clearTimeout(refreshStatusTimer);
+  const el = $("refreshStatus");
+  el.className = `refresh-status${kind ? ` ${kind}` : ""}`;
+  if (!msg) { el.classList.add("hidden"); return; }
+  el.textContent = msg;
+  el.classList.remove("hidden");
 }
 async function api(path, opts) {
   const r = await fetch(path.replace(/^\/+/, ""), opts);
@@ -282,15 +295,27 @@ async function loadDevices(msg, inline, refresh) {
   if (inline) {
     $("refreshBtn").disabled = true;
     $("refreshBtn").textContent = "Refreshing…";
+    refreshStatus("Fetching latest from Tuya…");
   } else {
+    refreshStatus("");
     $("loadingMsg").textContent = msg || "Loading your devices…";
     show("loading");
   }
   try {
     const { ok, status, body } = await api(refresh ? "/api/devices?refresh=1" : "/api/devices");
     if (!ok) {
-      if (status === 401) { show("login"); }
-      else { banner(body.error || "Failed to load devices."); show(deviceData.length ? "devices" : "login"); }
+      if (status === 401) {
+        deviceData = [];
+        refreshStatus("");
+        if ((body.error || "").startsWith("session_invalid:")) {
+          banner("Your login expired. Please scan the QR code again.");
+        }
+        show("login");
+      } else {
+        if (inline) refreshStatus("Refresh failed.", "error");
+        banner(body.error || "Failed to load devices.");
+        show(deviceData.length ? "devices" : "login");
+      }
       return;
     }
     deviceData = body.devices || [];
@@ -298,7 +323,15 @@ async function loadDevices(msg, inline, refresh) {
     const updatedAt = new Date((body.cached_at || Date.now() / 1000) * 1000);
     $("updated").innerHTML = `${icon("clock")} Last updated ${updatedAt.toLocaleDateString([], { month: "short", day: "numeric" })}, ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })}`;
     $("updated").classList.remove("hidden");
+    if (inline) {
+      refreshStatus("Device list refreshed.", "ok");
+      refreshStatusTimer = setTimeout(() => refreshStatus(""), 3000);
+    }
     show("devices");
+  } catch (err) {
+    if (inline) refreshStatus("Refresh failed.", "error");
+    banner(refresh ? "Refresh failed. Try again." : "Failed to load devices.");
+    show(deviceData.length ? "devices" : "login");
   } finally {
     $("refreshBtn").disabled = false;
     $("refreshBtn").textContent = "Refresh";
@@ -440,7 +473,7 @@ $("filter").oninput = (e) => { filterText = e.target.value.toLowerCase(); render
 $("refreshBtn").onclick = () => loadDevices("Refreshing…", true, true);
 $("logoutBtn").onclick = async () => {
   await api("/api/logout", { method: "POST" });
-  deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; show("login");
+  deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; refreshStatus(""); show("login");
 };
 
 // CSV export (client-side) — respects the current filter + sort order

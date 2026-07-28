@@ -179,6 +179,20 @@ def test_devices_requires_session(webapp):
     assert response.json == {"error": "not_logged_in"}
 
 
+def test_devices_returns_session_invalid_error(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+
+    def fail_devices_from_session(session, session_file):
+        raise RuntimeError("expired")
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fail_devices_from_session)
+
+    response = webapp.app.test_client().get("/api/devices")
+
+    assert response.status_code == 401
+    assert response.json == {"error": "session_invalid: expired"}
+
+
 def test_devices_response_is_cached_until_refresh(webapp, monkeypatch):
     webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
     calls = []
