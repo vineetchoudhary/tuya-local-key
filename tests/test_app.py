@@ -217,24 +217,86 @@ def test_login_poll_returns_json_when_session_save_fails(webapp, monkeypatch):
 
 
 def test_devices_requires_session(webapp):
-    response = webapp.app.test_client().get("/api/devices")
+    response = webapp.app.test_client().get("/api/devices?refresh=1")
 
     assert response.status_code == 401
     assert response.json == {"error": "not_logged_in"}
 
 
-def test_devices_returns_session_invalid_error(webapp, monkeypatch):
+def test_devices_returns_fetch_failed_for_transient_error(webapp, monkeypatch):
     webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
 
     def fail_devices_from_session(session, session_file):
-        raise RuntimeError("expired")
+        raise RuntimeError("offline")
 
     monkeypatch.setattr(webapp.core, "devices_from_session", fail_devices_from_session)
 
     response = webapp.app.test_client().get("/api/devices")
 
+    assert response.status_code == 502
+    assert response.json == {"error": "fetch_failed"}
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("1002", "access_token is null"),
+        ("1010", "token is expired"),
+        ("1011", "token invalid"),
+        ("1012", "token status is invalid"),
+        ("1400", "token invalid"),
+        ("2029", "session status is invalid"),
+        ("-9999999", "sign invalid"),
+    ],
+)
+def test_session_invalid_error_classifier_recognizes_relogin_errors(webapp, code, message):
+    error = SimpleNamespace(error_code=code, error_message=message)
+
+    assert webapp._is_session_invalid_error(error) is True
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("500", "system error, please contact the admin"),
+        ("1004", "sign invalid"),
+        ("1013", "request time is invalid"),
+        ("1106", "permission deny"),
+        ("1110", "concurrent request over limit"),
+        ("1199", "your requests are too frequent"),
+        ("2001", "device is offline"),
+        ("2010", "device not exist"),
+    ],
+)
+def test_session_invalid_error_classifier_ignores_retry_or_config_errors(webapp, code, message):
+    error = SimpleNamespace(error_code=code, error_message=message)
+
+    assert webapp._is_session_invalid_error(error) is False
+
+
+def test_devices_returns_session_invalid_for_auth_errors(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    with webapp._devices_cache_lock:
+        webapp._devices_cache = {
+            "body": {"devices": [{"name": "Old Device"}]},
+            "cached_at": time.time(),
+            "session_key": webapp._session_cache_key({"token_info": {}}),
+        }
+
+    class TokenExpiredError(Exception):
+        error_code = "-9999999"
+        error_message = "sign invalid"
+
+    def fail_devices_from_session(session, session_file):
+        raise TokenExpiredError()
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fail_devices_from_session)
+
+    response = webapp.app.test_client().get("/api/devices?refresh=1")
+
     assert response.status_code == 401
-    assert response.json == {"error": "session_invalid: expired"}
+    assert response.json == {"error": "session_invalid"}
+    assert webapp._devices_cache is None
 
 
 def test_devices_ignores_cache_for_different_session(webapp, monkeypatch):
@@ -256,6 +318,22 @@ def test_devices_ignores_cache_for_different_session(webapp, monkeypatch):
 
     assert response.status_code == 200
     assert response.json["devices"] == [{"name": "Fresh Device"}]
+
+
+def test_devices_fetch_runs_outside_cache_lock(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+
+    def fake_devices_from_session(session, session_file):
+        assert webapp._devices_cache_lock.acquire(blocking=False)
+        webapp._devices_cache_lock.release()
+        return [SimpleNamespace(name="Fresh Device")]
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fake_devices_from_session)
+    monkeypatch.setattr(webapp.core, "web_dict", lambda device: {"name": device.name})
+
+    response = webapp.app.test_client().get("/api/devices")
+
+    assert response.status_code == 200
 
 
 def test_devices_response_is_cached_until_refresh(webapp, monkeypatch):
@@ -281,6 +359,50 @@ def test_devices_response_is_cached_until_refresh(webapp, monkeypatch):
     assert second.json["devices"] == [{"name": "Device 1"}]
     assert refreshed.json["devices"] == [{"name": "Device 2"}]
     assert len(calls) == 2
+
+
+def test_devices_refresh_failure_returns_stale_cache(webapp, monkeypatch):
+    session = {"token_info": {}}
+    webapp.core.save_session(os.environ["SESSION_FILE"], session)
+    cached_body = {
+        "devices": [{"name": "Cached Device"}],
+        "cached_at": 1_000.0,
+        "cache_expires_at": 1_000.0 + webapp.DEVICE_CACHE_TTL_SECONDS,
+    }
+    with webapp._devices_cache_lock:
+        webapp._devices_cache = {
+            "body": cached_body,
+            "cached_at": 1_000.0,
+            "session_key": webapp._session_cache_key(session),
+        }
+
+    def fail_devices_from_session(session, session_file):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fail_devices_from_session)
+
+    response = webapp.app.test_client().get("/api/devices?refresh=1")
+
+    assert response.status_code == 200
+    assert response.json == {**cached_body, "refresh_failed": True}
+    assert webapp._devices_cache["body"] == cached_body
+
+
+def test_devices_uses_fetch_completion_time_for_cache(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    times = iter([1_000.0, 1_005.0])
+    monkeypatch.setattr(webapp.time, "time", lambda: next(times))
+    monkeypatch.setattr(
+        webapp.core,
+        "devices_from_session",
+        lambda session, session_file: [SimpleNamespace(name="Fresh Device")],
+    )
+    monkeypatch.setattr(webapp.core, "web_dict", lambda device: {"name": device.name})
+
+    response = webapp.app.test_client().get("/api/devices")
+
+    assert response.status_code == 200
+    assert response.json["cached_at"] == 1_005.0
 
 
 def test_devices_cache_expires_after_24_hours(webapp, monkeypatch):

@@ -337,13 +337,17 @@ async function loadDevices(msg, inline, refresh) {
       if (status === 401) {
         deviceData = [];
         refreshStatus("");
-        if ((body.error || "").startsWith("session_invalid:")) {
+        stopCacheStatusTimer();
+        if (body.error === "session_invalid") {
           banner("Your login expired. Please scan the QR code again.");
+        } else {
+          banner("Please log in again.");
         }
         show("login");
       } else {
         if (inline) refreshStatus("Refresh failed.", "error");
-        banner(body.error || "Failed to load devices.");
+        banner(body.error === "fetch_failed" ? "Could not load devices from Tuya. Try again." : (body.error || "Failed to load devices."));
+        if (!deviceData.length) stopCacheStatusTimer();
         show(deviceData.length ? "devices" : "login");
       }
       return;
@@ -352,6 +356,9 @@ async function loadDevices(msg, inline, refresh) {
     devicesCachedAt = body.cached_at || Date.now() / 1000;
     render();
     startCacheStatusTimer();
+    if (body.refresh_failed) {
+      banner("Refresh failed. Showing cached device list.");
+    }
     if (inline) {
       refreshStatus("Device list refreshed.", "ok");
       refreshStatusTimer = setTimeout(() => refreshStatus(""), 3000);

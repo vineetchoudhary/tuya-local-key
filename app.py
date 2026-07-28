@@ -7,7 +7,7 @@ Endpoints (JSON unless noted):
   GET  /api/state           -> {"logged_in": bool}
   POST /api/login/start     -> {"token", "qr"} (qr is a data: PNG) | {"error"}
   POST /api/login/poll      -> {"status": "pending"|"confirmed"|"expired"}
-    GET  /api/devices         -> {"devices": [...], "cached_at": ts} | 401 {"error"}
+  GET  /api/devices         -> {"devices": [...], "cached_at": ts} | 401/502 {"error"}
   POST /api/logout          -> {"ok": true}
 
 Auth state (the device-sharing session) is cached at SESSION_FILE so it survives
@@ -44,6 +44,14 @@ def _qr_scheme_from_options(default):
 
 QR_SCHEME = _qr_scheme_from_options(os.environ.get("QR_SCHEME", "smartlife"))
 DEVICE_CACHE_TTL_SECONDS = 24 * 60 * 60
+SESSION_INVALID_ERROR_CODES = {
+    "1002",  # access_token is null
+    "1010",  # token is expired
+    "1011",  # token invalid
+    "1012",  # token status is invalid
+    "1400",  # token invalid
+    "2029",  # session status is invalid,
+}
 
 app = Flask(__name__)
 
@@ -81,14 +89,49 @@ def _clear_devices_cache():
         _devices_cache = None
 
 
-def _cached_devices_response(session, now):
+def _devices_cache_for_session(session):
     if not _devices_cache:
         return None
     if _devices_cache["session_key"] != _session_cache_key(session):
         return None
-    if now - _devices_cache["cached_at"] >= DEVICE_CACHE_TTL_SECONDS:
+    return _devices_cache
+
+
+def _cached_devices_response(session, now):
+    cache = _devices_cache_for_session(session)
+    if not cache:
         return None
-    return _devices_cache["body"]
+    if now - cache["cached_at"] >= DEVICE_CACHE_TTL_SECONDS:
+        return None
+    return cache["body"]
+
+
+def _is_session_invalid_error(error):
+    if isinstance(error, KeyError):
+        return True
+
+    code = str(getattr(error, "error_code", ""))
+    if code in SESSION_INVALID_ERROR_CODES:
+        return True
+
+    message = str(getattr(error, "error_message", error)).lower()
+    if "sign invalid" in message or "signature invalid" in message:
+        return code == "-9999999" or "-9999999" in message
+
+    return any(
+        marker in message
+        for marker in (
+            "access_token is null",
+            "invalid token",
+            "token is expired",
+            "token invalid",
+            "token expired",
+            "token status is invalid",
+            "login expired",
+            "session expired",
+            "session status is invalid",
+        )
+    )
 
 
 @app.get("/")
@@ -167,22 +210,34 @@ def devices():
     if not session:
         return jsonify({"error": "not_logged_in"}), 401
     refresh = request.args.get("refresh") in {"1", "true", "yes"}
+
     with _devices_cache_lock:
         now = time.time()
         if not refresh:
             cached = _cached_devices_response(session, now)
             if cached:
                 return jsonify(cached)
-        try:
-            devs = core.devices_from_session(session, SESSION_FILE)
-        except Exception as e:
-            _devices_cache = None
-            return jsonify({"error": f"session_invalid: {e}"}), 401
-        body = {
-            "devices": [core.web_dict(d) for d in devs],
-            "cached_at": now,
-            "cache_expires_at": now + DEVICE_CACHE_TTL_SECONDS,
-        }
+        stale_cache = _devices_cache_for_session(session)
+
+    try:
+        devs = core.devices_from_session(session, SESSION_FILE)
+    except Exception as e:
+        if _is_session_invalid_error(e):
+            _clear_devices_cache()
+            return jsonify({"error": "session_invalid"}), 401
+        if refresh and stale_cache:
+            body = dict(stale_cache["body"])
+            body["refresh_failed"] = True
+            return jsonify(body)
+        return jsonify({"error": "fetch_failed"}), 502
+
+    now = time.time()
+    body = {
+        "devices": [core.web_dict(d) for d in devs],
+        "cached_at": now,
+        "cache_expires_at": now + DEVICE_CACHE_TTL_SECONDS,
+    }
+    with _devices_cache_lock:
         _devices_cache = {
             "body": body,
             "cached_at": now,
