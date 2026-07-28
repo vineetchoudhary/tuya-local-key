@@ -86,6 +86,10 @@ def test_export_csv_quotes_special_local_key(tmp_path):
     assert rows[0]["local_key"] == '5vps+n4FwxR2?df;"'
 
 
+def test_parse_args_defaults_to_smartlife_scheme():
+    assert core.parse_args([]).scheme == "smartlife"
+
+
 def test_logout_removes_cached_session(tmp_path, monkeypatch, capsys):
     session = tmp_path / "session.json"
     session.write_text(json.dumps({"token_info": {}}), encoding="utf-8")

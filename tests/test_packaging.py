@@ -22,7 +22,10 @@ def test_home_assistant_metadata_matches_release_image():
     assert config["ingress_port"] == 8000
     assert config["ports"]["8000/tcp"] is None
     assert config["environment"]["SESSION_FILE"] == "/data/session.json"
+    assert config["environment"]["QR_SCHEME"] == "smartlife"
     assert config["environment"]["PORT"] == "8000"
+    assert config["options"]["QR_SCHEME"] == "smartlife"
+    assert config["schema"]["QR_SCHEME"] == "list(smartlife|tuyaSmart)"
 
 
 def test_home_assistant_app_icon_exists_and_is_square_png():

@@ -46,6 +46,30 @@ def test_app_icon_uses_ingress_relative_urls(webapp):
     assert 'src="/icon.png"' not in response.text
 
 
+def test_qr_scheme_defaults_to_smartlife(tmp_path, monkeypatch):
+    monkeypatch.delenv("QR_SCHEME", raising=False)
+    monkeypatch.setenv("HASS_OPTIONS_FILE", str(tmp_path / "missing-options.json"))
+
+    import app
+
+    app = importlib.reload(app)
+
+    assert app.QR_SCHEME == "smartlife"
+
+
+def test_home_assistant_options_override_qr_scheme_environment(tmp_path, monkeypatch):
+    options_file = tmp_path / "options.json"
+    options_file.write_text('{"QR_SCHEME": "tuyaSmart"}')
+    monkeypatch.setenv("HASS_OPTIONS_FILE", str(options_file))
+    monkeypatch.setenv("QR_SCHEME", "smartlife")
+
+    import app
+
+    app = importlib.reload(app)
+
+    assert app.QR_SCHEME == "tuyaSmart"
+
+
 def test_login_start_validates_user_code(webapp):
     response = webapp.app.test_client().post("/api/login/start", json={"user_code": ""})
 

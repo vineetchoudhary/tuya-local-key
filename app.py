@@ -15,6 +15,7 @@ restarts; mount it on a volume in Docker.
 """
 
 import base64
+import json
 import os
 import threading
 import time
@@ -27,8 +28,21 @@ import tuya_devices as core
 SESSION_FILE = os.environ.get(
     "SESSION_FILE", os.path.expanduser("~/.config/tuya-smartlife/session.json")
 )
-QR_SCHEME = os.environ.get("QR_SCHEME", "tuyaSmart")
+OPTIONS_FILE = Path(os.environ.get("HASS_OPTIONS_FILE", "/data/options.json"))
 APP_ICON = Path(__file__).resolve().parent / "tuya_local_key" / "icon.png"
+
+
+def _qr_scheme_from_options(default):
+    try:
+        options = json.loads(OPTIONS_FILE.read_text())
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return default
+
+    value = options.get("QR_SCHEME", options.get("qr_scheme"))
+    return str(value).strip() if value else default
+
+
+QR_SCHEME = _qr_scheme_from_options(os.environ.get("QR_SCHEME", "smartlife"))
 
 app = Flask(__name__)
 

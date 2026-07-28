@@ -311,8 +311,8 @@ def parse_args(argv=None):
         description="List Smart Life devices via QR-code login (no developer account)."
     )
     p.add_argument("--user-code", help="Smart Life user code (else you'll be prompted)")
-    p.add_argument("--scheme", default="tuyaSmart", choices=["tuyaSmart", "smartlife"],
-                   help="QR login scheme prefix (default: tuyaSmart; Smart Life scans both)")
+    p.add_argument("--scheme", default="smartlife", choices=["tuyaSmart", "smartlife"],
+                   help="QR login scheme prefix (default: smartlife; Smart Life scans both)")
     p.add_argument("--session", default=DEFAULT_SESSION,
                    help=f"Session cache file (default: {DEFAULT_SESSION})")
     p.add_argument("--qr-png", default=DEFAULT_QR_PNG,

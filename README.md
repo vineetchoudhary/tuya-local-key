@@ -86,7 +86,7 @@ Then open `http://localhost:8000`.
 | Environment variable | Default | Description |
 |---|---|---|
 | `SESSION_FILE` | `/data/session.json` | Path where the cached login session is stored. |
-| `QR_SCHEME` | `tuyaSmart` | QR prefix. `smartlife` also works and is used by the included Compose file. |
+| `QR_SCHEME` | `smartlife` | QR prefix. Use `tuyaSmart` if scanning or confirmation does not work for your account. |
 | `PORT` | `8000` | Server port used by the Flask development server. The Docker image listens on `8000`. |
 
 > Security note: the web UI has no authentication. Anyone who can reach the port can see device `localKey` values and start a login flow. Run it only on localhost or a trusted private network, or put it behind a reverse proxy with authentication. Do not expose it directly to the internet.

@@ -15,6 +15,10 @@ Tuya Local Key retrieves Smart Life / Tuya device local keys using QR-code login
 
 In the Smart Life app, go to Me > Settings > Account and Security > User Code.
 
+## Configuration
+
+Use the app configuration page to choose the QR scheme. The default is `smartlife`; switch to `tuyaSmart` if scanning or confirmation does not work for your account.
+
 ## Security
 
 The app exposes device `localKey` values after login. Keep access restricted to trusted Home Assistant users.

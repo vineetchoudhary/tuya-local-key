@@ -24,4 +24,7 @@ environment:
   SESSION_FILE: /data/session.json
   QR_SCHEME: smartlife
   PORT: "8000"
-schema: false
+options:
+  QR_SCHEME: smartlife
+schema:
+  QR_SCHEME: "list(smartlife|tuyaSmart)"
