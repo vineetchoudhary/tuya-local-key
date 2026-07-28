@@ -7,7 +7,7 @@ Endpoints (JSON unless noted):
   GET  /api/state           -> {"logged_in": bool}
   POST /api/login/start     -> {"token", "qr"} (qr is a data: PNG) | {"error"}
   POST /api/login/poll      -> {"status": "pending"|"confirmed"|"expired"}
-  GET  /api/devices         -> {"devices": [...]} | 401 {"error"}
+    GET  /api/devices         -> {"devices": [...], "cached_at": ts} | 401 {"error"}
   POST /api/logout          -> {"ok": true}
 
 Auth state (the device-sharing session) is cached at SESSION_FILE so it survives
@@ -43,6 +43,7 @@ def _qr_scheme_from_options(default):
 
 
 QR_SCHEME = _qr_scheme_from_options(os.environ.get("QR_SCHEME", "smartlife"))
+DEVICE_CACHE_TTL_SECONDS = 24 * 60 * 60
 
 app = Flask(__name__)
 
@@ -50,6 +51,8 @@ app = Flask(__name__)
 _pending = {}
 _lock = threading.Lock()
 PENDING_LOGIN_TTL_SECONDS = 180
+_devices_cache = None
+_devices_cache_lock = threading.Lock()
 
 
 def _cleanup_pending(now=None):
@@ -60,6 +63,32 @@ def _cleanup_pending(now=None):
     ]
     for token in expired:
         _pending.pop(token, None)
+
+
+def _session_cache_key(session):
+    return (
+        SESSION_FILE,
+        session.get("client_id"),
+        session.get("user_code"),
+        session.get("terminal_id"),
+        session.get("endpoint"),
+    )
+
+
+def _clear_devices_cache():
+    global _devices_cache
+    with _devices_cache_lock:
+        _devices_cache = None
+
+
+def _cached_devices_response(session, now):
+    if not _devices_cache:
+        return None
+    if _devices_cache["session_key"] != _session_cache_key(session):
+        return None
+    if now - _devices_cache["cached_at"] >= DEVICE_CACHE_TTL_SECONDS:
+        return None
+    return _devices_cache["body"]
 
 
 @app.get("/")
@@ -126,20 +155,40 @@ def login_poll():
             return jsonify({"error": f"session_save_failed: {e}"}), 500
         with _lock:
             _pending.pop(token, None)
+        _clear_devices_cache()
         return jsonify({"status": "confirmed"})
     return jsonify({"status": "pending"})
 
 
 @app.get("/api/devices")
 def devices():
+    global _devices_cache
     session = core.load_session(SESSION_FILE)
     if not session:
         return jsonify({"error": "not_logged_in"}), 401
-    try:
-        devs = core.devices_from_session(session, SESSION_FILE)
-    except Exception as e:
-        return jsonify({"error": f"session_invalid: {e}"}), 401
-    return jsonify({"devices": [core.web_dict(d) for d in devs]})
+    refresh = request.args.get("refresh") in {"1", "true", "yes"}
+    with _devices_cache_lock:
+        now = time.time()
+        if not refresh:
+            cached = _cached_devices_response(session, now)
+            if cached:
+                return jsonify(cached)
+        try:
+            devs = core.devices_from_session(session, SESSION_FILE)
+        except Exception as e:
+            _devices_cache = None
+            return jsonify({"error": f"session_invalid: {e}"}), 401
+        body = {
+            "devices": [core.web_dict(d) for d in devs],
+            "cached_at": now,
+            "cache_expires_at": now + DEVICE_CACHE_TTL_SECONDS,
+        }
+        _devices_cache = {
+            "body": body,
+            "cached_at": now,
+            "session_key": _session_cache_key(session),
+        }
+    return jsonify(body)
 
 
 @app.post("/api/logout")
@@ -150,6 +199,7 @@ def logout():
         pass
     with _lock:
         _pending.clear()
+    _clear_devices_cache()
     return jsonify({"ok": True})
 
 

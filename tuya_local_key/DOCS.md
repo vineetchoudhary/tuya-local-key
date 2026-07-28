@@ -19,6 +19,8 @@ In the Smart Life app, go to Me > Settings > Account and Security > User Code.
 
 Use the app configuration page to choose the QR scheme. The default is `smartlife`; switch to `tuyaSmart` if scanning or confirmation does not work for your account.
 
+The web UI caches the device list for 24 hours. Click Refresh to get the latest list from Tuya.
+
 ## Security
 
 The app exposes device `localKey` values after login. Keep access restricted to trusted Home Assistant users.

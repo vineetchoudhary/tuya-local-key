@@ -2,6 +2,7 @@ import importlib
 import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +19,8 @@ def webapp(tmp_path, monkeypatch):
     app.app.config.update(TESTING=True)
     with app._lock:
         app._pending.clear()
+    with app._devices_cache_lock:
+        app._devices_cache = None
     return app
 
 
@@ -176,12 +179,69 @@ def test_devices_requires_session(webapp):
     assert response.json == {"error": "not_logged_in"}
 
 
+def test_devices_response_is_cached_until_refresh(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    calls = []
+
+    def fake_devices_from_session(session, session_file):
+        calls.append(session_file)
+        return [SimpleNamespace(name=f"Device {len(calls)}")]
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fake_devices_from_session)
+    monkeypatch.setattr(webapp.core, "web_dict", lambda device: {"name": device.name})
+    client = webapp.app.test_client()
+
+    first = client.get("/api/devices")
+    second = client.get("/api/devices")
+    refreshed = client.get("/api/devices?refresh=1")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert refreshed.status_code == 200
+    assert first.json["devices"] == [{"name": "Device 1"}]
+    assert second.json["devices"] == [{"name": "Device 1"}]
+    assert refreshed.json["devices"] == [{"name": "Device 2"}]
+    assert len(calls) == 2
+
+
+def test_devices_cache_expires_after_24_hours(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    current_time = [1_000.0]
+    calls = []
+
+    def fake_devices_from_session(session, session_file):
+        calls.append(session_file)
+        return [SimpleNamespace(name=f"Device {len(calls)}")]
+
+    monkeypatch.setattr(webapp.time, "time", lambda: current_time[0])
+    monkeypatch.setattr(webapp.core, "devices_from_session", fake_devices_from_session)
+    monkeypatch.setattr(webapp.core, "web_dict", lambda device: {"name": device.name})
+    client = webapp.app.test_client()
+
+    first = client.get("/api/devices")
+    current_time[0] += (24 * 60 * 60) - 1
+    cached = client.get("/api/devices")
+    current_time[0] += 2
+    expired = client.get("/api/devices")
+
+    assert first.json["devices"] == [{"name": "Device 1"}]
+    assert cached.json["devices"] == [{"name": "Device 1"}]
+    assert expired.json["devices"] == [{"name": "Device 2"}]
+    assert len(calls) == 2
+
+
 def test_logout_clears_session_and_pending_logins(webapp):
     webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
     with webapp._lock:
         webapp._pending["demo-token"] = {
             "user_code": "user-code",
             "created_at": time.time(),
+        }
+    with webapp._devices_cache_lock:
+        webapp._devices_cache = {
+            "body": {"devices": []},
+            "cached_at": time.time(),
+            "session_key": ("demo",),
         }
 
     response = webapp.app.test_client().post("/api/logout")
@@ -190,3 +250,4 @@ def test_logout_clears_session_and_pending_logins(webapp):
     assert response.json == {"ok": True}
     assert not os.path.exists(os.environ["SESSION_FILE"])
     assert webapp._pending == {}
+    assert webapp._devices_cache is None

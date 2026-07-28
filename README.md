@@ -81,6 +81,8 @@ Then open `http://localhost:8000`.
 3. Tap Confirm login in the app.
 4. View, filter, copy, refresh, and export your devices.
 
+The web UI caches the device list for 24 hours. Click Refresh to get the latest list from Tuya.
+
 ## Configuration
 
 | Environment variable | Default | Description |

@@ -277,7 +277,7 @@ $("cancelBtn").onclick = () => { stopPolling(); show("login"); };
 // ---- devices ----
 // inline=true keeps the table visible and just disables Refresh (used by the
 // Refresh button). inline=false shows the full loading screen (first load).
-async function loadDevices(msg, inline) {
+async function loadDevices(msg, inline, refresh) {
   banner("");
   if (inline) {
     $("refreshBtn").disabled = true;
@@ -287,7 +287,7 @@ async function loadDevices(msg, inline) {
     show("loading");
   }
   try {
-    const { ok, status, body } = await api("/api/devices");
+    const { ok, status, body } = await api(refresh ? "/api/devices?refresh=1" : "/api/devices");
     if (!ok) {
       if (status === 401) { show("login"); }
       else { banner(body.error || "Failed to load devices."); show(deviceData.length ? "devices" : "login"); }
@@ -295,7 +295,7 @@ async function loadDevices(msg, inline) {
     }
     deviceData = body.devices || [];
     render();
-    const updatedAt = new Date();
+    const updatedAt = new Date((body.cached_at || Date.now() / 1000) * 1000);
     $("updated").innerHTML = `${icon("clock")} Last updated ${updatedAt.toLocaleDateString([], { month: "short", day: "numeric" })}, ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })}`;
     $("updated").classList.remove("hidden");
     show("devices");
@@ -437,7 +437,7 @@ $("rows").addEventListener("click", async (e) => {
 // filter
 $("filter").oninput = (e) => { filterText = e.target.value.toLowerCase(); renderRows(computeList()); };
 
-$("refreshBtn").onclick = () => loadDevices("Refreshing…", true);
+$("refreshBtn").onclick = () => loadDevices("Refreshing…", true, true);
 $("logoutBtn").onclick = async () => {
   await api("/api/logout", { method: "POST" });
   deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; show("login");
