@@ -205,7 +205,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const views = { login: $("login"), qr: $("qr"), loading: $("loading"), devices: $("devices") };
-let pollTimer = null, deviceData = [], filterText = "";
+let pollTimer = null, cacheStatusTimer = null, deviceData = [], filterText = "";
+let devicesCachedAt = null;
 let refreshStatusTimer = null;
 let sortState = { key: null, dir: 1 };   // dir: 1 = ascending, -1 = descending
 let localKeysVisible = false;
@@ -240,6 +241,36 @@ function refreshStatus(msg, kind) {
   if (!msg) { el.classList.add("hidden"); return; }
   el.textContent = msg;
   el.classList.remove("hidden");
+}
+function formatCacheAge(cachedAt) {
+  if (!cachedAt) return "now";
+  const seconds = Math.max(0, Math.floor((Date.now() - cachedAt * 1000) / 1000));
+  if (seconds < 5) return "now";
+  if (seconds < 60) return "a few seconds ago";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 1) return "1 minute ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return "1 hour ago";
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "1 day ago" : `${days} days ago`;
+}
+function updateCacheStatus() {
+  if (!devicesCachedAt) return;
+  $("updated").innerHTML = `${icon("clock")} Last updated: ${formatCacheAge(devicesCachedAt)}`;
+  $("updated").classList.remove("hidden");
+}
+function startCacheStatusTimer() {
+  clearInterval(cacheStatusTimer);
+  updateCacheStatus();
+  cacheStatusTimer = setInterval(updateCacheStatus, 15000);
+}
+function stopCacheStatusTimer() {
+  clearInterval(cacheStatusTimer);
+  cacheStatusTimer = null;
+  devicesCachedAt = null;
+  $("updated").classList.add("hidden");
 }
 async function api(path, opts) {
   const r = await fetch(path.replace(/^\/+/, ""), opts);
@@ -288,8 +319,7 @@ function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = 
 $("cancelBtn").onclick = () => { stopPolling(); show("login"); };
 
 // ---- devices ----
-// inline=true keeps the table visible and just disables Refresh (used by the
-// Refresh button). inline=false shows the full loading screen (first load).
+// Shows the full loading screen unless inline=true is requested.
 async function loadDevices(msg, inline, refresh) {
   banner("");
   if (inline) {
@@ -319,10 +349,9 @@ async function loadDevices(msg, inline, refresh) {
       return;
     }
     deviceData = body.devices || [];
+    devicesCachedAt = body.cached_at || Date.now() / 1000;
     render();
-    const updatedAt = new Date((body.cached_at || Date.now() / 1000) * 1000);
-    $("updated").innerHTML = `${icon("clock")} Last updated ${updatedAt.toLocaleDateString([], { month: "short", day: "numeric" })}, ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })}`;
-    $("updated").classList.remove("hidden");
+    startCacheStatusTimer();
     if (inline) {
       refreshStatus("Device list refreshed.", "ok");
       refreshStatusTimer = setTimeout(() => refreshStatus(""), 3000);
@@ -470,10 +499,10 @@ $("rows").addEventListener("click", async (e) => {
 // filter
 $("filter").oninput = (e) => { filterText = e.target.value.toLowerCase(); renderRows(computeList()); };
 
-$("refreshBtn").onclick = () => loadDevices("Refreshing…", true, true);
+$("refreshBtn").onclick = () => loadDevices("Updating device list from Tuya…", false, true);
 $("logoutBtn").onclick = async () => {
   await api("/api/logout", { method: "POST" });
-  deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; refreshStatus(""); show("login");
+  deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; refreshStatus(""); stopCacheStatusTimer(); show("login");
 };
 
 // CSV export (client-side) — respects the current filter + sort order
