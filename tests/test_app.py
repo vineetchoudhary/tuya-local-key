@@ -95,6 +95,34 @@ def test_login_start_stores_pending_token_and_returns_qr(webapp, monkeypatch):
         assert webapp._pending["demo-token"]["user_code"] == "user-code"
 
 
+def test_login_start_returns_tuya_errors(webapp, monkeypatch):
+    monkeypatch.setattr(
+        webapp.core,
+        "mint_qr_token",
+        lambda user_code: (_ for _ in ()).throw(webapp.core.LoginError("bad code")),
+    )
+
+    response = webapp.app.test_client().post(
+        "/api/login/start", json={"user_code": "bad-user"}
+    )
+
+    assert response.status_code == 400
+    assert response.json == {"error": "bad code"}
+
+    monkeypatch.setattr(
+        webapp.core,
+        "mint_qr_token",
+        lambda user_code: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+
+    response = webapp.app.test_client().post(
+        "/api/login/start", json={"user_code": "user-code"}
+    )
+
+    assert response.status_code == 502
+    assert response.json == {"error": "Could not reach Tuya: offline"}
+
+
 def test_login_poll_uses_post_body_not_query_string(webapp):
     client = webapp.app.test_client()
 
@@ -116,6 +144,22 @@ def test_login_poll_expires_old_pending_token(webapp):
     assert response.status_code == 404
     with webapp._lock:
         assert "old-token" not in webapp._pending
+
+
+def test_login_poll_returns_pending_for_unconfirmed_login(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.core, "poll_login", lambda token, user_code: None)
+    with webapp._lock:
+        webapp._pending["demo-token"] = {
+            "user_code": "user-code",
+            "created_at": time.time(),
+        }
+
+    response = webapp.app.test_client().post(
+        "/api/login/poll", json={"token": "demo-token"}
+    )
+
+    assert response.status_code == 200
+    assert response.json == {"status": "pending"}
 
 
 def test_login_poll_saves_confirmed_session(webapp, monkeypatch):
@@ -193,6 +237,27 @@ def test_devices_returns_session_invalid_error(webapp, monkeypatch):
     assert response.json == {"error": "session_invalid: expired"}
 
 
+def test_devices_ignores_cache_for_different_session(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    with webapp._devices_cache_lock:
+        webapp._devices_cache = {
+            "body": {"devices": [{"name": "Old Device"}]},
+            "cached_at": time.time(),
+            "session_key": ("different-session",),
+        }
+    monkeypatch.setattr(
+        webapp.core,
+        "devices_from_session",
+        lambda session, session_file: [SimpleNamespace(name="Fresh Device")],
+    )
+    monkeypatch.setattr(webapp.core, "web_dict", lambda device: {"name": device.name})
+
+    response = webapp.app.test_client().get("/api/devices")
+
+    assert response.status_code == 200
+    assert response.json["devices"] == [{"name": "Fresh Device"}]
+
+
 def test_devices_response_is_cached_until_refresh(webapp, monkeypatch):
     webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
     calls = []
@@ -265,3 +330,10 @@ def test_logout_clears_session_and_pending_logins(webapp):
     assert not os.path.exists(os.environ["SESSION_FILE"])
     assert webapp._pending == {}
     assert webapp._devices_cache is None
+
+
+def test_logout_ok_when_session_file_is_missing(webapp):
+    response = webapp.app.test_client().post("/api/logout")
+
+    assert response.status_code == 200
+    assert response.json == {"ok": True}
