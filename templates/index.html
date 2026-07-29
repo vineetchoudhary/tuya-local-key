@@ -273,7 +273,9 @@ function stopCacheStatusTimer() {
   $("updated").classList.add("hidden");
 }
 async function api(path, opts) {
-  const r = await fetch(path.replace(/^\/+/, ""), opts);
+  let r;
+  try { r = await fetch(path.replace(/^\/+/, ""), opts); }
+  catch (e) { return { ok: false, status: 0, body: {} }; }  // network down: don't throw, callers handle !ok
   let body = {};
   try { body = await r.json(); } catch (e) {}
   return { ok: r.ok, status: r.status, body };
@@ -313,6 +315,7 @@ function startPolling(token) {
     });
     if (body.status === "confirmed") { stopPolling(); banner(""); loadDevices(); }
     else if (status === 404 || body.status === "expired") { stopPolling(); banner("QR expired — try again."); show("login"); }
+    else if (status >= 500) { stopPolling(); banner("Couldn't save your login session. Please try again."); }
   }, 2000);
 }
 function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
@@ -358,8 +361,8 @@ async function loadDevices(msg, inline, refresh) {
     startCacheStatusTimer();
     if (body.refresh_failed) {
       banner("Refresh failed. Showing cached device list.");
-    }
-    if (inline) {
+      if (inline) refreshStatus("Refresh failed.", "error");
+    } else if (inline) {
       refreshStatus("Device list refreshed.", "ok");
       refreshStatusTimer = setTimeout(() => refreshStatus(""), 3000);
     }

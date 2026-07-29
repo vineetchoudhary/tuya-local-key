@@ -3,6 +3,7 @@ import json
 import sys
 import stat
 import threading
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import tuya_devices as core
@@ -227,6 +228,24 @@ def test_web_dict_formats_times_and_preserves_device_fields():
 def test_fmt_time_handles_invalid_values():
     assert core.fmt_time(None) == "-"
     assert core.fmt_time("not-a-time") == "not-a-time"
+
+
+def test_fmt_time_renders_utc_and_survives_out_of_range():
+    expected = datetime.fromtimestamp(1_720_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    assert core.fmt_time(1_720_000_000) == expected
+    assert expected.endswith(" UTC")
+    # Milliseconds normalize to the same instant.
+    assert core.fmt_time(1_720_000_000_000) == expected
+    # Int-parseable but out-of-range degrades to the raw value, never raises
+    # (M2: one bad device timestamp must not 500 the whole list).
+    assert core.fmt_time(10**20) == "100000000000000000000"
+
+
+def test_apply_request_timeout_bumps_sdk_default():
+    core._apply_request_timeout()
+    import tuya_sharing.customerapi as customerapi
+
+    assert customerapi.DEFAULT_TIMEOUT == core.REQUEST_TIMEOUT_SECONDS == 60
 
 
 def test_print_devices_outputs_summary_and_fields(capsys):
