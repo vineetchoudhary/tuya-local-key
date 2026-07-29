@@ -26,6 +26,8 @@ import json
 import os
 import stat
 import sys
+import tempfile
+import threading
 import time
 from datetime import datetime
 
@@ -59,14 +61,31 @@ def load_session(path):
         return None
 
 
+_session_write_lock = threading.Lock()
+
+
 def save_session(path, session):
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(session, f, indent=2)
-    try:
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # 600: tokens are sensitive
-    except OSError:
-        pass
+    path = os.fspath(path)
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    with _session_write_lock:
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=".session-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(session, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            try:
+                os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)  # 600: tokens are sensitive
+            except OSError:
+                pass
+            os.replace(tmp, path)  # atomic on POSIX
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
 
 
 class _SessionSaver:

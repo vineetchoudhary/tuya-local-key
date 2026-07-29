@@ -1,5 +1,6 @@
 import importlib
 import os
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -334,6 +335,44 @@ def test_devices_fetch_runs_outside_cache_lock(webapp, monkeypatch):
     response = webapp.app.test_client().get("/api/devices")
 
     assert response.status_code == 200
+
+
+def test_concurrent_device_fetches_are_single_flighted(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    calls = []
+    in_fetch = threading.Event()
+    release = threading.Event()
+
+    def blocking_fetch(session, session_file):
+        calls.append(session_file)
+        in_fetch.set()
+        release.wait(2)
+        return [SimpleNamespace(name="Fresh Device")]
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", blocking_fetch)
+    monkeypatch.setattr(webapp.core, "web_dict", lambda device: {"name": device.name})
+
+    results = {}
+
+    def call(key):
+        resp = webapp.app.test_client().get("/api/devices?refresh=1")
+        results[key] = (resp.status_code, resp.get_json())
+
+    first = threading.Thread(target=call, args=("first",))
+    first.start()
+    assert in_fetch.wait(2)
+    second = threading.Thread(target=call, args=("second",))
+    second.start()
+    time.sleep(0.1)
+    release.set()
+    first.join(2)
+    second.join(2)
+
+    assert len(calls) == 1
+    assert results["first"][0] == 200
+    assert results["second"][0] == 200
+    assert results["first"][1]["devices"] == [{"name": "Fresh Device"}]
+    assert results["second"][1]["devices"] == [{"name": "Fresh Device"}]
 
 
 def test_devices_response_is_cached_until_refresh(webapp, monkeypatch):

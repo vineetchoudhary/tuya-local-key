@@ -2,6 +2,7 @@ import csv
 import json
 import sys
 import stat
+import threading
 from types import SimpleNamespace
 
 import tuya_devices as core
@@ -38,6 +39,50 @@ def test_save_session_ignores_chmod_errors(tmp_path, monkeypatch):
     core.save_session(path, {"token_info": {}})
 
     assert core.load_session(path) == {"token_info": {}}
+
+
+def test_save_session_is_atomic_and_leaves_original_on_error(tmp_path):
+    path = tmp_path / "session.json"
+    core.save_session(path, {"token_info": {"access_token": "good"}})
+
+    class Unserializable:
+        pass
+
+    try:
+        core.save_session(path, {"token_info": Unserializable()})
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("expected a serialization error")
+
+    # The good session survived and no temp file was left behind.
+    assert core.load_session(path) == {"token_info": {"access_token": "good"}}
+    assert [p.name for p in tmp_path.iterdir()] == ["session.json"]
+
+
+def test_concurrent_session_saves_never_corrupt(tmp_path):
+    path = tmp_path / "session.json"
+    core.save_session(path, {"token_info": {"access_token": "seed"}})
+    errors = []
+
+    def writer(n):
+        try:
+            for i in range(25):
+                core.save_session(path, {"token_info": {"access_token": f"{n}-{i}"}})
+                if core.load_session(path) is None:
+                    raise AssertionError("torn read: session file was incomplete")
+        except Exception as exc:  # surface any thread failure to the assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(n,)) for n in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+
+    assert errors == []
+    assert core.load_session(path) is not None
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_session_saver_updates_token_fields(tmp_path):

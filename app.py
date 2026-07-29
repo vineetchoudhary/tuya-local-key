@@ -61,6 +61,7 @@ _lock = threading.Lock()
 PENDING_LOGIN_TTL_SECONDS = 180
 _devices_cache = None
 _devices_cache_lock = threading.Lock()
+_devices_fetch_lock = threading.Lock()
 
 
 def _cleanup_pending(now=None):
@@ -210,40 +211,51 @@ def devices():
     if not session:
         return jsonify({"error": "not_logged_in"}), 401
     refresh = request.args.get("refresh") in {"1", "true", "yes"}
+    request_start = time.time()
 
-    with _devices_cache_lock:
+    if not refresh:
+        with _devices_cache_lock:
+            cached = _cached_devices_response(session, request_start)
+        if cached:
+            return jsonify(cached)
+
+    with _devices_fetch_lock:
+        with _devices_cache_lock:
+            cache = _devices_cache_for_session(session)
+
+            if cache and cache["cached_at"] >= request_start:
+                return jsonify(cache["body"])
+            if not refresh:
+                cached = _cached_devices_response(session, request_start)
+                if cached:
+                    return jsonify(cached)
+            stale_cache = cache
+
+        try:
+            devs = core.devices_from_session(session, SESSION_FILE)
+        except Exception as e:
+            if _is_session_invalid_error(e):
+                _clear_devices_cache()
+                return jsonify({"error": "session_invalid"}), 401
+            if refresh and stale_cache:
+                body = dict(stale_cache["body"])
+                body["refresh_failed"] = True
+                return jsonify(body)
+            return jsonify({"error": "fetch_failed"}), 502
+
         now = time.time()
-        if not refresh:
-            cached = _cached_devices_response(session, now)
-            if cached:
-                return jsonify(cached)
-        stale_cache = _devices_cache_for_session(session)
-
-    try:
-        devs = core.devices_from_session(session, SESSION_FILE)
-    except Exception as e:
-        if _is_session_invalid_error(e):
-            _clear_devices_cache()
-            return jsonify({"error": "session_invalid"}), 401
-        if refresh and stale_cache:
-            body = dict(stale_cache["body"])
-            body["refresh_failed"] = True
-            return jsonify(body)
-        return jsonify({"error": "fetch_failed"}), 502
-
-    now = time.time()
-    body = {
-        "devices": [core.web_dict(d) for d in devs],
-        "cached_at": now,
-        "cache_expires_at": now + DEVICE_CACHE_TTL_SECONDS,
-    }
-    with _devices_cache_lock:
-        _devices_cache = {
-            "body": body,
+        body = {
+            "devices": [core.web_dict(d) for d in devs],
             "cached_at": now,
-            "session_key": _session_cache_key(session),
+            "cache_expires_at": now + DEVICE_CACHE_TTL_SECONDS,
         }
-    return jsonify(body)
+        with _devices_cache_lock:
+            _devices_cache = {
+                "body": body,
+                "cached_at": now,
+                "session_key": _session_cache_key(session),
+            }
+        return jsonify(body)
 
 
 @app.post("/api/logout")
