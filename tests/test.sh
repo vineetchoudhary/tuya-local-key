@@ -12,6 +12,27 @@ QR_SCHEME="${QR_SCHEME:-smartlife}"
 SESSION_VOLUME="${SESSION_VOLUME:-tuya-session}"
 APP_URL="http://localhost:${HOST_PORT}"
 
+AUTH_USERNAME="${AUTH_USERNAME:-admin}"
+AUTH_PASSWORD="${AUTH_PASSWORD:-tuya-local-key}"
+
+# Enable Auth
+AUTH_ENABLED=0
+DOCKER_AUTH_ARGS=()
+CURL_AUTH_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --auth)
+      AUTH_ENABLED=1
+      DOCKER_AUTH_ARGS=(-e "AUTH_USERNAME=${AUTH_USERNAME}" -e "AUTH_PASSWORD=${AUTH_PASSWORD}")
+      CURL_AUTH_ARGS=(-u "${AUTH_USERNAME}:${AUTH_PASSWORD}")
+      ;;
+    *)
+      printf 'Unknown argument: %s\n' "$arg" >&2
+      exit 1
+      ;;
+  esac
+done
+
 log() {
   printf '\n==> %s\n' "$*"
 }
@@ -45,7 +66,7 @@ wait_for_app() {
 
   log "Waiting for ${APP_URL}"
   for _ in {1..30}; do
-    if curl -fsS "${APP_URL}/api/state" >/dev/null; then
+    if curl -fsS ${CURL_AUTH_ARGS[@]+"${CURL_AUTH_ARGS[@]}"} "${APP_URL}/api/state" >/dev/null; then
       return 0
     fi
     sleep 1
@@ -85,9 +106,13 @@ run docker run -d \
   -p "${HOST_PORT}:8000" \
   -v "${SESSION_VOLUME}:/data" \
   -e "QR_SCHEME=${QR_SCHEME}" \
+  ${DOCKER_AUTH_ARGS[@]+"${DOCKER_AUTH_ARGS[@]}"} \
   "$IMAGE_NAME"
 
 wait_for_app
 open_browser
 
 log "Running ${CONTAINER_NAME} at ${APP_URL}"
+if [[ "$AUTH_ENABLED" == 1 ]]; then
+  log "Basic Auth enabled — sign in with ${AUTH_USERNAME} / ${AUTH_PASSWORD}"
+fi
