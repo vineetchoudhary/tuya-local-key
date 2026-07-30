@@ -26,3 +26,5 @@ The web UI caches the device list for 24 hours. Click Refresh to get the latest 
 The app exposes device `localKey` values after login. Keep access restricted to trusted Home Assistant users.
 
 The direct `8000/tcp` port is disabled by default. Use Home Assistant ingress unless you intentionally enable the direct port.
+
+Ingress access is already authenticated by Home Assistant. If you enable the direct port (or otherwise reach the app outside ingress), set both `AUTH_USERNAME` and `AUTH_PASSWORD` in the app Configuration to require a login.

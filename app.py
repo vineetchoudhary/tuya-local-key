@@ -15,6 +15,7 @@ restarts; mount it on a volume in Docker.
 """
 
 import base64
+import hmac
 import json
 import os
 import threading
@@ -32,17 +33,26 @@ OPTIONS_FILE = Path(os.environ.get("HASS_OPTIONS_FILE", "/data/options.json"))
 APP_ICON = Path(__file__).resolve().parent / "tuya_local_key" / "icon.png"
 
 
-def _qr_scheme_from_options(default):
+def _options():
     try:
-        options = json.loads(OPTIONS_FILE.read_text())
+        return json.loads(OPTIONS_FILE.read_text())
     except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return default
-
-    value = options.get("QR_SCHEME", options.get("qr_scheme"))
-    return str(value).strip() if value else default
+        return {}
 
 
-QR_SCHEME = _qr_scheme_from_options(os.environ.get("QR_SCHEME", "smartlife"))
+_OPTS = _options()
+
+
+def _setting(name, default=""):
+    """HA's options.json (if present) wins over the env var."""
+    value = _OPTS.get(name) or _OPTS.get(name.lower())
+    return str(value).strip() if value else os.environ.get(name, default)
+
+
+QR_SCHEME = _setting("QR_SCHEME", "smartlife")
+AUTH_USERNAME = _setting("AUTH_USERNAME")
+AUTH_PASSWORD = _setting("AUTH_PASSWORD")
+
 DEVICE_CACHE_TTL_SECONDS = 24 * 60 * 60
 SESSION_INVALID_ERROR_CODES = {
     "1002",  # access_token is null
@@ -143,6 +153,21 @@ def index():
 @app.get("/icon.png")
 def app_icon():
     return send_file(APP_ICON, mimetype="image/png", max_age=86400)
+
+
+@app.before_request
+def _require_auth():
+    if not (AUTH_USERNAME and AUTH_PASSWORD):
+        return 
+
+    auth = request.authorization
+    ok = bool(auth) and auth.type == "basic" and (
+        hmac.compare_digest((auth.username or "").encode(), AUTH_USERNAME.encode())
+        & hmac.compare_digest((auth.password or "").encode(), AUTH_PASSWORD.encode())
+    )
+    if not ok:
+        return ("Authentication required.", 401,
+                {"WWW-Authenticate": 'Basic realm="Tuya Local Key"'})
 
 
 @app.after_request

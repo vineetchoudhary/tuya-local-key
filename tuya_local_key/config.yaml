@@ -28,3 +28,5 @@ options:
   QR_SCHEME: smartlife
 schema:
   QR_SCHEME: "list(smartlife|tuyaSmart)"
+  AUTH_USERNAME: "str?"
+  AUTH_PASSWORD: "password?"

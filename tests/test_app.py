@@ -74,6 +74,50 @@ def test_home_assistant_options_override_qr_scheme_environment(tmp_path, monkeyp
     assert app.QR_SCHEME == "tuyaSmart"
 
 
+def _reload_app(monkeypatch, tmp_path, **env):
+    monkeypatch.setenv("SESSION_FILE", str(tmp_path / "session.json"))
+    monkeypatch.setenv("HASS_OPTIONS_FILE", str(tmp_path / "missing.json"))
+    monkeypatch.delenv("AUTH_USERNAME", raising=False)
+    monkeypatch.delenv("AUTH_PASSWORD", raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    import app
+
+    return importlib.reload(app)
+
+
+def test_auth_off_unless_both_username_and_password_set(tmp_path, monkeypatch):
+    for env in ({}, {"AUTH_USERNAME": "admin"}, {"AUTH_PASSWORD": "secret"}):
+        app = _reload_app(monkeypatch, tmp_path, **env)
+        assert app.app.test_client().get("/api/state").status_code == 200, env
+
+
+def test_auth_required_when_both_set(tmp_path, monkeypatch):
+    app = _reload_app(monkeypatch, tmp_path, AUTH_USERNAME="admin", AUTH_PASSWORD="secret")
+    client = app.app.test_client()
+
+    unauth = client.get("/api/state")
+    assert unauth.status_code == 401
+    assert unauth.headers["WWW-Authenticate"].startswith("Basic")
+
+    assert client.get("/api/state", auth=("admin", "wrong")).status_code == 401
+    assert client.get("/api/state", auth=("nope", "secret")).status_code == 401
+
+    ok = client.get("/api/state", auth=("admin", "secret"))
+    assert ok.status_code == 200
+    assert ok.json == {"logged_in": False}
+
+
+def test_auth_reads_home_assistant_options(tmp_path, monkeypatch):
+    options = tmp_path / "options.json"
+    options.write_text('{"AUTH_USERNAME": "ha", "AUTH_PASSWORD": "ingress-pw"}')
+    app = _reload_app(monkeypatch, tmp_path, HASS_OPTIONS_FILE=str(options))
+    client = app.app.test_client()
+
+    assert client.get("/api/state").status_code == 401
+    assert client.get("/api/state", auth=("ha", "ingress-pw")).status_code == 200
+
+
 def test_login_start_validates_user_code(webapp):
     response = webapp.app.test_client().post("/api/login/start", json={"user_code": ""})
 
