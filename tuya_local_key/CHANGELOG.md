@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6
+- Added optional username/password authentication. Set both `AUTH_USERNAME` and `AUTH_PASSWORD` to enable login.
+- Cached the device list in the web UI for 24 hours. Use the Refresh button to fetch the latest list from Tuya.
+- Added Home Assistant configuration for selecting the QR code scheme.
+- Various other improvements and bug fixes.
+
 ## 1.5
 - Fixed broken app icon for Home Assistant ingress urls
 
