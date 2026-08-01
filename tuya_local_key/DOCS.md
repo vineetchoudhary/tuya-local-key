@@ -28,3 +28,5 @@ The app exposes device `localKey` values after login. Keep access restricted to 
 The direct `8000/tcp` port is disabled by default. Use Home Assistant ingress unless you intentionally enable the direct port.
 
 Ingress access is already authenticated by Home Assistant. If you enable the direct port (or otherwise reach the app outside ingress), set both `AUTH_USERNAME` and `AUTH_PASSWORD` in the app Configuration to require a login.
+
+> **Warning:** `AUTH_USERNAME` and `AUTH_PASSWORD` are **ignored when the app is opened through Home Assistant ingress** (the sidebar panel). Ingress already authenticates you, and the browser cannot pass Basic Auth credentials through the ingress proxy, so no login prompt appears there. It only applies if you expose the direct port.

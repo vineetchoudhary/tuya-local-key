@@ -158,7 +158,10 @@ def app_icon():
 @app.before_request
 def _require_auth():
     if not (AUTH_USERNAME and AUTH_PASSWORD):
-        return 
+        return
+
+    if request.headers.get("X-Ingress-Path"):
+        return
 
     auth = request.authorization
     ok = bool(auth) and auth.type == "basic" and (
