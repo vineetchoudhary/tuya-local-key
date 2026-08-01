@@ -108,6 +108,21 @@ def test_auth_required_when_both_set(tmp_path, monkeypatch):
     assert ok.json == {"logged_in": False}
 
 
+def test_auth_skipped_for_home_assistant_ingress(tmp_path, monkeypatch):
+    app = _reload_app(monkeypatch, tmp_path, AUTH_USERNAME="admin", AUTH_PASSWORD="secret")
+    client = app.app.test_client()
+
+    # Ingress requests carry Supervisor's X-Ingress-Path and no Basic Auth credentials
+    ingress = client.get(
+        "/api/state", headers={"X-Ingress-Path": "/api/hassio_ingress/abc123"}
+    )
+    assert ingress.status_code == 200
+    assert ingress.json == {"logged_in": False}
+
+    # Direct-port access (no ingress header) still requires credentials.
+    assert client.get("/api/state").status_code == 401
+
+
 def test_auth_reads_home_assistant_options(tmp_path, monkeypatch):
     options = tmp_path / "options.json"
     options.write_text('{"AUTH_USERNAME": "ha", "AUTH_PASSWORD": "ingress-pw"}')
