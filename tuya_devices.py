@@ -26,8 +26,10 @@ import json
 import os
 import stat
 import sys
+import tempfile
+import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Home Assistant's public device-sharing app registration (not a secret; it is
 # published in the HA/tuya-local source). The actual authorization is your QR
@@ -40,6 +42,9 @@ DEFAULT_QR_PNG = os.path.join(os.getcwd(), "tuya-login-qr.png")
 
 # Device attributes exposed by tuya_sharing.CustomerDevice.
 TOKEN_FIELDS = ("t", "uid", "expire_time", "access_token", "refresh_token")
+
+# Request timeout for the SDK (seconds)
+REQUEST_TIMEOUT_SECONDS = 60
 
 
 class LoginError(Exception):
@@ -59,14 +64,31 @@ def load_session(path):
         return None
 
 
+_session_write_lock = threading.Lock()
+
+
 def save_session(path, session):
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(session, f, indent=2)
-    try:
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # 600: tokens are sensitive
-    except OSError:
-        pass
+    path = os.fspath(path)
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    with _session_write_lock:
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=".session-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(session, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            try:
+                os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)  # 600: tokens are sensitive
+            except OSError:
+                pass
+            os.replace(tmp, path)  # atomic on POSIX
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
 
 
 class _SessionSaver:
@@ -187,10 +209,22 @@ def qr_login(user_code, scheme, png_path, poll_seconds=150):
     print("Logged in.\n")
     return session
 
+def _apply_request_timeout():
+    # ponytail: rebinding the SDK's module globals is the only injection point;
+    # ceiling: silently no-ops if the SDK stops reading DEFAULT_TIMEOUT here.
+    try:
+        import tuya_sharing.customerapi as customerapi
+        import tuya_sharing.user as user
+
+        customerapi.DEFAULT_TIMEOUT = user.DEFAULT_TIMEOUT = REQUEST_TIMEOUT_SECONDS
+    except (ImportError, AttributeError):
+        pass
+
 
 def build_manager(session, session_path):
     from tuya_sharing import Manager
 
+    _apply_request_timeout()
     saver = _SessionSaver(session_path, session)
     return Manager(
         session.get("client_id", CLIENT_ID),
@@ -236,7 +270,11 @@ def fmt_time(value):
         return str(value)
     if ts > 1_000_000_000_000:  # milliseconds
         ts //= 1000
-    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        dt = datetime.fromtimestamp(ts, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return str(value)  # out-of-range timestamp: show it raw, don't 500 the list
+    return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def g(device, attr, default=None):
@@ -311,8 +349,8 @@ def parse_args(argv=None):
         description="List Smart Life devices via QR-code login (no developer account)."
     )
     p.add_argument("--user-code", help="Smart Life user code (else you'll be prompted)")
-    p.add_argument("--scheme", default="tuyaSmart", choices=["tuyaSmart", "smartlife"],
-                   help="QR login scheme prefix (default: tuyaSmart; Smart Life scans both)")
+    p.add_argument("--scheme", default="smartlife", choices=["tuyaSmart", "smartlife"],
+                   help="QR login scheme prefix (default: smartlife; Smart Life scans both)")
     p.add_argument("--session", default=DEFAULT_SESSION,
                    help=f"Session cache file (default: {DEFAULT_SESSION})")
     p.add_argument("--qr-png", default=DEFAULT_QR_PNG,

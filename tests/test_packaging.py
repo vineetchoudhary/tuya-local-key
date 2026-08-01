@@ -14,7 +14,7 @@ def test_home_assistant_metadata_matches_release_image():
 
     assert repository["name"] == "Tuya Local Key"
     assert config["slug"] == "tuya_local_key"
-    assert config["version"] == "1.5"
+    assert config["version"] == "1.6"
     assert config["image"] == "ghcr.io/vineetchoudhary/tuya-local-key"
     assert "legacy" not in config
     assert config["arch"] == ["aarch64", "amd64"]
@@ -22,7 +22,12 @@ def test_home_assistant_metadata_matches_release_image():
     assert config["ingress_port"] == 8000
     assert config["ports"]["8000/tcp"] is None
     assert config["environment"]["SESSION_FILE"] == "/data/session.json"
+    assert config["environment"]["QR_SCHEME"] == "smartlife"
     assert config["environment"]["PORT"] == "8000"
+    assert config["options"]["QR_SCHEME"] == "smartlife"
+    assert config["schema"]["QR_SCHEME"] == "list(smartlife|tuyaSmart)"
+    assert config["schema"]["AUTH_USERNAME"] == "str?"
+    assert config["schema"]["AUTH_PASSWORD"] == "password?"
 
 
 def test_home_assistant_app_icon_exists_and_is_square_png():

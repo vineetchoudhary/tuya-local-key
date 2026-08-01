@@ -95,6 +95,9 @@
     background: var(--card); color: var(--muted); font-size: 12px; font-weight: 600;
   }
   .updated svg { width: 13px; height: 13px; color: var(--accent); }
+  .refresh-status { color: var(--muted); font-size: 13px; font-weight: 600; }
+  .refresh-status.ok { color: var(--ok); }
+  .refresh-status.error { color: var(--off); }
   .table-scroll { overflow-x: auto; border:1px solid var(--border); border-radius:12px; }
   table { border-collapse: collapse; width: 100%; font-size: 13.5px; white-space: nowrap; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
@@ -187,6 +190,7 @@
       <input id="filter" type="text" placeholder="Filter…" style="max-width:200px" autocomplete="off">
       <button id="csvBtn">Export CSV</button>
       <button id="refreshBtn">Refresh</button>
+      <span class="refresh-status hidden" id="refreshStatus" aria-live="polite"></span>
       <button id="logoutBtn">Log out</button>
     </div>
     <div class="table-scroll">
@@ -201,7 +205,9 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const views = { login: $("login"), qr: $("qr"), loading: $("loading"), devices: $("devices") };
-let pollTimer = null, deviceData = [], filterText = "";
+let pollTimer = null, cacheStatusTimer = null, deviceData = [], filterText = "";
+let devicesCachedAt = null;
+let refreshStatusTimer = null;
 let sortState = { key: null, dir: 1 };   // dir: 1 = ascending, -1 = descending
 let localKeysVisible = false;
 
@@ -228,8 +234,48 @@ function banner(msg) {
   if (!msg) { b.classList.add("hidden"); return; }
   b.textContent = msg; b.classList.remove("hidden");
 }
+function refreshStatus(msg, kind) {
+  clearTimeout(refreshStatusTimer);
+  const el = $("refreshStatus");
+  el.className = `refresh-status${kind ? ` ${kind}` : ""}`;
+  if (!msg) { el.classList.add("hidden"); return; }
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+function formatCacheAge(cachedAt) {
+  if (!cachedAt) return "now";
+  const seconds = Math.max(0, Math.floor((Date.now() - cachedAt * 1000) / 1000));
+  if (seconds < 5) return "now";
+  if (seconds < 60) return "a few seconds ago";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 1) return "1 minute ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return "1 hour ago";
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "1 day ago" : `${days} days ago`;
+}
+function updateCacheStatus() {
+  if (!devicesCachedAt) return;
+  $("updated").innerHTML = `${icon("clock")} Last updated: ${formatCacheAge(devicesCachedAt)}`;
+  $("updated").classList.remove("hidden");
+}
+function startCacheStatusTimer() {
+  clearInterval(cacheStatusTimer);
+  updateCacheStatus();
+  cacheStatusTimer = setInterval(updateCacheStatus, 15000);
+}
+function stopCacheStatusTimer() {
+  clearInterval(cacheStatusTimer);
+  cacheStatusTimer = null;
+  devicesCachedAt = null;
+  $("updated").classList.add("hidden");
+}
 async function api(path, opts) {
-  const r = await fetch(path.replace(/^\/+/, ""), opts);
+  let r;
+  try { r = await fetch(path.replace(/^\/+/, ""), opts); }
+  catch (e) { return { ok: false, status: 0, body: {} }; }  // network down: don't throw, callers handle !ok
   let body = {};
   try { body = await r.json(); } catch (e) {}
   return { ok: r.ok, status: r.status, body };
@@ -269,36 +315,62 @@ function startPolling(token) {
     });
     if (body.status === "confirmed") { stopPolling(); banner(""); loadDevices(); }
     else if (status === 404 || body.status === "expired") { stopPolling(); banner("QR expired — try again."); show("login"); }
+    else if (status >= 500) { stopPolling(); banner("Couldn't save your login session. Please try again."); }
   }, 2000);
 }
 function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 $("cancelBtn").onclick = () => { stopPolling(); show("login"); };
 
 // ---- devices ----
-// inline=true keeps the table visible and just disables Refresh (used by the
-// Refresh button). inline=false shows the full loading screen (first load).
-async function loadDevices(msg, inline) {
+// Shows the full loading screen unless inline=true is requested.
+async function loadDevices(msg, inline, refresh) {
   banner("");
   if (inline) {
     $("refreshBtn").disabled = true;
     $("refreshBtn").textContent = "Refreshing…";
+    refreshStatus("Fetching latest from Tuya…");
   } else {
+    refreshStatus("");
     $("loadingMsg").textContent = msg || "Loading your devices…";
     show("loading");
   }
   try {
-    const { ok, status, body } = await api("/api/devices");
+    const { ok, status, body } = await api(refresh ? "/api/devices?refresh=1" : "/api/devices");
     if (!ok) {
-      if (status === 401) { show("login"); }
-      else { banner(body.error || "Failed to load devices."); show(deviceData.length ? "devices" : "login"); }
+      if (status === 401) {
+        deviceData = [];
+        refreshStatus("");
+        stopCacheStatusTimer();
+        if (body.error === "session_invalid") {
+          banner("Your login expired. Please scan the QR code again.");
+        } else {
+          banner("Please log in again.");
+        }
+        show("login");
+      } else {
+        if (inline) refreshStatus("Refresh failed.", "error");
+        banner(body.error === "fetch_failed" ? "Could not load devices from Tuya. Try again." : (body.error || "Failed to load devices."));
+        if (!deviceData.length) stopCacheStatusTimer();
+        show(deviceData.length ? "devices" : "login");
+      }
       return;
     }
     deviceData = body.devices || [];
+    devicesCachedAt = body.cached_at || Date.now() / 1000;
     render();
-    const updatedAt = new Date();
-    $("updated").innerHTML = `${icon("clock")} Last updated ${updatedAt.toLocaleDateString([], { month: "short", day: "numeric" })}, ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })}`;
-    $("updated").classList.remove("hidden");
+    startCacheStatusTimer();
+    if (body.refresh_failed) {
+      banner("Refresh failed. Showing cached device list.");
+      if (inline) refreshStatus("Refresh failed.", "error");
+    } else if (inline) {
+      refreshStatus("Device list refreshed.", "ok");
+      refreshStatusTimer = setTimeout(() => refreshStatus(""), 3000);
+    }
     show("devices");
+  } catch (err) {
+    if (inline) refreshStatus("Refresh failed.", "error");
+    banner(refresh ? "Refresh failed. Try again." : "Failed to load devices.");
+    show(deviceData.length ? "devices" : "login");
   } finally {
     $("refreshBtn").disabled = false;
     $("refreshBtn").textContent = "Refresh";
@@ -437,10 +509,10 @@ $("rows").addEventListener("click", async (e) => {
 // filter
 $("filter").oninput = (e) => { filterText = e.target.value.toLowerCase(); renderRows(computeList()); };
 
-$("refreshBtn").onclick = () => loadDevices("Refreshing…", true);
+$("refreshBtn").onclick = () => loadDevices("Updating device list from Tuya…", false, true);
 $("logoutBtn").onclick = async () => {
   await api("/api/logout", { method: "POST" });
-  deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; show("login");
+  deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; refreshStatus(""); stopCacheStatusTimer(); show("login");
 };
 
 // CSV export (client-side) — respects the current filter + sort order

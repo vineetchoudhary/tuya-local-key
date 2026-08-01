@@ -8,6 +8,10 @@ services:
       - tuya-session:/data
     environment:
       - QR_SCHEME=smartlife      # or "tuyaSmart"
+      # Optional login. Set BOTH to require a username + password (recommended
+      # when the port is reachable beyond localhost); leave unset for no auth.
+      # - AUTH_USERNAME=admin
+      # - AUTH_PASSWORD=change-me
     restart: unless-stopped
 
 volumes:
