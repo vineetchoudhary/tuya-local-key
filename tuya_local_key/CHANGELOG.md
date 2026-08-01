@@ -2,47 +2,40 @@
 
 ## 1.7
 - `AUTH_USERNAME` and `AUTH_PASSWORD` only apply to the direct port access. These are ignored under Home Assistant ingress.
-
-**Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.6...v1.7
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.6...v1.7
 
 ## 1.6
 - Added optional username/password authentication. Set both `AUTH_USERNAME` and `AUTH_PASSWORD` to enable login.
 - Cached the device list in the web UI for 24 hours. Use the Refresh button to fetch the latest list from Tuya.
 - Added Home Assistant configuration for selecting the QR code scheme.
 - Various other improvements and bug fixes.
-
-**Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.5...v1.6
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.5...v1.6
 
 ## 1.5
 - Fixed broken app icon for Home Assistant ingress urls
-
-**Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.4...v1.5
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.4...v1.5
 
 ## 1.4
 - Publishing GHCR images without Buildx provenance/SBOM attestation manifests.
 - Local keys are now hidden by default in the web UI. Use the eye toggle in the Local Key header to reveal or hide all keys, while copy-to-clipboard continues to copy the real key value.
-
-**Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.3...v1.4
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.3...v1.4
 
 ## 1.3
 - Fix HomeAssistant volume mount issue
-
-**Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.2...v1.3
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.2...v1.3
 
 ## 1.2
 
 - Fixed Home Assistant installation.
 - Added the Home Assistant app icon.
-
-**Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.1...v1.2
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.1...v1.2
 
 ## 1.1
 
 - Added Home Assistant app support.
 - Improved web UI local-key copy behavior.
 - Hardened QR login polling and session cleanup.
-
-**Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.0...v1.1
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.0...v1.1
 
 ## 1.0
 
