@@ -1,6 +1,6 @@
 # Tuya Local Key
 
-Tuya Local Key helps you retrieve the local keys for devices in your Smart Life / Tuya account, along with device ID, UUID, product details, category, IP address, online status, and timestamps.
+Tuya Local Key helps you retrieve the local keys for devices in your Smart Life / Tuya account, along with device ID, UUID, product details, category, IP address, online status, timestamps, and every data point the device reports.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/header-devices-dark.png">
@@ -17,6 +17,7 @@ Use it as a self-hosted web UI with Docker or as a local CLI tool.
 ## Features
 
 - Web UI for QR login, device listing, filtering, local key copy, refresh, logout, and CSV export.
+- Device details panel with every field the device-sharing SDK returns, including current data point values, their specifications, and the local data point id mapping.
 - CLI with the same QR login flow for terminal use.
 - Session caching so you do not need to scan a QR code every time.
 - Docker and Docker Compose support.
@@ -80,8 +81,28 @@ Then open `http://localhost:8000`.
 2. Scan the QR code in the Smart Life app.
 3. Tap Confirm login in the app.
 4. View, filter, copy, refresh, and export your devices.
+5. Select a device row to open its details panel.
 
 The web UI caches the device list for 24 hours. Click Refresh to get the latest list from Tuya.
+
+## Device Details
+
+Selecting a device row opens a side panel with everything the device-sharing SDK reports for it:
+
+| Section | Contents |
+|---|---|
+| Identity | Name, device ID, UUID, local key, category, product ID and name, model, icon path. |
+| Connectivity | Online status, IP address, local-control support, sub-device flag, node and gateway ids, time zone, coordinates. |
+| Account | User, owner, and asset ids. |
+| Timeline | First paired, last paired, and status-updated times in your local timezone, with the UTC reading and the raw epoch below each one. |
+| Data points | Every data point: local dp id, code, current value, type, read/write access, and value range. |
+| Raw JSON | The complete device record, with a copy button. |
+
+Fields Tuya returns that are not listed above appear under "Other fields", so nothing is hidden. The dp id shown next to each data point code is the mapping local integrations such as LocalTuya and tuya-local need.
+
+The device table shows the columns you scan most; UUID, category, IP address, and the last-paired time live in the panel. CSV export and `--json` still include every field.
+
+Timestamps in the web UI use your browser's timezone, so the same list reads differently on different machines. CSV export and the CLI stay in UTC.
 
 ## Configuration
 
@@ -165,6 +186,14 @@ The QR code expires within a minute or two. If it times out, start the login aga
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/devices-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/devices-light.png">
   <img alt="Device table with 60 demo devices" src="docs/screenshots/devices-light.png">
+</picture>
+
+### Device Details
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/details-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/details-light.png">
+  <img alt="Device details panel showing identity, connectivity, account, timeline, and data points" src="docs/screenshots/details-light.png">
 </picture>
 
 ### Filtering
