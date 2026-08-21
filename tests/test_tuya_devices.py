@@ -225,6 +225,103 @@ def test_web_dict_formats_times_and_preserves_device_fields():
     assert data["create_time"] == "-"
 
 
+def demo_device(**overrides):
+    """A device shaped like tuya_sharing.CustomerDevice after a device-list fetch."""
+    device = SimpleNamespace(
+        name="Kitchen Plug",
+        id="d7ddc303490bb07ca5rqmj",
+        uuid="4e1ea52584f6a774",
+        local_key="5vps+n4FwxR2?df;",
+        product_id="ofxioj0ypuygidrs",
+        product_name="Energy Monitoring Plug",
+        category="cz",
+        ip="192.168.1.61",
+        online=True,
+        sub=False,
+        support_local=True,
+        time_zone="+05:30",
+        asset_id="",
+        active_time=1_720_000_000,
+        create_time=1_690_000_000,
+        update_time=1_752_000_000,
+        # Tuya returns fields the SDK does not declare; they must survive too.
+        protocol_version="3.3",
+        status={"switch_1": True, "cur_power": 812,
+                "cycle_time": [{"start": "0800"}, {"start": "2000"}]},
+        function={"switch_1": SimpleNamespace(code="switch_1", type="Boolean", values="{}")},
+        status_range={"cur_power": SimpleNamespace(code="cur_power", type="Integer",
+                                                  values='{"unit":"W"}', report_type="minux")},
+        local_strategy={1: {"status_code": "switch_1", "config_item": {"pid": "ofxioj0ypuygidrs"}}},
+    )
+    for key, value in overrides.items():
+        setattr(device, key, value)
+    return device
+
+
+def test_device_dict_exposes_specs_and_undeclared_fields():
+    data = core.device_dict(demo_device())
+
+    # Known scalars keep their display order, and the spec maps come last.
+    assert list(data)[:6] == ["name", "id", "uuid", "local_key", "product_id", "product_name"]
+    assert list(data)[-4:] == ["status", "function", "status_range", "local_strategy"]
+    assert data["protocol_version"] == "3.3"
+    assert data["status"]["cur_power"] == 812
+    assert data["status"]["cycle_time"] == [{"start": "0800"}, {"start": "2000"}]
+    # Namespaces flatten to dicts and int dp ids become JSON-safe strings.
+    assert data["function"]["switch_1"] == {"code": "switch_1", "type": "Boolean", "values": "{}"}
+    assert data["status_range"]["cur_power"]["report_type"] == "minux"
+    assert data["local_strategy"]["1"]["status_code"] == "switch_1"
+    assert json.dumps(data)  # nothing left that json cannot serialize
+
+
+def test_device_dict_skips_missing_fields_and_empty_maps():
+    data = core.device_dict(SimpleNamespace(id="sparse-1", name="Unpaired Relay",
+                                            online=False, status={}, function={}))
+
+    assert data == {"name": "Unpaired Relay", "id": "sparse-1", "online": False}
+
+
+def test_web_dict_humanizes_times_and_keeps_raw_epochs():
+    data = core.web_dict(demo_device(online=1))
+
+    assert data["active_time"] == core.fmt_time(1_720_000_000)
+    assert data["epochs"] == {
+        "active_time": 1_720_000_000,
+        "create_time": 1_690_000_000,
+        "update_time": 1_752_000_000,
+    }
+    assert data["online"] is True
+    assert data["status"]["switch_1"] is True
+
+
+def test_export_csv_covers_every_flat_field(tmp_path):
+    path = tmp_path / "devices.csv"
+    other = SimpleNamespace(id="lamp-1", name="Lamp", online=False, room_name="Study")
+
+    core.export_csv([demo_device(), other], path)
+
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["local_key"] == "5vps+n4FwxR2?df;"
+    assert rows[0]["protocol_version"] == "3.3"
+    assert rows[0]["update_time"] == core.fmt_time(1_752_000_000)
+    # A column only the second device has still gets a header, and the maps do not.
+    assert rows[1]["room_name"] == "Study"
+    assert rows[0]["room_name"] == ""
+    assert not {"status", "function", "local_strategy"} & set(rows[0])
+
+
+def test_print_devices_lists_fields_and_counts_spec_maps(capsys):
+    core.print_devices([demo_device()])
+
+    out = capsys.readouterr().out
+    assert "protocol_version: 3.3" in out
+    assert "asset_id      : -" in out            # empty values read as "-"
+    assert "status        : 3 entries" in out    # maps are counted; --json has the detail
+    assert "function      : 1 entry" in out
+    assert f"update_time   : {core.fmt_time(1_752_000_000)}" in out
+
+
 def test_fmt_time_handles_invalid_values():
     assert core.fmt_time(None) == "-"
     assert core.fmt_time("not-a-time") == "not-a-time"

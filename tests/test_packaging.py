@@ -14,7 +14,7 @@ def test_home_assistant_metadata_matches_release_image():
 
     assert repository["name"] == "Tuya Local Key"
     assert config["slug"] == "tuya_local_key"
-    assert config["version"] == "1.7"
+    assert config["version"] == "2.0"
     assert config["image"] == "ghcr.io/vineetchoudhary/tuya-local-key"
     assert "legacy" not in config
     assert config["arch"] == ["aarch64", "amd64"]
@@ -28,6 +28,21 @@ def test_home_assistant_metadata_matches_release_image():
     assert config["schema"]["QR_SCHEME"] == "list(smartlife|tuyaSmart)"
     assert config["schema"]["AUTH_USERNAME"] == "str?"
     assert config["schema"]["AUTH_PASSWORD"] == "password?"
+
+
+def test_release_version_is_consistent_across_metadata():
+    """config.yaml, the changelog, and the Python package must move together."""
+    config = yaml.safe_load((ROOT / "tuya_local_key" / "config.yaml").read_text())
+    changelog = (ROOT / "tuya_local_key" / "CHANGELOG.md").read_text()
+    pyproject = (ROOT / "pyproject.toml").read_text()
+
+    version = config["version"]
+    headings = re.findall(r"^## (\S+)$", changelog, re.M)
+
+    assert headings[0] == version, "newest changelog entry must be the app version"
+    assert f"...v{version}" in changelog, "changelog needs a compare link for this release"
+    assert re.search(rf'^version = "{re.escape(version)}\.\d+"$', pyproject, re.M), \
+        "pyproject version must share the app's major.minor"
 
 
 def test_home_assistant_app_icon_exists_and_is_square_png():

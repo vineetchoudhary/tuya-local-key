@@ -359,6 +359,25 @@ def test_devices_returns_session_invalid_for_auth_errors(webapp, monkeypatch):
     assert webapp._devices_cache is None
 
 
+def test_devices_response_keeps_field_order(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    monkeypatch.setattr(
+        webapp.core,
+        "devices_from_session",
+        lambda session, session_file: [SimpleNamespace(
+            name="Kitchen Plug", id="device-1", local_key="key", online=True,
+            update_time=1_752_000_000, status={"switch_1": True},
+        )],
+    )
+
+    response = webapp.app.test_client().get("/api/devices")
+
+    # jsonify sorts keys by default; the UI and CSV export rely on web_dict()'s order.
+    assert list(response.json["devices"][0]) == [
+        "name", "id", "local_key", "online", "update_time", "status", "epochs",
+    ]
+
+
 def test_devices_ignores_cache_for_different_session(webapp, monkeypatch):
     webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
     with webapp._devices_cache_lock:
