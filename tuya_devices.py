@@ -9,8 +9,9 @@ Smart Life app account:
      Security -> User Code).
   2. Scan the QR code this prints, in the Smart Life app (+ -> Scan), and tap
      "Confirm login".
-  3. The devices in your account are listed (customName/name, id, localKey,
-     productId, productName, updateTime, uuid, ip, isOnline, ...).
+  3. The devices in your account are listed with every field the SDK exposes
+     (name, id, local_key, product_id, uuid, ip, online, timestamps, and the
+     data point values/specifications with --json).
 
 The session token is cached (~/.config/tuya-smartlife/session.json) and
 auto-refreshed, so you only scan again when the login fully expires.
@@ -30,6 +31,7 @@ import tempfile
 import threading
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 # Home Assistant's public device-sharing app registration (not a secret; it is
 # published in the HA/tuya-local source). The actual authorization is your QR
@@ -281,64 +283,111 @@ def g(device, attr, default=None):
     return getattr(device, attr, default)
 
 
+# Single-value attributes of tuya_sharing.CustomerDevice, in display order. The
+# SDK builds each device as a SimpleNamespace over Tuya's raw payload, so
+# device_dict() also picks up whatever else Tuya returned for the account —
+# these are only the ones we know how to order.
+SCALAR_ATTRS = (
+    "name", "id", "uuid", "local_key", "product_id", "product_name",
+    "category", "model", "ip", "lat", "lon", "time_zone", "online", "sub",
+    "support_local", "set_up", "asset_id", "owner_id", "uid", "biz_type",
+    "icon", "active_time", "create_time", "update_time",
+)
+
+# Timestamps (epoch seconds or milliseconds) that fmt_time() humanizes.
+TIME_ATTRS = ("active_time", "create_time", "update_time")
+
+# Per-device maps the SDK fills in after the device list call: current data
+# point values, the command/status specifications, and the local dp id mapping.
+SPEC_ATTRS = ("status", "function", "status_range", "local_strategy")
+
+
+def _plain(value):
+    """JSON-safe copy of an SDK value.
+
+    DeviceFunction/DeviceStatusRange are namespaces, and local_strategy is keyed
+    by int dp id, so neither survives json.dump/jsonify unhelped.
+    """
+    if isinstance(value, SimpleNamespace):
+        value = vars(value)
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
+
+
+def device_dict(device):
+    """Everything the SDK knows about a device, JSON-safe.
+
+    Known scalars first (in SCALAR_ATTRS order), then any extra fields Tuya
+    returned, then the nested spec/state maps.
+    """
+    data = {a: _plain(g(device, a)) for a in SCALAR_ATTRS if hasattr(device, a)}
+    for key, value in sorted(vars(device).items()):
+        if key not in data and key not in SPEC_ATTRS:
+            data[key] = _plain(value)
+    for attr in SPEC_ATTRS:
+        value = g(device, attr)
+        if value:
+            data[attr] = _plain(value)
+    return data
+
+
+def web_dict(device):
+    """device_dict() with timestamps humanized for the web UI.
+
+    Raw epochs move to `epochs` so the UI can show both, and `online` is
+    coerced to a real bool (Tuya sometimes reports 0/1).
+    """
+    data = device_dict(device)
+    epochs = {k: data[k] for k in TIME_ATTRS if k in data}
+    for key, epoch in epochs.items():
+        data[key] = fmt_time(epoch)
+    data["online"] = bool(data.get("online"))
+    if epochs:
+        data["epochs"] = epochs
+    return data
+
+
 def print_devices(devices):
     online = sum(1 for d in devices if g(d, "online"))
     print(f"Found {len(devices)} device(s) — "
           f"{online} online, {len(devices) - online} offline\n")
     for i, d in enumerate(devices, 1):
-        title = g(d, "name") or "(unnamed)"
-        status = "online" if g(d, "online") else "offline"
+        data = device_dict(d)
+        title = data.get("name") or "(unnamed)"
+        status = "online" if data.get("online") else "offline"
         print(f"[{i:>3}] {title}  —  {status}")
-        rows = [
-            ("name", g(d, "name") or "-"),
-            ("id", g(d, "id")),
-            ("uuid", g(d, "uuid") or "-"),
-            ("localKey", g(d, "local_key") or "-"),
-            ("productId", g(d, "product_id") or "-"),
-            ("productName", g(d, "product_name") or "-"),
-            ("category", g(d, "category") or "-"),
-            ("ip", g(d, "ip") or "-"),
-            ("isOnline", bool(g(d, "online"))),
-            ("updateTime", fmt_time(g(d, "update_time"))),
-            ("activeTime", fmt_time(g(d, "active_time"))),
-        ]
-        for k, v in rows:
-            print(f"      {k:<12}: {v}")
+        for key, value in data.items():
+            if isinstance(value, dict):  # status/function/status_range/…: --json has the detail
+                count = len(value)
+                value = f"{count} entr{'y' if count == 1 else 'ies'}"
+            elif key in TIME_ATTRS:
+                value = fmt_time(value)
+            elif value is None or value == "":
+                value = "-"
+            print(f"      {key:<14}: {value}")
         print()
 
 
-JSON_ATTRS = [
-    "name", "id", "uuid", "local_key", "product_id", "product_name",
-    "category", "ip", "online", "sub", "active_time", "update_time",
-    "create_time", "time_zone",
-]
-
-
-def to_dict(device):
-    return {a: g(device, a) for a in JSON_ATTRS}
-
-
-def web_dict(device):
-    """to_dict() with timestamps humanized and `online` coerced to bool (web UI)."""
-    d = to_dict(device)
-    for key in ("active_time", "update_time", "create_time"):
-        d[key] = fmt_time(d.get(key))
-    d["online"] = bool(d.get("online"))
-    return d
-
-
 def export_csv(devices, path):
+    """One row per device, one column per flat field any device has."""
     import csv
 
-    time_cols = {"active_time", "update_time", "create_time"}
+    rows = [device_dict(d) for d in devices]
+    columns = []
+    for row in rows:
+        for key, value in row.items():
+            if key not in columns and not isinstance(value, (dict, list)):
+                columns.append(key)  # the spec maps don't fit a cell
+        for key in TIME_ATTRS:
+            if key in row:
+                row[key] = fmt_time(row[key])
     with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(JSON_ATTRS)
-        for d in devices:
-            writer.writerow([
-                fmt_time(g(d, a)) if a in time_cols else g(d, a)
-                for a in JSON_ATTRS
-            ])
+        writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 # --------------------------------------------------------------------------- #
@@ -378,7 +427,7 @@ def main(argv=None):
     devices = get_devices(args)
 
     if args.json:
-        print(json.dumps([to_dict(d) for d in devices], indent=2, ensure_ascii=False))
+        print(json.dumps([device_dict(d) for d in devices], indent=2, ensure_ascii=False))
     else:
         print_devices(devices)
 

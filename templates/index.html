@@ -30,7 +30,7 @@
   }
   .app-icon { width: 32px; height: 32px; border-radius: 7px; display: block; }
   header h1 { font-size: 17px; margin: 0; font-weight: 650; }
-  main { max-width: 1100px; margin: 0 auto; padding: 22px 16px 60px; }
+  main { max-width: 1300px; margin: 0 auto; padding: 22px 16px 60px; }
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 22px; margin: 0 auto; max-width: 540px;
@@ -128,6 +128,82 @@
             border:1px solid var(--off); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:14px; }
   .hidden { display: none; }
   a { color: var(--accent); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+  /* Rows open the details panel */
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  tbody tr.selected { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+  th.details-col, td.details-col { width: 1%; padding-left: 0; }
+
+  /* Details panel: a drawer on wide screens, a full-width overlay on narrow ones */
+  .scrim {
+    position: fixed; inset: 0; z-index: 15; background: rgba(0,0,0,.4);
+    opacity: 0; pointer-events: none; transition: opacity .2s ease;
+  }
+  .panel {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 20; width: 420px; max-width: 100%;
+    display: flex; flex-direction: column;
+    background: var(--card); border-left: 1px solid var(--border);
+    transform: translateX(100%); visibility: hidden;
+    transition: transform .22s ease, visibility .22s ease;
+  }
+  body.panel-open .panel { transform: none; visibility: visible; }
+  @media (min-width: 900px) {
+    body { transition: padding-right .22s ease; }
+    body.panel-open { padding-right: 420px; }
+    .scrim { display: none; }
+  }
+  @media (max-width: 899px) {   /* too narrow to sit beside the table: cover it */
+    .panel { width: 100%; }
+    body.panel-open { overflow: hidden; }
+    body.panel-open .scrim { opacity: 1; pointer-events: auto; }
+  }
+  .panel-head {
+    flex: 0 0 auto; display: flex; align-items: flex-start; gap: 10px;
+    padding: 16px 18px; border-bottom: 1px solid var(--border);
+  }
+  .panel-head .grow { flex: 1 1 auto; min-width: 0; }
+  .panel-title { font-size: 16px; font-weight: 650; margin: 0; overflow-wrap: anywhere; }
+  .panel-sub {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 6px 0 0; font-size: 13px; color: var(--muted);
+  }
+  /* min-height:0 so the body scrolls instead of stretching the flex column */
+  .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px 18px 28px; }
+  .section-title {
+    margin: 20px 0 8px; font-size: 12px; font-weight: 700;
+    letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+  }
+  dl.fields {
+    display: grid; grid-template-columns: minmax(92px, 36%) 1fr; gap: 0 12px;
+    margin: 0; font-size: 13.5px;
+  }
+  dl.fields dt { padding: 6px 0; color: var(--muted); }
+  dl.fields dd { margin: 0; padding: 6px 0; overflow-wrap: anywhere; }
+  .copyable {
+    padding: 0; margin: 0; border: 0; background: none; font: inherit; color: inherit;
+    text-align: left; cursor: pointer; overflow-wrap: anywhere;
+  }
+  .copyable:hover, .copyable:focus-visible { color: var(--accent); outline: none; text-decoration: underline; }
+  .dash { color: var(--muted); }
+  .field-sub { margin-top: 2px; font-size: 12px; color: var(--muted); }
+  ul.dps { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 10px; }
+  ul.dps li { padding: 8px 11px; border-bottom: 1px solid var(--border); }
+  ul.dps li:last-child { border-bottom: none; }
+  .dp-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+  .dp-id { min-width: 24px; text-align: right; font-size: 12px; color: var(--muted); }
+  .dp-code { font-weight: 600; overflow-wrap: anywhere; }
+  .dp-val { max-width: 48%; margin-left: auto; text-align: right; overflow-wrap: anywhere; }
+  .dp-meta { margin-top: 3px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  details.raw { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--border); }
+  details.raw summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+  details.raw summary:hover { color: var(--fg); }
+  details.raw .raw-actions { margin-top: 10px; }
+  details.raw pre {
+    margin: 10px 0 0; padding: 11px; border-radius: 8px; background: var(--code-bg);
+    font-size: 12px; line-height: 1.5; max-height: 320px; overflow: auto;
+  }
 </style>
 </head>
 <body>
@@ -199,8 +275,22 @@
         <tbody id="rows"></tbody>
       </table>
     </div>
+    <p class="hint">Select a device to see everything Tuya reports for it.</p>
   </section>
 </main>
+
+<!-- DEVICE DETAILS -->
+<div id="scrim" class="scrim"></div>
+<aside id="panel" class="panel" role="dialog" aria-labelledby="panelTitle" aria-hidden="true" tabindex="-1">
+  <div class="panel-head">
+    <div class="grow">
+      <h2 id="panelTitle" class="panel-title"></h2>
+      <p id="panelSub" class="panel-sub"></p>
+    </div>
+    <button id="panelClose" class="icon-btn" type="button" aria-label="Close details" title="Close details"></button>
+  </div>
+  <div id="panelBody" class="panel-body"></div>
+</aside>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -210,24 +300,52 @@ let devicesCachedAt = null;
 let refreshStatusTimer = null;
 let sortState = { key: null, dir: 1 };   // dir: 1 = ascending, -1 = descending
 let localKeysVisible = false;
+let searchIndex = new WeakMap();         // device -> lowercased haystack for the filter
+let selectedId = null;                   // device shown in the details panel
+let panelOpener = null;                  // element to refocus when the panel closes
 
-// Column definitions drive both the header and the rows (kept in sync).
+// Column definitions drive both the header and the rows (kept in sync). The
+// fields left out here (uuid, category, specs, …) live in the details panel.
 const COLUMNS = [
   { key: "name",         label: "Name",         sortable: true },
   { key: "online",       label: "Status",       sortable: true, render: d => badge(d.online) },
   { key: "id",           label: "ID",           cls: "mono" },
-  { key: "uuid",         label: "UUID",         cls: "mono" },
   { key: "local_key",    label: "Local Key",    header: renderLocalKeyHeader, render: d => renderLocalKey(d.local_key) },
   { key: "product_id",   label: "Product ID",   cls: "mono" },
   { key: "product_name", label: "Product Name" },
-  { key: "category",     label: "Category" },
-  { key: "ip",           label: "IP",           cls: "mono" },
-  { key: "update_time",  label: "Update Time",  sortable: true },
-  { key: "active_time",  label: "Active Time",  sortable: true },
+  { key: "update_time",  label: "Update Time",  sortable: true, render: d => renderTime(d, "update_time") },
+];
+
+// Timestamps the server sends as a UTC string plus a raw epoch under `epochs`.
+const TIME_KEYS = ["create_time", "active_time", "update_time"];
+
+// Per-device maps from the SDK; rendered as the data point list, not as fields.
+const SPEC_KEYS = ["status", "function", "status_range", "local_strategy"];
+const MONO_FIELDS = new Set(["id", "uuid", "local_key", "product_id", "model", "icon",
+  "ip", "lat", "lon", "time_zone", "uid", "owner_id", "asset_id", "node_id", "gateway_id"]);
+const FIELD_LABELS = {
+  name: "Name", id: "Device ID", uuid: "UUID", local_key: "Local key",
+  category: "Category", product_id: "Product ID", product_name: "Product name",
+  model: "Model", icon: "Icon path", online: "Status", ip: "IP address",
+  support_local: "Local control", sub: "Sub-device", node_id: "Node ID",
+  gateway_id: "Gateway ID", set_up: "Set up", time_zone: "Time zone",
+  lat: "Latitude", lon: "Longitude", uid: "User ID", owner_id: "Owner ID",
+  asset_id: "Asset ID", biz_type: "Business type",
+  create_time: "First paired", active_time: "Last paired", update_time: "Status updated",
+};
+// Anything Tuya returns that isn't listed here lands in "Other fields".
+const DETAIL_SECTIONS = [
+  { title: "Identity", keys: ["name", "id", "uuid", "local_key", "category", "product_id", "product_name", "model", "icon"] },
+  { title: "Connectivity", keys: ["online", "ip", "support_local", "sub", "node_id", "gateway_id", "set_up", "time_zone", "lat", "lon"] },
+  { title: "Account", keys: ["uid", "owner_id", "asset_id", "biz_type"] },
+  { title: "Timeline", keys: ["create_time", "active_time", "update_time"] },
 ];
 
 function show(name) {
   for (const k in views) views[k].classList.toggle("hidden", k !== name);
+  // A refresh (devices -> loading -> devices) keeps the open device; losing the
+  // session does not.
+  if (name === "login" || name === "qr") closePanel();
 }
 function banner(msg) {
   const b = $("banner");
@@ -356,6 +474,7 @@ async function loadDevices(msg, inline, refresh) {
       return;
     }
     deviceData = body.devices || [];
+    indexDevices();
     devicesCachedAt = body.cached_at || Date.now() / 1000;
     render();
     startCacheStatusTimer();
@@ -385,8 +504,38 @@ function icon(name) {
     eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
     eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m3 3 18 18M10.6 10.6A3 3 0 0 0 12 15a3 3 0 0 0 2.4-1.2M9.9 4.2A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a16.8 16.8 0 0 1-2.8 4.2M6.6 6.6C3.7 8.5 2 12 2 12s3.5 8 10 8a10.7 10.7 0 0 0 4.1-.8"/></svg>',
     clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 2"/></svg>',
+    chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 6 6 6-6 6"/></svg>',
+    close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6 6 18"/></svg>',
   };
   return icons[name] || "";
+}
+// The server humanizes timestamps in UTC and sends the raw epoch alongside, so
+// only the browser can name the viewer's own zone.
+const tzFormat = (() => {
+  try { return new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }); }
+  catch (e) { return null; }
+})();
+function epochMs(epoch) {
+  const value = Number(epoch);
+  if (!value || !isFinite(value)) return null;   // 0/None/unparseable: no time to show
+  return value > 1e12 ? value : value * 1000;    // Tuya reports seconds or milliseconds
+}
+// "2024-07-03 15:16:40 IST" — local time, "" when there is no usable epoch.
+function localTime(epoch) {
+  const ms = epochMs(epoch);
+  if (ms === null) return "";
+  const date = new Date(ms);
+  if (isNaN(date.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  const zone = tzFormat
+    ? (tzFormat.formatToParts(date).find(part => part.type === "timeZoneName") || {}).value
+    : "";
+  return zone ? `${stamp} ${zone}` : stamp;
+}
+function renderTime(d, key) {
+  return esc(localTime(d.epochs && d.epochs[key]) || d[key]);
 }
 function keyDisplay(value, visible) {
   const text = String(value ?? "");
@@ -395,9 +544,12 @@ function keyDisplay(value, visible) {
   const length = Math.max(text.length, 12);
   return "•".repeat(Math.min(length, 20));
 }
-function renderLocalKeyHeader() {
+function renderLocalKeyToggle() {
   const label = localKeysVisible ? "Hide local keys" : "Show local keys";
-  return `<span class="key-heading"><span>Local Key</span><button id="localKeyToggle" class="icon-btn" type="button" data-key-toggle aria-label="${label}" aria-pressed="${localKeysVisible}" title="${label}">${icon(localKeysVisible ? "eyeOff" : "eye")}</button></span>`;
+  return `<button class="icon-btn" type="button" data-key-toggle aria-label="${label}" aria-pressed="${localKeysVisible}" title="${label}">${icon(localKeysVisible ? "eyeOff" : "eye")}</button>`;
+}
+function renderLocalKeyHeader() {
+  return `<span class="key-heading"><span>Local Key</span>${renderLocalKeyToggle()}</span>`;
 }
 function renderLocalKey(value) {
   const text = String(value ?? "");
@@ -443,9 +595,20 @@ function cmp(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+// The filter matches every field, specs included, so the haystack is built once
+// per fetch instead of on every keystroke.
+function indexDevices() {
+  searchIndex = new WeakMap();
+  for (const d of deviceData) {
+    // Local times are rendered, not sent, so add them to match what is on screen.
+    const times = TIME_KEYS.map(key => localTime(d.epochs && d.epochs[key])).join(" ");
+    searchIndex.set(d, `${JSON.stringify(d)} ${times}`.toLowerCase());
+  }
+}
+
 function computeList() {
   let list = deviceData;
-  if (filterText) list = list.filter(d => JSON.stringify(d).toLowerCase().includes(filterText));
+  if (filterText) list = list.filter(d => (searchIndex.get(d) || "").includes(filterText));
   if (sortState.key) {
     const { key, dir } = sortState;
     list = [...list].sort((a, b) => cmp(a[key], b[key]) * dir);
@@ -460,29 +623,31 @@ function renderHead() {
     const active = sortState.key === c.key;
     const arrow = active ? (sortState.dir === 1 ? "▲" : "▼") : "";
     return `<th class="sortable${active ? " active" : ""}" data-key="${c.key}">${label}<span class="arrow">${arrow}</span></th>`;
-  }).join("") + "</tr>";
+  }).join("") + `<th class="details-col"><span class="sr-only">Details</span></th></tr>`;
 }
 
 function renderRows(list) {
   const online = list.filter(d => d.online).length;
   $("count").innerHTML = `${list.length} device${list.length===1?"":"s"} ` +
     `<span class="muted">· ${online} online · ${list.length-online} offline</span>`;
-  $("rows").innerHTML = list.map(d => "<tr>" + COLUMNS.map(c => {
-    const cls = c.cls ? ` class="${c.cls}"` : "";
-    const val = c.render ? c.render(d) : esc(d[c.key]);
-    return `<td${cls}>${val}</td>`;
-  }).join("") + "</tr>").join("");
+  $("rows").innerHTML = list.map(d => {
+    const cells = COLUMNS.map(c => {
+      const cls = c.cls ? ` class="${c.cls}"` : "";
+      const val = c.render ? c.render(d) : esc(d[c.key]);
+      return `<td${cls}>${val}</td>`;
+    }).join("");
+    const label = `Show details for ${esc(d.name || d.id)}`;
+    const open = `<td class="details-col"><button class="icon-btn" type="button" data-open ` +
+      `aria-label="${label}" title="Details">${icon("chevron")}</button></td>`;
+    return `<tr data-id="${esc(d.id)}"${d.id === selectedId ? ' class="selected"' : ""}>${cells}${open}</tr>`;
+  }).join("");
 }
 
-function render() { renderHead(); renderRows(computeList()); }
+function render() { renderHead(); renderRows(computeList()); renderPanel(); }
 
 // sort on header click
 $("thead").addEventListener("click", (e) => {
-  if (e.target.closest("[data-key-toggle]")) {
-    localKeysVisible = !localKeysVisible;
-    render();
-    return;
-  }
+  if (e.target.closest("[data-key-toggle]")) return;   // handled by the toggle listener
   const th = e.target.closest("th[data-key]");
   if (!th) return;
   const key = th.dataset.key;
@@ -491,20 +656,223 @@ $("thead").addEventListener("click", (e) => {
   render();
 });
 
-// copy local key
-$("rows").addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-copy]");
-  if (!el) return;
-  try {
-    await copyText(el.dataset.copy || "");
-    el.textContent = "copied!";
-  } catch (err) {
-    el.textContent = "copy failed";
-  }
-  setTimeout(() => {
-    if (el.isConnected) el.textContent = keyDisplay(el.dataset.copy || "", localKeysVisible);
-  }, 800);
+// show/hide every local key (the table header and the panel share one toggle)
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("[data-key-toggle]")) return;
+  localKeysVisible = !localKeysVisible;
+  render();
 });
+
+// copy any value marked with data-copy (table cells and panel fields alike)
+function copyOnClick(container) {
+  container.addEventListener("click", async (e) => {
+    const el = e.target.closest("[data-copy]");
+    if (!el) return;
+    const original = el.innerHTML;
+    try {
+      await copyText(el.dataset.copy || "");
+      el.textContent = "copied!";
+    } catch (err) {
+      el.textContent = "copy failed";
+    }
+    setTimeout(() => { if (el.isConnected) el.innerHTML = original; }, 800);
+  });
+}
+copyOnClick($("rows"));
+copyOnClick($("panelBody"));
+
+// open the details panel for the clicked row
+$("rows").addEventListener("click", (e) => {
+  if (e.target.closest("[data-copy]")) return;   // copying a key isn't a row click
+  const tr = e.target.closest("tr[data-id]");
+  if (!tr) return;
+  panelOpener = e.target.closest("[data-open]") || tr;
+  openPanel(tr.dataset.id);
+});
+
+// ---- details panel ----
+function openPanel(id) {
+  selectedId = id;
+  if (!renderPanel()) return;
+  document.body.classList.add("panel-open");
+  $("panel").setAttribute("aria-hidden", "false");
+  $("panel").focus();
+  markSelectedRow();
+}
+function closePanel() {
+  if (!selectedId) return;
+  selectedId = null;
+  document.body.classList.remove("panel-open");
+  $("panel").setAttribute("aria-hidden", "true");
+  markSelectedRow();
+  if (panelOpener && panelOpener.isConnected) panelOpener.focus();
+  panelOpener = null;
+}
+function markSelectedRow() {
+  for (const tr of $("rows").querySelectorAll("tr[data-id]")) {
+    tr.classList.toggle("selected", tr.dataset.id === selectedId);
+  }
+}
+
+// Repaints the open panel (after a refresh or a local-key toggle).
+// Returns false when there is nothing to show.
+function renderPanel() {
+  if (!selectedId) return false;
+  const d = deviceData.find(dev => dev.id === selectedId);
+  if (!d) { closePanel(); return false; }   // the device is gone after a refresh
+  $("panelTitle").textContent = d.name || "(unnamed)";
+  $("panelSub").innerHTML = [badge(d.online), esc(d.product_name), esc(d.category)]
+    .filter(part => part && part !== "-").join("<span>·</span>");
+  $("panelBody").innerHTML = fieldSections(d) + dpSection(d) + rawSection(d);
+  return true;
+}
+
+function labelFor(key) {
+  return FIELD_LABELS[key] || key.replace(/_/g, " ").replace(/^./, c => c.toUpperCase());
+}
+function dash() { return '<span class="dash">—</span>'; }
+function section(title, body) {
+  return `<h3 class="section-title">${esc(title)}</h3>${body}`;
+}
+function fieldList(d, keys) {
+  return `<dl class="fields">` + keys.map(key =>
+    `<dt title="${esc(key)}">${esc(labelFor(key))}</dt><dd>${fieldValue(d, key)}</dd>`
+  ).join("") + `</dl>`;
+}
+
+function copyable(text, mono) {
+  return `<button class="copyable${mono ? " mono" : ""}" type="button" ` +
+    `data-copy="${esc(text)}" title="Copy">${esc(text)}</button>`;
+}
+
+// Local time reads first, with the server's UTC string and raw epoch below it.
+function timeValue(d, key) {
+  const epoch = d.epochs[key];
+  const local = localTime(epoch);
+  if (!local) return copyable(String(d[key]));
+  const utc = [d[key], epoch].filter(v => v !== null && v !== undefined && v !== "");
+  return copyable(local) + `<div class="field-sub">${utc.map(esc).join(" · ")}</div>`;
+}
+
+function fieldValue(d, key) {
+  const value = d[key];
+  if (key === "local_key") return `<span class="key-heading">${renderLocalKey(value)}${renderLocalKeyToggle()}</span>`;
+  if (key === "online") return badge(value);
+  if (value === null || value === undefined || value === "") return dash();
+  if (d.epochs && key in d.epochs) return timeValue(d, key);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "object") return `<code class="mono">${esc(JSON.stringify(value))}</code>`;
+  return copyable(String(value), MONO_FIELDS.has(key));
+}
+
+function fieldSections(d) {
+  const shown = new Set(["epochs", ...SPEC_KEYS]);
+  let html = "";
+  for (const { title, keys } of DETAIL_SECTIONS) {
+    const present = keys.filter(key => key in d);
+    present.forEach(key => shown.add(key));
+    if (present.length) html += section(title, fieldList(d, present));
+  }
+  const rest = Object.keys(d).filter(key => !shown.has(key));
+  if (rest.length) html += section("Other fields", fieldList(d, rest));
+  return html;
+}
+
+// One row per data point: dp id (from local_strategy), current value (status),
+// and the type/range/access from the device specification.
+function dpRows(d) {
+  const status = d.status || {}, fns = d.function || {}, ranges = d.status_range || {};
+  const dpIds = {};
+  for (const [dpId, info] of Object.entries(d.local_strategy || {})) {
+    if (info && info.status_code) dpIds[info.status_code] = dpId;
+  }
+  const codes = [...new Set([
+    ...Object.keys(ranges), ...Object.keys(fns), ...Object.keys(status), ...Object.keys(dpIds),
+  ])];
+  codes.sort((a, b) => {
+    const ia = a in dpIds ? Number(dpIds[a]) : Infinity;
+    const ib = b in dpIds ? Number(dpIds[b]) : Infinity;
+    if (ia !== ib) return ia < ib ? -1 : 1;
+    return a.localeCompare(b);
+  });
+  return codes.map(code => {
+    const spec = ranges[code] || {}, fn = fns[code] || {};
+    return {
+      code,
+      dpId: dpIds[code],
+      value: status[code],
+      hasValue: code in status,
+      type: spec.type || fn.type || "",
+      values: spec.values || fn.values || "",
+      access: `${ranges[code] ? "R" : ""}${fns[code] ? "W" : ""}`,
+      reportType: spec.report_type || "",
+      hint: [fn.name, fn.desc].filter(Boolean).join(" — "),
+    };
+  });
+}
+
+// Tuya spec values are a JSON string; show the useful part, keep the rest in the tooltip.
+function dpRange(raw, type) {
+  if (!raw) return "";
+  let spec;
+  try { spec = JSON.parse(raw); } catch (e) { return String(raw); }
+  if (!spec || typeof spec !== "object") return String(raw);
+  if (Array.isArray(spec.range)) return spec.range.join(", ");
+  if (Array.isArray(spec.label)) return spec.label.join(", ");
+  if ("min" in spec || "max" in spec) {
+    const unit = String(spec.unit ?? "").trim();
+    const extra = [];
+    if (Number(spec.scale)) extra.push(`scale ${spec.scale}`);
+    if (spec.step !== undefined && Number(spec.step) !== 1) extra.push(`step ${spec.step}`);
+    return `${spec.min ?? "?"}–${spec.max ?? "?"}${unit ? ` ${unit}` : ""}` +
+      (extra.length ? ` · ${extra.join(" · ")}` : "");
+  }
+  return Object.keys(spec).length ? String(raw) : "";
+}
+function dpValue(row) {
+  if (!row.hasValue || row.value === null) return dash();
+  const value = row.value;
+  if (typeof value === "object") return `<code class="mono">${esc(JSON.stringify(value))}</code>`;
+  const text = String(value);
+  return text === "" ? dash() : copyable(text, true);
+}
+
+// dp id + code + current value on one line, the specification underneath.
+function dpSection(d) {
+  const rows = dpRows(d);
+  if (!rows.length) return "";
+  const items = rows.map(r => {
+    const meta = [
+      r.type,
+      { R: "read-only", W: "write-only", RW: "read/write" }[r.access] || "",
+      dpRange(r.values, r.type),
+      r.reportType,
+    ].filter(Boolean).map(esc).join(" · ");
+    return `<li><div class="dp-head">` +
+      `<span class="dp-id mono" title="Local data point id">${r.dpId === undefined ? "—" : esc(r.dpId)}</span>` +
+      `<span class="dp-code mono"${r.hint ? ` title="${esc(r.hint)}"` : ""}>${esc(r.code)}</span>` +
+      `<span class="dp-val">${dpValue(r)}</span></div>` +
+      (meta ? `<div class="dp-meta">${meta}</div>` : "") + `</li>`;
+  }).join("");
+  return section(`Data points (${rows.length})`, `<ul class="dps">${items}</ul>`);
+}
+
+// Escape hatch for anything the sections above don't cover. The displayed copy
+// respects the local-key toggle; the copy button always yields the real values.
+function rawSection(d) {
+  const full = JSON.stringify(d, null, 2);
+  const masked = localKeysVisible || !d.local_key
+    ? full
+    : JSON.stringify({ ...d, local_key: keyDisplay(d.local_key, false) }, null, 2);
+  return `<details class="raw"><summary>Raw JSON</summary>` +
+    `<div class="raw-actions"><button type="button" data-copy="${esc(full)}">Copy JSON</button></div>` +
+    `<pre class="mono">${esc(masked)}</pre></details>`;
+}
+
+$("panelClose").innerHTML = icon("close");
+$("panelClose").onclick = closePanel;
+$("scrim").onclick = closePanel;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePanel(); });
 
 // filter
 $("filter").oninput = (e) => { filterText = e.target.value.toLowerCase(); renderRows(computeList()); };
@@ -515,9 +883,23 @@ $("logoutBtn").onclick = async () => {
   deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; refreshStatus(""); stopCacheStatusTimer(); show("login");
 };
 
+// Every flat field of the fetched devices, in the order the server sent them.
+function csvColumns() {
+  const skip = new Set(["epochs", ...SPEC_KEYS]);
+  const cols = [];
+  for (const d of deviceData) {
+    for (const [key, value] of Object.entries(d)) {
+      if (skip.has(key) || cols.includes(key)) continue;
+      if (value !== null && typeof value === "object") continue;   // specs don't fit a cell
+      cols.push(key);
+    }
+  }
+  return cols;
+}
+
 // CSV export (client-side) — respects the current filter + sort order
 $("csvBtn").onclick = () => {
-  const cols = ["name","id","uuid","local_key","product_id","product_name","category","ip","online","update_time","active_time","create_time","time_zone","sub"];
+  const cols = csvColumns();
   const rows = [cols.join(",")].concat(computeList().map(d =>
     cols.map(c => `"${String(d[c] ?? "").replace(/"/g,'""')}"`).join(",")));
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
