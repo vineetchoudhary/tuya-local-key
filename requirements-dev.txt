@@ -2,3 +2,7 @@
 pytest>=8.0
 pytest-cov>=5.0
 PyYAML>=6.0
+# Browser smoke tests (tests/test_ui.py). They also need a browser:
+#   python -m playwright install chromium
+# and skip themselves when one isn't available.
+playwright>=1.40

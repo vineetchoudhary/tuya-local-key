@@ -10,6 +10,7 @@ Tuya Local Key retrieves Smart Life / Tuya device local keys using QR-code login
 4. Scan the QR code with the Smart Life app.
 5. Tap Confirm login in the app.
 6. View, copy, filter, refresh, or export your devices.
+7. Select a device row to open a panel with its full details: identity, connectivity, timestamps, every data point with its local dp id and current value, and the raw JSON record.
 
 ## Finding Your User Code
 
