@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0
+- Added a device details panel. Select a device row to see every field the device-sharing SDK returns: identity, connectivity, account ids, timestamps, every data point with its local dp id and current value, and the raw JSON record.
+- Timestamps in the web UI now use your browser's timezone. The details panel also shows the UTC reading and the raw epoch. CSV export stay in UTC.
+- Moved UUID, category, IP address, and last-paired time out of the device table into the details panel.
+- Update `tuya-device-sharing-sdk`.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.7...v2.0
+
 ## 1.7
 - `AUTH_USERNAME` and `AUTH_PASSWORD` only apply to the direct port access. These are ignored under Home Assistant ingress.
 - **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v1.6...v1.7

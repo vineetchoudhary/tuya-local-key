@@ -64,6 +64,9 @@ SESSION_INVALID_ERROR_CODES = {
 }
 
 app = Flask(__name__)
+# Keep core.web_dict()'s field order (name/id/local key first, specs last); the
+# UI and the CSV export follow it.
+app.json.sort_keys = False
 
 # token -> login info, for in-flight logins (single-process; guarded by a lock).
 _pending = {}
