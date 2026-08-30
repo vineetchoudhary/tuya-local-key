@@ -104,6 +104,16 @@ The device table shows the columns you scan most; UUID, category, IP address, an
 
 Timestamps in the web UI use your browser's timezone, so the same list reads differently on different machines. CSV export and the CLI stay in UTC.
 
+## Bluetooth Devices
+
+Bluetooth-only devices show `-` in the Local Key column. This is not a bug in this tool. Tuya's device-sharing API does not return a `local_key` for them, so there is nothing to display. The SDK builds each device record straight from Tuya's response, so a field Tuya omits is simply absent. You can confirm this in the Raw JSON section of the details panel, where the `local_key` line is missing entirely rather than empty.
+
+Tuya documents `local_key` as the ["unique encrypted key of the specified device over LAN"](https://developer.tuya.com/en/docs/cloud/9f0ad495f5?id=Kfpa9zysx687w). A Bluetooth-only device has no LAN presence, and Tuya's [Bluetooth pairing docs](https://developer.tuya.com/en/docs/app-development/activator_ble_ios?id=Kcy2u7zj5hwkf) describe the connection as point-to-point between phone and device, so the app-side API this tool logs into has no LAN key to hand out.
+
+### Bluetooth Devices Behind a Gateway
+
+Pairing a Bluetooth device to a Tuya Bluetooth or SigMesh gateway makes a local key appear. That key belongs to the gateway, not to the device: every sub-device under the same gateway shows the same value, because sub-devices are reached over LAN through the gateway. Treat it as the gateway's key. It will not authenticate a direct Bluetooth connection to the device.
+
 ## Configuration
 
 | Environment variable | Default | Description |
@@ -210,3 +220,4 @@ The QR code expires within a minute or two. If it times out, start the login aga
 - Login timed out or QR expired: start the login again and scan promptly.
 - `session_invalid` or redirected back to login: the cached login expired; scan again.
 - No devices found: confirm the devices are paired in the Smart Life app under the same account.
+- Local key shows `-`: the device is Bluetooth-only. See [Bluetooth Devices](#bluetooth-devices).

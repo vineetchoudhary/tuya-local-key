@@ -22,6 +22,10 @@ Use the app configuration page to choose the QR scheme. The default is `smartlif
 
 The web UI caches the device list for 24 hours. Click Refresh to get the latest list from Tuya.
 
+## Bluetooth Devices
+
+Bluetooth-only devices show `-` in the Local Key column. Tuya's device-sharing API does not return a local key for them, so there is nothing to display. See [Bluetooth Devices](https://github.com/vineetchoudhary/tuya-local-key#bluetooth-devices) in the README for more information.
+
 ## Security
 
 The app exposes device `localKey` values after login. Keep access restricted to trusted Home Assistant users.
