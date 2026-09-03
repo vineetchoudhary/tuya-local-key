@@ -7,14 +7,13 @@ Endpoints (JSON unless noted):
   GET  /api/state           -> {"logged_in": bool}
   POST /api/login/start     -> {"token", "qr"} (qr is a data: PNG) | {"error"}
   POST /api/login/poll      -> {"status": "pending"|"confirmed"|"expired"}
-  GET  /api/devices         -> {"devices": [...], "cached_at": ts} | 401/502 {"error"}
+  GET  /api/devices         -> {"devices": [...], "cached_at": ts,
+                                "changes"?: {...}, "stale"?: true} | 401/502 {"error"}
   POST /api/logout          -> {"ok": true}
-
-Auth state (the device-sharing session) is cached at SESSION_FILE so it survives
-restarts; mount it on a volume in Docker.
 """
 
 import base64
+import hashlib
 import hmac
 import json
 import os
@@ -24,6 +23,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
 
+import device_cache
 import tuya_devices as core
 
 SESSION_FILE = os.environ.get(
@@ -54,6 +54,17 @@ AUTH_USERNAME = _setting("AUTH_USERNAME")
 AUTH_PASSWORD = _setting("AUTH_PASSWORD")
 
 DEVICE_CACHE_TTL_SECONDS = 24 * 60 * 60
+
+_SESSION_DIR = os.path.dirname(SESSION_FILE) or "."
+DEVICE_CACHE_FILE = os.environ.get(
+    "DEVICE_CACHE_FILE", os.path.join(_SESSION_DIR, "devices.cache")
+)
+DEVICE_CACHE_KEY_FILE = os.environ.get(
+    "DEVICE_CACHE_KEY_FILE", os.path.join(_SESSION_DIR, "cache.key")
+)
+DEVICE_CACHE_PERSIST = _setting("DEVICE_CACHE", "on").lower() not in {
+    "off", "0", "false", "no",
+}
 SESSION_INVALID_ERROR_CODES = {
     "1002",  # access_token is null
     "1010",  # token is expired
@@ -73,6 +84,7 @@ _pending = {}
 _lock = threading.Lock()
 PENDING_LOGIN_TTL_SECONDS = 180
 _devices_cache = None
+_devices_cache_loaded = False
 _devices_cache_lock = threading.Lock()
 _devices_fetch_lock = threading.Lock()
 
@@ -88,22 +100,46 @@ def _cleanup_pending(now=None):
 
 
 def _session_cache_key(session):
-    return (
+    """Identity of the logged-in session, digested.
+
+    Hashed rather than kept as-is because it is stored with the cache, and the
+    identity includes the account's user code.
+    """
+    identity = json.dumps([
         SESSION_FILE,
         session.get("client_id"),
         session.get("user_code"),
         session.get("terminal_id"),
         session.get("endpoint"),
-    )
+    ])
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _load_persisted_cache():
+    global _devices_cache, _devices_cache_loaded
+    if _devices_cache_loaded:
+        return
+    _devices_cache_loaded = True
+    if not DEVICE_CACHE_PERSIST:
+        # Turning the setting off should take any list already stored with it,
+        # not leave one sitting there until the next logout.
+        device_cache.clear(DEVICE_CACHE_FILE, DEVICE_CACHE_KEY_FILE)
+        return
+    if _devices_cache is not None:
+        return
+    _devices_cache = device_cache.load(DEVICE_CACHE_FILE, DEVICE_CACHE_KEY_FILE)
 
 
 def _clear_devices_cache():
-    global _devices_cache
+    global _devices_cache, _devices_cache_loaded
     with _devices_cache_lock:
         _devices_cache = None
+        _devices_cache_loaded = True  # nothing left on disk worth reading
+        device_cache.clear(DEVICE_CACHE_FILE, DEVICE_CACHE_KEY_FILE)
 
 
 def _devices_cache_for_session(session):
+    _load_persisted_cache()
     if not _devices_cache:
         return None
     if _devices_cache["session_key"] != _session_cache_key(session):
@@ -118,6 +154,15 @@ def _cached_devices_response(session, now):
     if now - cache["cached_at"] >= DEVICE_CACHE_TTL_SECONDS:
         return None
     return cache["body"]
+
+
+def _snapshot_body(cache, refresh, reason):
+    body = dict(cache["body"])
+    body["stale"] = True
+    body["stale_reason"] = reason
+    if refresh:
+        body["refresh_failed"] = True
+    return body
 
 
 def _is_session_invalid_error(error):
@@ -237,7 +282,7 @@ def login_poll():
 
 @app.get("/api/devices")
 def devices():
-    global _devices_cache
+    global _devices_cache, _devices_cache_loaded
     session = core.load_session(SESSION_FILE)
     if not session:
         return jsonify({"error": "not_logged_in"}), 401
@@ -260,32 +305,42 @@ def devices():
                 cached = _cached_devices_response(session, request_start)
                 if cached:
                     return jsonify(cached)
-            stale_cache = cache
+            previous = cache
 
         try:
             devs = core.devices_from_session(session, SESSION_FILE)
         except Exception as e:
-            if _is_session_invalid_error(e):
+            invalid = _is_session_invalid_error(e)
+            if previous:
+                return jsonify(_snapshot_body(
+                    previous, refresh, "session_invalid" if invalid else "fetch_failed"
+                ))
+            if invalid:
                 _clear_devices_cache()
                 return jsonify({"error": "session_invalid"}), 401
-            if refresh and stale_cache:
-                body = dict(stale_cache["body"])
-                body["refresh_failed"] = True
-                return jsonify(body)
             return jsonify({"error": "fetch_failed"}), 502
 
         now = time.time()
+        listed = [core.web_dict(d) for d in devs]
         body = {
-            "devices": [core.web_dict(d) for d in devs],
+            "devices": listed,
             "cached_at": now,
             "cache_expires_at": now + DEVICE_CACHE_TTL_SECONDS,
         }
+        if previous:
+            changes = core.diff_devices(previous["body"].get("devices", []), listed)
+            if any(changes.values()):
+                body["changes"] = changes
+        entry = {
+            "body": body,
+            "cached_at": now,
+            "session_key": _session_cache_key(session),
+        }
         with _devices_cache_lock:
-            _devices_cache = {
-                "body": body,
-                "cached_at": now,
-                "session_key": _session_cache_key(session),
-            }
+            _devices_cache = entry
+            _devices_cache_loaded = True
+        if DEVICE_CACHE_PERSIST:
+            device_cache.save(DEVICE_CACHE_FILE, DEVICE_CACHE_KEY_FILE, entry)
         return jsonify(body)
 
 

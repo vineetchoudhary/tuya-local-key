@@ -66,31 +66,42 @@ def load_session(path):
         return None
 
 
+def atomic_write(path, data, prefix=".tmp-"):
+    """Write `data` (bytes) to `path` atomically, mode 600.
+
+    Temp file + fsync + os.replace, so a crash mid-write can't leave a partial
+    file where a session or a device cache is expected. Everything written this
+    way holds secrets, hence 600.
+    """
+    path = os.fspath(path)
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=prefix, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+        os.replace(tmp, path)  # atomic on POSIX
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 _session_write_lock = threading.Lock()
 
 
 def save_session(path, session):
-    path = os.fspath(path)
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
+    payload = json.dumps(session, indent=2).encode("utf-8")
     with _session_write_lock:
-        fd, tmp = tempfile.mkstemp(dir=directory, prefix=".session-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(session, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            try:
-                os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)  # 600: tokens are sensitive
-            except OSError:
-                pass
-            os.replace(tmp, path)  # atomic on POSIX
-        except BaseException:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-            raise
+        atomic_write(path, payload, prefix=".session-")
 
 
 class _SessionSaver:
@@ -348,6 +359,47 @@ def web_dict(device):
     if epochs:
         data["epochs"] = epochs
     return data
+
+
+# --------------------------------------------------------------------------- #
+# Comparing two device lists
+# --------------------------------------------------------------------------- #
+def diff_devices(previous, current):
+    """What changed between two web_dict() lists, keyed by device id.
+
+    A rotated local_key gets its own bucket because it is the change that
+    silently breaks anything holding the old one — LocalTuya, tinytuya,
+    tuya-local all just stop decrypting. Renames are tracked alongside it only
+    so a changed device is recognisable by the name you know it under.
+
+    Key values never appear in the result, just the fact that one moved.
+    """
+    before = {d.get("id"): d for d in previous if d.get("id")}
+    after = {d.get("id"): d for d in current if d.get("id")}
+    changes = {"key_changed": [], "added": [], "removed": [], "renamed": []}
+
+    for device_id, device in after.items():
+        was = before.get(device_id)
+        name = device.get("name") or ""
+        if was is None:
+            changes["added"].append({"id": device_id, "name": name})
+            continue
+        if was.get("local_key") != device.get("local_key"):
+            changes["key_changed"].append({"id": device_id, "name": name})
+        if (was.get("name") or "") != name:
+            changes["renamed"].append(
+                {"id": device_id, "name": name, "was": was.get("name") or ""}
+            )
+
+    for device_id, device in before.items():
+        if device_id not in after:
+            changes["removed"].append(
+                {"id": device_id, "name": device.get("name") or ""}
+            )
+
+    for entries in changes.values():
+        entries.sort(key=lambda e: (e["name"].lower(), e["id"]))
+    return changes
 
 
 def print_devices(devices):

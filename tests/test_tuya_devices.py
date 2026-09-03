@@ -571,3 +571,115 @@ def test_logout_reports_missing_cached_session(tmp_path, capsys):
     core.main(["--logout", "--session", str(tmp_path / "missing.json")])
 
     assert "No cached session to remove." in capsys.readouterr().out
+
+
+def test_atomic_write_replaces_content_at_owner_only_mode(tmp_path):
+    import os
+    import stat
+
+    path = tmp_path / "secret.bin"
+    core.atomic_write(path, b"first")
+    core.atomic_write(path, b"second")
+
+    assert path.read_bytes() == b"second"
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert [p.name for p in tmp_path.iterdir()] == ["secret.bin"]
+
+
+def test_atomic_write_creates_missing_directories(tmp_path):
+    path = tmp_path / "nested" / "dir" / "secret.bin"
+
+    core.atomic_write(path, b"data")
+
+    assert path.read_bytes() == b"data"
+
+
+# --------------------------------------------------------------------------- #
+# diff_devices
+# --------------------------------------------------------------------------- #
+def _dev(device_id, name, key="key"):
+    return {"id": device_id, "name": name, "local_key": key}
+
+
+EMPTY_DIFF = {"key_changed": [], "added": [], "removed": [], "renamed": []}
+
+
+def test_diff_reports_nothing_for_an_unchanged_list():
+    devices = [_dev("a", "Plug"), _dev("b", "Lamp")]
+
+    assert core.diff_devices(devices, list(devices)) == EMPTY_DIFF
+
+
+def test_diff_reports_a_rotated_local_key():
+    before = [_dev("a", "Kitchen Plug", "old-key")]
+    after = [_dev("a", "Kitchen Plug", "new-key")]
+
+    changes = core.diff_devices(before, after)
+
+    assert changes["key_changed"] == [{"id": "a", "name": "Kitchen Plug"}]
+    assert changes["added"] == changes["removed"] == changes["renamed"] == []
+
+
+def test_diff_never_includes_the_key_values():
+    before = [_dev("a", "Kitchen Plug", "old-secret")]
+    after = [_dev("a", "Kitchen Plug", "new-secret")]
+
+    rendered = json.dumps(core.diff_devices(before, after))
+
+    assert "old-secret" not in rendered
+    assert "new-secret" not in rendered
+
+
+def test_diff_reports_added_and_removed_devices():
+    changes = core.diff_devices([_dev("a", "Gone")], [_dev("b", "Fresh")])
+
+    assert changes["added"] == [{"id": "b", "name": "Fresh"}]
+    assert changes["removed"] == [{"id": "a", "name": "Gone"}]
+    assert changes["key_changed"] == []
+
+
+def test_diff_reports_a_rename_with_the_previous_name():
+    changes = core.diff_devices([_dev("a", "Lamp")], [_dev("a", "Bedroom Lamp")])
+
+    assert changes["renamed"] == [{"id": "a", "name": "Bedroom Lamp", "was": "Lamp"}]
+
+
+def test_diff_reports_a_rename_and_a_key_rotation_together():
+    changes = core.diff_devices(
+        [_dev("a", "Lamp", "old")], [_dev("a", "Bedroom Lamp", "new")]
+    )
+
+    assert changes["key_changed"] == [{"id": "a", "name": "Bedroom Lamp"}]
+    assert changes["renamed"] == [{"id": "a", "name": "Bedroom Lamp", "was": "Lamp"}]
+
+
+def test_diff_treats_a_bluetooth_device_gaining_a_gateway_key_as_a_change():
+    """Tuya omits local_key entirely for Bluetooth-only devices."""
+    before = [{"id": "a", "name": "BT Sensor"}]
+    after = [_dev("a", "BT Sensor", "gateway-key")]
+
+    assert core.diff_devices(before, after)["key_changed"] == [
+        {"id": "a", "name": "BT Sensor"}
+    ]
+    assert core.diff_devices(before, list(before)) == EMPTY_DIFF
+
+
+def test_diff_ignores_records_without_an_id():
+    changes = core.diff_devices([{"name": "No id"}], [{"name": "Still no id"}])
+
+    assert changes == EMPTY_DIFF
+
+
+def test_diff_sorts_each_bucket_by_name():
+    before = []
+    after = [_dev("c", "zeta"), _dev("a", "Alpha"), _dev("b", "middle")]
+
+    assert [e["name"] for e in core.diff_devices(before, after)["added"]] == [
+        "Alpha", "middle", "zeta",
+    ]
+
+
+def test_diff_handles_a_missing_name():
+    changes = core.diff_devices([], [{"id": "a"}])
+
+    assert changes["added"] == [{"id": "a", "name": ""}]

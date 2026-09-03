@@ -14,7 +14,7 @@ def test_home_assistant_metadata_matches_release_image():
 
     assert repository["name"] == "Tuya Local Key"
     assert config["slug"] == "tuya_local_key"
-    assert config["version"] == "2.0"
+    assert config["version"] == "2.1"
     assert config["image"] == "ghcr.io/vineetchoudhary/tuya-local-key"
     assert "legacy" not in config
     assert config["arch"] == ["aarch64", "amd64"]
@@ -25,7 +25,9 @@ def test_home_assistant_metadata_matches_release_image():
     assert config["environment"]["QR_SCHEME"] == "smartlife"
     assert config["environment"]["PORT"] == "8000"
     assert config["options"]["QR_SCHEME"] == "smartlife"
+    assert config["options"]["DEVICE_CACHE"] == "on"
     assert config["schema"]["QR_SCHEME"] == "list(smartlife|tuyaSmart)"
+    assert config["schema"]["DEVICE_CACHE"] == "list(on|off)"
     assert config["schema"]["AUTH_USERNAME"] == "str?"
     assert config["schema"]["AUTH_PASSWORD"] == "password?"
 
@@ -64,6 +66,8 @@ def test_dockerfile_has_home_assistant_labels_and_runtime_contract():
     assert "PYTHONDONTWRITEBYTECODE=1" in dockerfile
     assert "USER appuser" not in dockerfile
     assert "SESSION_FILE=/data/session.json" in dockerfile
+    assert "device_cache.py" in dockerfile
+    assert 'VOLUME ["/data"]' in dockerfile
     assert "waitress-serve --listen=0.0.0.0:${PORT:-8000}" in dockerfile
 
 

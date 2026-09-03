@@ -21,7 +21,7 @@ COPY requirements.txt requirements-web.txt ./
 RUN pip install -r requirements-web.txt
 
 # App
-COPY tuya_devices.py app.py ./
+COPY tuya_devices.py app.py device_cache.py ./
 COPY templates ./templates
 COPY tuya_local_key/icon.png ./tuya_local_key/icon.png
 

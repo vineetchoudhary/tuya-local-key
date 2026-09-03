@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import threading
 import time
@@ -334,18 +335,13 @@ def test_session_invalid_error_classifier_ignores_retry_or_config_errors(webapp,
     assert webapp._is_session_invalid_error(error) is False
 
 
-def test_devices_returns_session_invalid_for_auth_errors(webapp, monkeypatch):
-    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
-    with webapp._devices_cache_lock:
-        webapp._devices_cache = {
-            "body": {"devices": [{"name": "Old Device"}]},
-            "cached_at": time.time(),
-            "session_key": webapp._session_cache_key({"token_info": {}}),
-        }
+class TokenExpiredError(Exception):
+    error_code = "-9999999"
+    error_message = "sign invalid"
 
-    class TokenExpiredError(Exception):
-        error_code = "-9999999"
-        error_message = "sign invalid"
+
+def test_devices_returns_session_invalid_when_there_is_no_snapshot(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
 
     def fail_devices_from_session(session, session_file):
         raise TokenExpiredError()
@@ -357,6 +353,31 @@ def test_devices_returns_session_invalid_for_auth_errors(webapp, monkeypatch):
     assert response.status_code == 401
     assert response.json == {"error": "session_invalid"}
     assert webapp._devices_cache is None
+
+
+def test_expired_session_still_serves_the_snapshot(webapp, monkeypatch):
+    """Local keys outlive the login, so an expired session shows the saved list."""
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    with webapp._devices_cache_lock:
+        webapp._devices_cache = {
+            "body": {"devices": [{"name": "Old Device"}]},
+            "cached_at": time.time(),
+            "session_key": webapp._session_cache_key({"token_info": {}}),
+        }
+
+    def fail_devices_from_session(session, session_file):
+        raise TokenExpiredError()
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fail_devices_from_session)
+
+    response = webapp.app.test_client().get("/api/devices?refresh=1")
+
+    assert response.status_code == 200
+    assert response.json["devices"] == [{"name": "Old Device"}]
+    assert response.json["stale"] is True
+    assert response.json["stale_reason"] == "session_invalid"
+    assert response.json["refresh_failed"] is True
+    assert webapp._devices_cache is not None, "the saved keys are still good"
 
 
 def test_devices_response_keeps_field_order(webapp, monkeypatch):
@@ -501,14 +522,18 @@ def test_devices_refresh_failure_returns_stale_cache(webapp, monkeypatch):
     response = webapp.app.test_client().get("/api/devices?refresh=1")
 
     assert response.status_code == 200
-    assert response.json == {**cached_body, "refresh_failed": True}
+    assert response.json == {
+        **cached_body, "stale": True, "stale_reason": "fetch_failed", "refresh_failed": True,
+    }
     assert webapp._devices_cache["body"] == cached_body
 
 
 def test_devices_uses_fetch_completion_time_for_cache(webapp, monkeypatch):
     webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
-    times = iter([1_000.0, 1_005.0])
-    monkeypatch.setattr(webapp.time, "time", lambda: next(times))
+    # Request start, then fetch completion; anything after (the cache write
+    # stamps its own token) keeps the last reading.
+    times = [1_000.0, 1_005.0]
+    monkeypatch.setattr(webapp.time, "time", lambda: times.pop(0) if len(times) > 1 else times[0])
     monkeypatch.setattr(
         webapp.core,
         "devices_from_session",
@@ -576,3 +601,368 @@ def test_logout_ok_when_session_file_is_missing(webapp):
 
     assert response.status_code == 200
     assert response.json == {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# The device list on disk (see device_cache)
+# --------------------------------------------------------------------------- #
+def _serve_devices(webapp, monkeypatch, calls, name="Kitchen Plug", key="s3cret-key"):
+    """Log the fixture in and count how often the list is fetched from Tuya."""
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+
+    def fake_devices_from_session(session, session_file):
+        calls.append(session_file)
+        return [SimpleNamespace(name=name, local_key=key)]
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fake_devices_from_session)
+    monkeypatch.setattr(
+        webapp.core, "web_dict", lambda d: {"name": d.name, "local_key": d.local_key}
+    )
+
+
+def _restart(webapp):
+    """Reload the module, so only what reached disk survives."""
+    restarted = importlib.reload(webapp)
+    restarted.app.config.update(TESTING=True)
+    return restarted
+
+
+def test_devices_survive_a_restart(webapp, monkeypatch):
+    calls = []
+    _serve_devices(webapp, monkeypatch, calls)
+    first = webapp.app.test_client().get("/api/devices")
+
+    second = _restart(webapp).app.test_client().get("/api/devices")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json == first.json
+    assert len(calls) == 1, "the stored list should serve the restart"
+
+
+def test_stored_devices_are_encrypted_at_rest(webapp, monkeypatch):
+    _serve_devices(webapp, monkeypatch, [])
+    webapp.app.test_client().get("/api/devices")
+
+    blob = Path(webapp.DEVICE_CACHE_FILE).read_bytes()
+
+    assert b"s3cret-key" not in blob
+    assert b"Kitchen Plug" not in blob
+
+
+def test_stored_devices_are_ignored_after_switching_accounts(webapp, monkeypatch):
+    calls = []
+    _serve_devices(webapp, monkeypatch, calls)
+    webapp.app.test_client().get("/api/devices")
+    assert os.path.exists(webapp.DEVICE_CACHE_FILE)
+
+    webapp.core.save_session(
+        os.environ["SESSION_FILE"], {"user_code": "somebody-else", "token_info": {}}
+    )
+    response = _restart(webapp).app.test_client().get("/api/devices")
+
+    assert response.status_code == 200
+    assert len(calls) == 2, "another account's list must not be served"
+
+
+def test_unreadable_stored_devices_fall_back_to_a_fetch(webapp, monkeypatch):
+    calls = []
+    _serve_devices(webapp, monkeypatch, calls)
+    webapp.app.test_client().get("/api/devices")
+    assert os.path.exists(webapp.DEVICE_CACHE_FILE)
+    Path(webapp.DEVICE_CACHE_FILE).write_bytes(b"not a fernet token")
+
+    response = _restart(webapp).app.test_client().get("/api/devices")
+
+    assert response.status_code == 200
+    assert response.json["devices"] == [{"name": "Kitchen Plug", "local_key": "s3cret-key"}]
+    assert len(calls) == 2
+
+
+def test_stored_devices_expire_after_24_hours(webapp, monkeypatch):
+    calls = []
+    now = [1_000.0]
+    monkeypatch.setattr(webapp.time, "time", lambda: now[0])
+    _serve_devices(webapp, monkeypatch, calls)
+    webapp.app.test_client().get("/api/devices")
+    assert os.path.exists(webapp.DEVICE_CACHE_FILE)
+
+    now[0] += webapp.DEVICE_CACHE_TTL_SECONDS + 1
+    restarted = _restart(webapp)
+    monkeypatch.setattr(restarted.time, "time", lambda: now[0])
+    response = restarted.app.test_client().get("/api/devices")
+
+    assert response.status_code == 200
+    assert len(calls) == 2, "a stored list past its TTL must be refetched"
+
+
+def test_logout_removes_the_stored_devices_and_their_key(webapp, monkeypatch):
+    _serve_devices(webapp, monkeypatch, [])
+    webapp.app.test_client().get("/api/devices")
+    assert os.path.exists(webapp.DEVICE_CACHE_FILE)
+
+    response = webapp.app.test_client().post("/api/logout")
+
+    assert response.status_code == 200
+    assert not os.path.exists(webapp.DEVICE_CACHE_FILE)
+    assert not os.path.exists(webapp.DEVICE_CACHE_KEY_FILE)
+
+
+def test_confirmed_login_removes_the_previous_stored_devices(webapp, monkeypatch):
+    _serve_devices(webapp, monkeypatch, [])
+    webapp.app.test_client().get("/api/devices")
+    assert os.path.exists(webapp.DEVICE_CACHE_FILE)
+
+    monkeypatch.setattr(
+        webapp.core, "poll_login",
+        lambda token, user_code: {"user_code": user_code, "token_info": {}},
+    )
+    with webapp._lock:
+        webapp._pending["demo-token"] = {
+            "user_code": "user-code",
+            "created_at": time.time(),
+        }
+
+    response = webapp.app.test_client().post(
+        "/api/login/poll", json={"token": "demo-token"}
+    )
+
+    assert response.json == {"status": "confirmed"}
+    assert not os.path.exists(webapp.DEVICE_CACHE_FILE)
+    assert not os.path.exists(webapp.DEVICE_CACHE_KEY_FILE)
+
+
+def test_device_cache_off_keeps_the_list_in_memory_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("SESSION_FILE", str(tmp_path / "session.json"))
+    monkeypatch.setenv("HASS_OPTIONS_FILE", str(tmp_path / "missing-options.json"))
+    monkeypatch.setenv("DEVICE_CACHE", "off")
+    import app
+
+    app = importlib.reload(app)
+    app.app.config.update(TESTING=True)
+    calls = []
+    _serve_devices(app, monkeypatch, calls)
+
+    client = app.app.test_client()
+    first = client.get("/api/devices")
+    second = client.get("/api/devices")
+
+    assert first.status_code == 200
+    assert second.json == first.json
+    assert len(calls) == 1, "the in-memory cache still applies"
+    assert not os.path.exists(app.DEVICE_CACHE_FILE)
+    assert not os.path.exists(app.DEVICE_CACHE_KEY_FILE)
+
+
+def test_turning_the_device_cache_off_removes_an_existing_one(webapp, monkeypatch, tmp_path):
+    _serve_devices(webapp, monkeypatch, [])
+    webapp.app.test_client().get("/api/devices")
+    assert os.path.exists(webapp.DEVICE_CACHE_FILE)
+
+    monkeypatch.setenv("DEVICE_CACHE", "off")
+    restarted = _restart(webapp)
+    _serve_devices(restarted, monkeypatch, [])
+    response = restarted.app.test_client().get("/api/devices")
+
+    assert response.status_code == 200
+    assert not os.path.exists(restarted.DEVICE_CACHE_FILE)
+    assert not os.path.exists(restarted.DEVICE_CACHE_KEY_FILE)
+
+
+def test_device_cache_paths_default_beside_the_session(webapp, tmp_path):
+    assert webapp.DEVICE_CACHE_FILE == str(tmp_path / "devices.cache")
+    assert webapp.DEVICE_CACHE_KEY_FILE == str(tmp_path / "cache.key")
+
+
+def test_session_cache_key_does_not_leak_the_user_code(webapp):
+    key = webapp._session_cache_key({"user_code": "abcdef123456", "token_info": {}})
+
+    assert "abcdef123456" not in key
+    assert key != webapp._session_cache_key({"user_code": "other", "token_info": {}})
+
+
+# --------------------------------------------------------------------------- #
+# Change detection and the offline snapshot
+# --------------------------------------------------------------------------- #
+def _serve_changing_devices(webapp, monkeypatch, rounds):
+    """Return a different device list on each fetch, from `rounds`."""
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    remaining = list(rounds)
+
+    def fake_devices_from_session(session, session_file):
+        return [SimpleNamespace(**d) for d in remaining.pop(0)]
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fake_devices_from_session)
+    monkeypatch.setattr(
+        webapp.core, "web_dict",
+        lambda d: {"name": d.name, "id": d.id, "local_key": d.local_key},
+    )
+
+
+def test_first_fetch_reports_no_changes(webapp, monkeypatch):
+    _serve_changing_devices(webapp, monkeypatch, [
+        [{"id": "a", "name": "Plug", "local_key": "k1"}],
+    ])
+
+    response = webapp.app.test_client().get("/api/devices")
+
+    assert response.status_code == 200
+    assert "changes" not in response.json, "nothing to compare a first list against"
+
+
+def test_refresh_reports_a_rotated_local_key(webapp, monkeypatch):
+    _serve_changing_devices(webapp, monkeypatch, [
+        [{"id": "a", "name": "Kitchen Plug", "local_key": "k1"}],
+        [{"id": "a", "name": "Kitchen Plug", "local_key": "ROTATED"}],
+    ])
+    client = webapp.app.test_client()
+    client.get("/api/devices")
+
+    response = client.get("/api/devices?refresh=1")
+
+    assert response.json["changes"]["key_changed"] == [
+        {"id": "a", "name": "Kitchen Plug"}
+    ]
+    assert "ROTATED" not in json.dumps(response.json["changes"])
+
+
+def test_refresh_reports_added_removed_and_renamed(webapp, monkeypatch):
+    _serve_changing_devices(webapp, monkeypatch, [
+        [{"id": "a", "name": "Lamp", "local_key": "k1"},
+         {"id": "b", "name": "Gone", "local_key": "k2"}],
+        [{"id": "a", "name": "Bedroom Lamp", "local_key": "k1"},
+         {"id": "c", "name": "New Sensor", "local_key": "k3"}],
+    ])
+    client = webapp.app.test_client()
+    client.get("/api/devices")
+
+    changes = client.get("/api/devices?refresh=1").json["changes"]
+
+    assert changes["added"] == [{"id": "c", "name": "New Sensor"}]
+    assert changes["removed"] == [{"id": "b", "name": "Gone"}]
+    assert changes["renamed"] == [{"id": "a", "name": "Bedroom Lamp", "was": "Lamp"}]
+    assert changes["key_changed"] == []
+
+
+def test_an_unchanged_refresh_reports_nothing(webapp, monkeypatch):
+    same = [{"id": "a", "name": "Plug", "local_key": "k1"}]
+    _serve_changing_devices(webapp, monkeypatch, [same, list(same)])
+    client = webapp.app.test_client()
+    client.get("/api/devices")
+
+    assert "changes" not in client.get("/api/devices?refresh=1").json
+
+
+def test_changes_are_compared_against_the_stored_list_across_a_restart(webapp, monkeypatch):
+    _serve_changing_devices(webapp, monkeypatch, [
+        [{"id": "a", "name": "Kitchen Plug", "local_key": "k1"}],
+        [{"id": "a", "name": "Kitchen Plug", "local_key": "ROTATED"}],
+    ])
+    webapp.app.test_client().get("/api/devices")
+
+    restarted = _restart(webapp)
+    response = restarted.app.test_client().get("/api/devices?refresh=1")
+
+    assert response.json["changes"]["key_changed"] == [
+        {"id": "a", "name": "Kitchen Plug"}
+    ]
+
+
+def test_changes_survive_a_reload_of_the_page(webapp, monkeypatch):
+    """The notice outlives the response that discovered it, until the next refresh."""
+    _serve_changing_devices(webapp, monkeypatch, [
+        [{"id": "a", "name": "Kitchen Plug", "local_key": "k1"}],
+        [{"id": "a", "name": "Kitchen Plug", "local_key": "ROTATED"}],
+    ])
+    client = webapp.app.test_client()
+    client.get("/api/devices")
+    client.get("/api/devices?refresh=1")
+
+    assert client.get("/api/devices").json["changes"]["key_changed"]
+
+
+def test_switching_accounts_does_not_report_every_device_as_added(webapp, monkeypatch):
+    _serve_changing_devices(webapp, monkeypatch, [
+        [{"id": "a", "name": "Plug", "local_key": "k1"}],
+        [{"id": "z", "name": "Other Account Plug", "local_key": "k9"}],
+    ])
+    webapp.app.test_client().get("/api/devices")
+
+    webapp.core.save_session(
+        os.environ["SESSION_FILE"], {"user_code": "somebody-else", "token_info": {}}
+    )
+    response = _restart(webapp).app.test_client().get("/api/devices")
+
+    assert response.status_code == 200
+    assert "changes" not in response.json
+
+
+def test_an_unreachable_tuya_serves_the_snapshot_instead_of_a_502(webapp, monkeypatch):
+    calls = []
+    _serve_devices(webapp, monkeypatch, calls)
+    first = webapp.app.test_client().get("/api/devices")
+
+    restarted = _restart(webapp)
+    monkeypatch.setattr(
+        restarted.core, "devices_from_session",
+        lambda session, path: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+    response = restarted.app.test_client().get("/api/devices?refresh=1")
+
+    assert response.status_code == 200
+    assert response.json["devices"] == first.json["devices"]
+    assert response.json["stale"] is True
+    assert response.json["stale_reason"] == "fetch_failed"
+
+
+def test_an_expired_snapshot_is_still_served_when_tuya_is_unreachable(webapp, monkeypatch):
+    """Past the TTL and offline: a stale list beats no list at all."""
+    now = [1_000.0]
+    monkeypatch.setattr(webapp.time, "time", lambda: now[0])
+    _serve_devices(webapp, monkeypatch, [])
+    first = webapp.app.test_client().get("/api/devices")
+
+    now[0] += webapp.DEVICE_CACHE_TTL_SECONDS + 1
+    restarted = _restart(webapp)
+    monkeypatch.setattr(restarted.time, "time", lambda: now[0])
+    monkeypatch.setattr(
+        restarted.core, "devices_from_session",
+        lambda session, path: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+    response = restarted.app.test_client().get("/api/devices")  # no refresh flag
+
+    assert response.status_code == 200
+    assert response.json["devices"] == first.json["devices"]
+    assert response.json["stale"] is True
+    assert "refresh_failed" not in response.json, "the user didn't ask for a refresh"
+
+
+def test_a_fetch_failure_without_a_snapshot_still_fails(webapp, monkeypatch):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+    monkeypatch.setattr(
+        webapp.core, "devices_from_session",
+        lambda session, path: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+
+    response = webapp.app.test_client().get("/api/devices")
+
+    assert response.status_code == 502
+    assert response.json == {"error": "fetch_failed"}
+
+
+def test_a_served_snapshot_is_never_written_back_as_fresh(webapp, monkeypatch):
+    _serve_devices(webapp, monkeypatch, [])
+    webapp.app.test_client().get("/api/devices")
+
+    restarted = _restart(webapp)
+    monkeypatch.setattr(
+        restarted.core, "devices_from_session",
+        lambda session, path: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+    restarted.app.test_client().get("/api/devices?refresh=1")
+
+    stored = restarted.device_cache.load(
+        restarted.DEVICE_CACHE_FILE, restarted.DEVICE_CACHE_KEY_FILE
+    )
+    assert "stale" not in stored["body"]
+    assert "refresh_failed" not in stored["body"]

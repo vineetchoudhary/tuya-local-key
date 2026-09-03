@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1
+- The device list is now stored on disk, so a restart or an app update shows your devices immediately instead of re-fetching them from Tuya.
+- The stored list is encrypted. It contains every local key in your account, so it is written with a key kept beside it and readable only by the app. Logging out deletes both, which also makes any copy of the file that survives elsewhere permanently unreadable.
+- Every refresh is now compared against the previous list. Devices added, removed, and renamed are summarised above the table, and so are local keys that changed. Changed rows are badged, and the filter matches the badge text.
+- When Tuya cannot be reached, or your login has expired, the saved device list is now shown as a labelled snapshot instead of an error or the login screen. Local keys do not expire with the login, so those keys are still good. Logging out still clears everything.
+- Added a `DEVICE_CACHE` setting. Set it to `off` to keep the device list in memory only, as in 2.0.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v2.0...v2.1
+
 ## 2.0
 - Added a device details panel. Select a device row to see every field the device-sharing SDK returns: identity, connectivity, account ids, timestamps, every data point with its local dp id and current value, and the raw JSON record.
 - Timestamps in the web UI now use your browser's timezone. The details panel also shows the UTC reading and the raw epoch. CSV export stay in UTC.

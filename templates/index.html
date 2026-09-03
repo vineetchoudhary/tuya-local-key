@@ -10,13 +10,13 @@
   :root {
     --bg: #f6f7f9; --card: #fff; --fg: #1c2530; --muted: #6b7684;
     --border: #e3e7ec; --accent: #2f6fed; --accent-fg: #fff;
-    --ok: #1a9d51; --off: #b03a3a; --code-bg: #f0f2f5;
+    --ok: #1a9d51; --off: #b03a3a; --warn: #8a5a00; --code-bg: #f0f2f5;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #12161c; --card: #1b2129; --fg: #e6eaef; --muted: #9aa5b1;
       --border: #2b333d; --accent: #4d86ff; --accent-fg: #fff;
-      --ok: #38c172; --off: #e06666; --code-bg: #232b34;
+      --ok: #38c172; --off: #e06666; --warn: #e3ab4f; --code-bg: #232b34;
     }
   }
   * { box-sizing: border-box; }
@@ -124,6 +124,42 @@
   .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
   .badge.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
   .badge.off { color: var(--off); background: color-mix(in srgb, var(--off) 14%, transparent); }
+  .muted { color: var(--muted); }
+  /* Notices above the table: what changed, and whether this list is a snapshot */
+  .notices { display: grid; gap: 10px; margin-bottom: 14px; }
+  .notices:empty { display: none; }
+  .notice {
+    display: flex; align-items: flex-start; gap: 10px; border-radius: 8px;
+    padding: 11px 13px; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+  }
+  .notice.warn {
+    border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+    background: color-mix(in srgb, var(--warn) 13%, transparent);
+  }
+  .notice .grow { flex: 1 1 auto; min-width: 0; }
+  .notice .notice-title { display: block; font-weight: 650; margin-bottom: 3px; }
+  .notice ul { margin: 0; padding: 0; list-style: none; }
+  .notice li + li { margin-top: 5px; }
+  .notice li.rotated { color: var(--warn); }
+  .notice button.primary { flex: 0 0 auto; padding: 6px 11px; font-size: 13px; }
+  .link-btn {
+    padding: 0; border: 0; background: none; font: inherit; font-weight: 600;
+    color: var(--accent); cursor: pointer; text-decoration: underline;
+  }
+  .link-btn:hover, .link-btn:focus-visible { color: var(--fg); }
+  .change-badge {
+    margin-left: 7px; font-size: 11px; font-weight: 700; letter-spacing: .03em;
+    padding: 1px 7px; border-radius: 999px; text-transform: uppercase;
+    color: var(--muted); background: var(--code-bg); white-space: nowrap;
+  }
+  .change-badge.key_changed {
+    color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent);
+  }
+  .change-badge.added {
+    color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent);
+  }
   .banner { background: color-mix(in srgb, var(--off) 14%, transparent); color: var(--off);
             border:1px solid var(--off); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:14px; }
   .hidden { display: none; }
@@ -259,6 +295,7 @@
 
   <!-- DEVICES -->
   <section id="devices" class="hidden">
+    <div class="notices" id="notices"></div>
     <div class="toolbar">
       <span class="count" id="count"></span>
       <span class="updated hidden" id="updated"></span>
@@ -302,12 +339,16 @@ let sortState = { key: null, dir: 1 };   // dir: 1 = ascending, -1 = descending
 let localKeysVisible = false;
 let searchIndex = new WeakMap();         // device -> lowercased haystack for the filter
 let selectedId = null;                   // device shown in the details panel
+let deviceChanges = null;                // what the last fetch found had changed
+let changeById = new Map();              // device id -> the change to badge its row with
+let snapshotReason = null;               // set when the list on screen couldn't be refreshed
 let panelOpener = null;                  // element to refocus when the panel closes
 
 // Column definitions drive both the header and the rows (kept in sync). The
 // fields left out here (uuid, category, specs, …) live in the details panel.
 const COLUMNS = [
-  { key: "name",         label: "Name",         sortable: true },
+  { key: "name",         label: "Name",         sortable: true,
+    render: d => esc(d.name) + changeBadge(d.id) },
   { key: "online",       label: "Status",       sortable: true, render: d => badge(d.online) },
   { key: "id",           label: "ID",           cls: "mono" },
   { key: "local_key",    label: "Local Key",    header: renderLocalKeyHeader, render: d => renderLocalKey(d.local_key) },
@@ -457,6 +498,8 @@ async function loadDevices(msg, inline, refresh) {
     if (!ok) {
       if (status === 401) {
         deviceData = [];
+        deviceChanges = snapshotReason = null;
+        indexChanges();
         refreshStatus("");
         stopCacheStatusTimer();
         if (body.error === "session_invalid") {
@@ -474,8 +517,11 @@ async function loadDevices(msg, inline, refresh) {
       return;
     }
     deviceData = body.devices || [];
-    indexDevices();
+    deviceChanges = body.changes || null;
+    snapshotReason = body.stale ? (body.stale_reason || "fetch_failed") : null;
     devicesCachedAt = body.cached_at || Date.now() / 1000;
+    indexChanges();
+    indexDevices();
     render();
     startCacheStatusTimer();
     if (body.refresh_failed) {
@@ -499,6 +545,93 @@ async function loadDevices(msg, inline, refresh) {
 function badge(on) {
   return `<span class="badge ${on ? "on" : "off"}">${on ? "online" : "offline"}</span>`;
 }
+
+// ---- what changed since the previous list ----
+// A rotated key is the change that silently breaks LocalTuya/tinytuya/tuya-local
+// setups, so it outranks a rename on the same row and leads the summary.
+const CHANGE_BADGES = { key_changed: "key changed", added: "new", renamed: "renamed" };
+const CHANGES_DISMISSED_KEY = "tuya-local-key.changes-dismissed";
+
+function indexChanges() {
+  changeById = new Map();
+  if (!deviceChanges) return;
+  for (const kind of ["renamed", "added", "key_changed"]) {   // last write wins
+    for (const entry of deviceChanges[kind] || []) changeById.set(entry.id, kind);
+  }
+}
+function changeBadge(id) {
+  const kind = changeById.get(id);
+  return kind ? `<span class="change-badge ${kind}">${CHANGE_BADGES[kind]}</span>` : "";
+}
+function dismissedChangesAt() {
+  try { return Number(localStorage.getItem(CHANGES_DISMISSED_KEY)) || 0; }
+  catch (e) { return 0; }   // private mode / storage blocked: just keep showing it
+}
+function dismissChanges() {
+  try { localStorage.setItem(CHANGES_DISMISSED_KEY, String(devicesCachedAt || 0)); }
+  catch (e) {}
+  renderNotices();
+}
+function plural(n, noun) { return `${n} ${noun}${n === 1 ? "" : "s"}`; }
+function deviceLink(entry) {
+  return `<button type="button" class="link-btn" data-open-device="${esc(entry.id)}">` +
+    `${esc(entry.name || entry.id)}</button>`;
+}
+function changeItems() {
+  const c = deviceChanges, items = [];
+  const links = (entries) => entries.map(deviceLink).join(", ");
+  const keys = c.key_changed || [];
+  if (keys.length) {
+    const it = keys.length === 1 ? "it" : "them";
+    items.push(`<li class="rotated"><b>${plural(keys.length, "local key")} changed</b> — ` +
+      `${links(keys)}. Anything still holding the old ` +
+      `${keys.length === 1 ? "key" : "keys"} will fail until you update ${it}.</li>`);
+  }
+  if ((c.added || []).length)
+    items.push(`<li>${plural(c.added.length, "device")} added — ${links(c.added)}.</li>`);
+  if ((c.removed || []).length)
+    items.push(`<li>${plural(c.removed.length, "device")} removed — ` +
+      `${c.removed.map(e => esc(e.name || e.id)).join(", ")}.</li>`);
+  if ((c.renamed || []).length)
+    items.push(`<li>${plural(c.renamed.length, "device")} renamed — ` +
+      `${c.renamed.map(e => `${deviceLink(e)} <span class="muted">(was ${esc(e.was)})</span>`)
+        .join(", ")}.</li>`);
+  return items;
+}
+function snapshotNotice() {
+  const age = formatCacheAge(devicesCachedAt);
+  const when = age === "now" ? "" : ` from ${age}`;
+  if (snapshotReason === "session_invalid") {
+    return `<div class="notice warn" data-snapshot="session_invalid"><div class="grow">` +
+      `<span class="notice-title">Your login expired</span>` +
+      `Showing the device list saved${when}. These keys are still the ones your devices ` +
+      `use — log in again to check for changes.</div>` +
+      `<button type="button" class="primary" data-relogin>Log in again</button></div>`;
+  }
+  return `<div class="notice warn" data-snapshot="fetch_failed"><div class="grow">` +
+    `<span class="notice-title">Could not reach Tuya</span>` +
+    `Showing the device list saved${when}. Try Refresh again in a moment.</div></div>`;
+}
+function renderNotices() {
+  const parts = [];
+  if (snapshotReason) parts.push(snapshotNotice());
+  if (deviceChanges && dismissedChangesAt() !== devicesCachedAt) {
+    parts.push(`<div class="notice" id="changesNotice"><div class="grow">` +
+      `<span class="notice-title">What changed since the previous list</span>` +
+      `<ul>${changeItems().join("")}</ul></div>` +
+      `<button type="button" class="icon-btn" data-dismiss-changes ` +
+      `aria-label="Dismiss" title="Dismiss">${icon("close")}</button></div>`);
+  }
+  $("notices").innerHTML = parts.join("");
+}
+
+$("notices").addEventListener("click", (e) => {
+  if (e.target.closest("[data-dismiss-changes]")) { dismissChanges(); return; }
+  // Re-login without logging out: the saved list stays put if the scan is abandoned.
+  if (e.target.closest("[data-relogin]")) { show("login"); return; }
+  const link = e.target.closest("[data-open-device]");
+  if (link) { panelOpener = link; openPanel(link.dataset.openDevice); }
+});
 function icon(name) {
   const icons = {
     eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
@@ -602,7 +735,9 @@ function indexDevices() {
   for (const d of deviceData) {
     // Local times are rendered, not sent, so add them to match what is on screen.
     const times = TIME_KEYS.map(key => localTime(d.epochs && d.epochs[key])).join(" ");
-    searchIndex.set(d, `${JSON.stringify(d)} ${times}`.toLowerCase());
+    // The change badge is rendered, not sent, so filtering on "key changed" works.
+    const change = CHANGE_BADGES[changeById.get(d.id)] || "";
+    searchIndex.set(d, `${JSON.stringify(d)} ${times} ${change}`.toLowerCase());
   }
 }
 
@@ -643,7 +778,7 @@ function renderRows(list) {
   }).join("");
 }
 
-function render() { renderHead(); renderRows(computeList()); renderPanel(); }
+function render() { renderNotices(); renderHead(); renderRows(computeList()); renderPanel(); }
 
 // sort on header click
 $("thead").addEventListener("click", (e) => {

@@ -20,7 +20,25 @@ In the Smart Life app, go to Me > Settings > Account and Security > User Code.
 
 Use the app configuration page to choose the QR scheme. The default is `smartlife`; switch to `tuyaSmart` if scanning or confirmation does not work for your account.
 
-The web UI caches the device list for 24 hours. Click Refresh to get the latest list from Tuya.
+`DEVICE_CACHE` controls whether the device list is stored. Leave it `on` to keep the list across restarts and app updates, or set it to `off` to hold the list in memory only.
+
+## Device List Cache
+
+The device list is cached for 24 hours and stored in the app's `/data` directory, so restarting or updating the app shows your devices immediately instead of re-fetching them from Tuya. Click Refresh to get the current list.
+
+That list contains every local key in your account, so it is encrypted at rest: `/data/devices.cache` holds the encrypted list and `/data/cache.key` holds the key that decrypts it. Both are readable only by the app. Logging out deletes both, which also makes any copy of `devices.cache` in an older Home Assistant backup permanently unreadable.
+
+This protects the cache file on its own, not the `/data` directory as a whole — the key sits beside the file it unlocks, and that directory already holds the session tokens that can fetch the same keys from Tuya. Home Assistant backups include `/data`, so treat a backup of this app as sensitive. Set `DEVICE_CACHE` to `off` if you would rather the device list never reach disk.
+
+### When Tuya Cannot Be Reached
+
+If a fetch fails, or your login has expired, the saved list is shown instead of an error and labelled as a snapshot. Local keys do not expire with the login, so those keys are still the ones your devices use, and the notice offers to log in again rather than dropping you at the login screen with nothing. Logging out is what clears the saved list.
+
+## Change Detection
+
+Every refresh is compared against the list you saw before it. Devices added, removed, and renamed are summarised above the table, and so are local keys that changed.
+
+A rotated local key is the one worth watching for: Tuya changes it when a device is re-paired, and anything holding the old one, such as LocalTuya or tuya-local, stops working with no explanation. Changed rows are badged in the table, and the filter box matches the badge text, so typing `key changed` narrows the list to them.
 
 ## Bluetooth Devices
 
@@ -28,7 +46,7 @@ Bluetooth-only devices show `-` in the Local Key column. Tuya's device-sharing A
 
 ## Security
 
-The app exposes device `localKey` values after login. Keep access restricted to trusted Home Assistant users.
+The app exposes device `localKey` values after login. Keep access restricted to trusted Home Assistant users. The device list is also stored in `/data`, encrypted; see [Device List Cache](#device-list-cache).
 
 The direct `8000/tcp` port is disabled by default. Use Home Assistant ingress unless you intentionally enable the direct port.
 
