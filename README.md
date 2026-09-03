@@ -86,7 +86,7 @@ Then open `http://localhost:8000`.
 4. View, filter, copy, refresh, and export your devices.
 5. Select a device row to open its details panel.
 
-The web UI caches the device list for 24 hours and keeps it across restarts. Click Refresh to get the latest list from Tuya. See [Device List Cache](#device-list-cache).
+The web UI caches the device list for 3 days and keeps it across restarts. Click Refresh to get the latest list from Tuya. See [Device List Cache](#device-list-cache).
 
 ## Device Details
 
@@ -109,7 +109,7 @@ Timestamps in the web UI use your browser's timezone, so the same list reads dif
 
 ## Device List Cache
 
-The device list is cached for 24 hours and stored next to your session file, so restarting the container or updating the Home Assistant app shows your devices immediately instead of re-fetching them from Tuya. Click Refresh at any time to pull the current list.
+The device list is cached for 3 days and stored next to your session file, so restarting the container or updating the Home Assistant app shows your devices immediately instead of re-fetching them from Tuya. Click Refresh at any time to pull the current list.
 
 That cached list contains every local key in your account, so it is encrypted at rest with a key kept beside it:
 

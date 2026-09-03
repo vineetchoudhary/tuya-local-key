@@ -24,7 +24,7 @@ Use the app configuration page to choose the QR scheme. The default is `smartlif
 
 ## Device List Cache
 
-The device list is cached for 24 hours and stored in the app's `/data` directory, so restarting or updating the app shows your devices immediately instead of re-fetching them from Tuya. Click Refresh to get the current list.
+The device list is cached for 3 days and stored in the app's `/data` directory, so restarting or updating the app shows your devices immediately instead of re-fetching them from Tuya. Click Refresh to get the current list.
 
 That list contains every local key in your account, so it is encrypted at rest: `/data/devices.cache` holds the encrypted list and `/data/cache.key` holds the key that decrypts it. Both are readable only by the app. Logging out deletes both, which also makes any copy of `devices.cache` in an older Home Assistant backup permanently unreadable.
 

@@ -53,7 +53,7 @@ QR_SCHEME = _setting("QR_SCHEME", "smartlife")
 AUTH_USERNAME = _setting("AUTH_USERNAME")
 AUTH_PASSWORD = _setting("AUTH_PASSWORD")
 
-DEVICE_CACHE_TTL_SECONDS = 24 * 60 * 60
+DEVICE_CACHE_TTL_SECONDS = 3 * 24 * 60 * 60
 
 _SESSION_DIR = os.path.dirname(SESSION_FILE) or "."
 DEVICE_CACHE_FILE = os.environ.get(

@@ -6,6 +6,7 @@
 - Every refresh is now compared against the previous list. Devices added, removed, and renamed are summarised above the table, and so are local keys that changed. Changed rows are badged, and the filter matches the badge text.
 - When Tuya cannot be reached, or your login has expired, the saved device list is now shown as a labelled snapshot instead of an error or the login screen. Local keys do not expire with the login, so those keys are still good. Logging out still clears everything.
 - Added a `DEVICE_CACHE` setting. Set it to `off` to keep the device list in memory only, as in 2.0.
+- The device list is now cached for 3 days instead of 24 hours. Click Refresh at any time to pull the current list from Tuya.
 - **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v2.0...v2.1
 
 ## 2.0

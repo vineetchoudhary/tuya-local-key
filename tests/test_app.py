@@ -547,7 +547,7 @@ def test_devices_uses_fetch_completion_time_for_cache(webapp, monkeypatch):
     assert response.json["cached_at"] == 1_005.0
 
 
-def test_devices_cache_expires_after_24_hours(webapp, monkeypatch):
+def test_devices_cache_expires_after_ttl(webapp, monkeypatch):
     webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
     current_time = [1_000.0]
     calls = []
@@ -562,7 +562,7 @@ def test_devices_cache_expires_after_24_hours(webapp, monkeypatch):
     client = webapp.app.test_client()
 
     first = client.get("/api/devices")
-    current_time[0] += (24 * 60 * 60) - 1
+    current_time[0] += webapp.DEVICE_CACHE_TTL_SECONDS - 1
     cached = client.get("/api/devices")
     current_time[0] += 2
     expired = client.get("/api/devices")
