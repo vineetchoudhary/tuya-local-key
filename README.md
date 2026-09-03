@@ -239,6 +239,14 @@ The QR code expires within a minute or two. If it times out, start the login aga
   <img alt="Device table with 60 demo devices" src="docs/screenshots/devices-light.png">
 </picture>
 
+### Change Summary
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/changes-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/changes-light.png">
+  <img alt="Change summary above the device table naming a rotated local key, an added device, a removed device, and a renamed device, with the matching rows badged" src="docs/screenshots/changes-light.png">
+</picture>
+
 ### Device Details
 
 <picture>
