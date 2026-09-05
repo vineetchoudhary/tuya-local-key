@@ -97,3 +97,17 @@ def test_readme_screenshot_paths_exist():
     for path in paths:
         if path.startswith("docs/screenshots/"):
             assert (ROOT / path).is_file(), path
+
+
+def test_every_readme_screenshot_can_be_regenerated():
+    readme = (ROOT / "README.md").read_text()
+    embedded = {
+        re.sub(r"-(light|dark)$", "", Path(path).stem)
+        for path in re.findall(r'(?:src|srcset)="([^"]+)"', readme)
+        if path.startswith("docs/screenshots/")
+    }
+    script = (ROOT / "tools" / "screenshots.py").read_text()
+    shots = set(re.findall(r'^    "([\w-]+)": shot_\w+,$', script, re.MULTILINE))
+
+    assert shots, "SHOTS table not found in tools/screenshots.py"
+    assert embedded == shots
