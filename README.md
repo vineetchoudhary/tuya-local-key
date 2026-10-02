@@ -1,3 +1,7 @@
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor%20on%20GitHub-EA4AAA?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sponsors/vineetchoudhary)
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/vineetchoudhary)
+[![Build status](https://img.shields.io/github/actions/workflow/status/vineetchoudhary/tuya-local-key/docker-publish.yml?style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/vineetchoudhary/tuya-local-key/actions/workflows/docker-publish.yml)
+[![Docker image downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fvineetchoudhary%2Ftuya-local-key%2Fbadges%2Fdownloads.json&style=for-the-badge&logo=docker&logoColor=white)](https://github.com/vineetchoudhary/tuya-local-key/pkgs/container/tuya-local-key)
 
 # Tuya Local Key
 
@@ -331,3 +335,17 @@ The QR code expires within a minute or two. If it times out, start the login aga
 - Local key shows `-`: the device is Bluetooth-only. See [Bluetooth Devices](#bluetooth-devices).
 - A device stopped working with a local integration: its local key may have rotated. Click Refresh and read the change summary. See [Change Detection](#change-detection).
 - "Could not reach Tuya" with the list still shown: that is the saved snapshot. Try Refresh again.
+
+## Support
+
+If this project has been useful to you, consider supporting its continued development.
+
+<a href="https://github.com/sponsors/vineetchoudhary">
+  <img src="https://img.shields.io/badge/Sponsor%20on%20GitHub-EA4AAA?style=for-the-badge&logo=github&logoColor=white" alt="Sponsor on GitHub" height="50">
+</a>
+&nbsp;
+<a href="https://buymeacoffee.com/vineetchoudhary">
+  <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee" height="50">
+</a>
+
+Thank you for supporting open source! 🙏

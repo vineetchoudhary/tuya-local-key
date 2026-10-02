@@ -1,0 +1,56 @@
+name: Update downloads badge
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # daily, 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: downloads-badge
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Read the image's total downloads
+        id: count
+        run: |
+          page=$(curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/pkgs/container/${GITHUB_REPOSITORY#*/}")
+          count=$(printf '%s' "$page" | sed 's/<[^>]*>/ /g' | tr -s ' \n' ' ' \
+            | grep -oE 'Total downloads [0-9][0-9.,]*[KMB]?' | head -1 | awk '{print $3}')
+          if [ -z "$count" ]; then
+            echo "::error::No total downloads found on the package page. Its layout may have changed."
+            exit 1
+          fi
+          echo "Total downloads: $count"
+          echo "value=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Write the badge file to the badges branch
+        env:
+          COUNT: ${{ steps.count.outputs.value }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          remote="https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if ! git clone -q --depth 1 --branch badges "$remote" out 2>/dev/null; then
+            # First run: start the branch with no history from main.
+            git init -q out
+            git -C out checkout -q --orphan badges
+            git -C out remote add origin "$remote"
+          fi
+          cd out
+          printf '{"schemaVersion": 1, "label": "downloads", "message": "%s", "color": "2f6fed"}\n' \
+            "$COUNT" > downloads.json
+          git add downloads.json
+          if git diff --cached --quiet; then
+            echo "Unchanged at $COUNT."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Update downloads badge to $COUNT"
+          git push -q origin HEAD:badges
