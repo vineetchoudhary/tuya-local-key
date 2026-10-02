@@ -454,23 +454,25 @@ def export_csv(devices, path, lan=None):
         writer.writerows(rows)
 
 
-def scan_lan(devices, targets):
+def scan_lan(devices, targets, routers=None):
     """Run lan_scan over `targets` for these devices: {device id: LAN fields}.
 
-    Progress and the summary go to stderr, so --json output stays clean. The
-    CLI keeps no state, so every run is a first scan.
+    `routers` are the addresses lan_scan.likely_routers() picked out: scanned,
+    but not listed as refused. Progress and the summary go to stderr, so --json
+    output stays clean. The CLI keeps no state, so every run is a first scan.
     """
     import lan_scan
 
     print(f"Scanning {len(targets)} address(es) on TCP port {lan_scan.PORT}…", file=sys.stderr)
-    outcome = lan_scan.scan(targets, [device_dict(d) for d in devices])
+    outcome = lan_scan.scan(targets, [device_dict(d) for d in devices], routers=routers)
     summary = outcome["summary"]
     line = (f"Found {summary['matched']} of {summary['devices']} device(s) on the local "
             f"network in {summary['duration']} s.")
     if summary["refused"]:
-        line += (f" {len(summary['refused'])} address(es) refused the connection. A device "
-                 "already connected to another local client refuses new ones: "
-                 + ", ".join(summary["refused"]))
+        line += (f" {len(summary['refused'])} address(es) refused the connection on port "
+                 f"{lan_scan.PORT}: {', '.join(summary['refused'])}. They may not be Tuya "
+                 "devices at all, since any device that doesn't use that port refuses. A Tuya "
+                 "device also refuses while another local client holds its only connection.")
     print(line + "\n", file=sys.stderr)
     return {
         dev_id: {
@@ -521,7 +523,7 @@ def main(argv=None):
             print("No cached session to remove.")
         return
 
-    targets = None
+    targets = routers = None
     if args.scan:
         import lan_scan
 
@@ -529,13 +531,14 @@ def main(argv=None):
             targets = lan_scan.parse_targets(args.scan)
         except lan_scan.TargetError as e:
             sys.exit(f"--scan: {e}")
+        routers = lan_scan.likely_routers(args.scan)
 
     devices = get_devices(args)
     lan = None
     if targets:
         # The scan is an extra: whatever goes wrong in it, the list still prints.
         try:
-            lan = scan_lan(devices, targets)
+            lan = scan_lan(devices, targets, routers)
         except Exception as e:
             import lan_scan
 

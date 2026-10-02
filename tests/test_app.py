@@ -1007,9 +1007,10 @@ class FakeScan:
         self.calls = []
         self.gate = gate
 
-    def __call__(self, targets, devices, known, progress=None, cancel=None, only=None):
+    def __call__(self, targets, devices, known, progress=None, cancel=None, only=None,
+                 routers=None):
         self.calls.append({"targets": targets, "devices": devices, "known": known,
-                           "cancel": cancel, "only": only})
+                           "cancel": cancel, "only": only, "routers": routers})
         if progress:
             progress({"phase": "probe", "addresses": len(targets), "matched": 0})
         if self.gate is not None:
@@ -1083,6 +1084,7 @@ def test_a_scan_runs_in_the_background_and_stores_its_results(webapp, monkeypatc
     assert fake.calls[0]["targets"] == ["10.0.0.1", "10.0.0.2"]
     assert [d["id"] for d in fake.calls[0]["devices"]] == ["plug", "lamp", "sensor"]
     assert fake.calls[0]["only"] is None
+    assert fake.calls[0]["routers"] == {"10.0.0.1"}, "the .1 starting the subnet typed"
     lan = client.get("/api/lan").json
     assert lan["results"]["plug"]["version"] == "3.4"
     assert lan["results"]["sensor"]["status"] == "via_gateway"
@@ -1149,6 +1151,7 @@ def test_checking_one_device_uses_the_given_ip(webapp, monkeypatch):
     assert job["kind"] == "device" and job["result"]["ip"] == "10.0.0.9"
     assert fake.calls[0]["targets"] == ["10.0.0.9"]
     assert fake.calls[0]["only"] == ["lamp"]
+    assert fake.calls[0]["routers"] is None, "an IP typed for one device is never the router"
     # The whole list goes along, so a gateway is known as one by its sub-devices.
     assert [d["id"] for d in fake.calls[0]["devices"]] == ["plug", "lamp", "sensor"]
     assert fake.calls[0]["known"] == {"lamp": {"ip": "10.0.0.9"}}

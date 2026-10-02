@@ -696,10 +696,12 @@ def _fake_lan_scan(monkeypatch, results, refused=()):
     calls = []
 
     def scan(targets, devices, known=None, **kwargs):
-        calls.append({"targets": targets, "devices": devices, "known": known})
+        calls.append({"targets": targets, "devices": devices, "known": known,
+                      "routers": kwargs.get("routers")})
         return {"results": results, "summary": {
             "matched": sum(r["status"] == "ok" for r in results.values()),
             "devices": len(devices), "refused": list(refused), "duration": 1.5,
+            "routers": sorted(kwargs.get("routers") or ()),   # as if each refused
         }}
 
     monkeypatch.setattr(lan_scan, "scan", scan)
@@ -724,9 +726,12 @@ def test_scan_adds_lan_fields_to_json_and_csv(tmp_path, monkeypatch, capsys):
     assert listed[1]["protocol_version"] == "" and listed[1]["lan_status"] == ""
     assert calls[0]["targets"] == ["192.168.1.1", "192.168.1.2"]
     assert calls[0]["known"] is None, "the CLI keeps no LAN state"
+    assert calls[0]["routers"] == {"192.168.1.1"}
     # Progress goes to stderr, so the JSON on stdout stays parseable.
     assert "Found 1 of 2 device(s)" in captured.err
     assert "192.168.1.9" in captured.err
+    assert "They may not be Tuya devices at all" in captured.err
+    assert "router" not in captured.err, "the likely router is left out without a word"
     with csv_path.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert rows[0]["protocol_version"] == "3.4" and rows[0]["device22"] == "False"

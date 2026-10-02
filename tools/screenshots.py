@@ -127,7 +127,7 @@ class Fixture:
                 "targets": demo_fleet.LAN_SUBNET, "changes": None, "changes_at": None,
             })
 
-    def _scan(self, targets, devices, known, progress=None, cancel=None, only=None):
+    def _scan(self, targets, devices, known, progress=None, cancel=None, only=None, routers=None):
         results = demo_fleet.lan_results()
         return {"results": results, "summary": demo_fleet.lan_summary(results)}
 

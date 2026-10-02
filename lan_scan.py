@@ -137,6 +137,30 @@ def parse_targets(text):
     return addresses
 
 
+def likely_routers(text):
+    """The .1 that starts each subnet in `text`, where a router usually sits.
+
+    A router has nothing on port 6668, so it refuses the connection the way a
+    busy device does. The scan still asks it, so a device there is still found,
+    but leaves it out of the summary's address lists. A single IP typed on
+    purpose never counts, and neither does a .1 in the middle of a bigger subnet.
+    """
+    routers = set()
+    for part in re.split(r"[,\s]+", str(text or "").strip()):
+        if "/" not in part:
+            continue
+        try:
+            network = ipaddress.ip_network(part, strict=False)
+        except ValueError:
+            continue
+        if network.version != 4 or network.prefixlen >= 31:
+            continue
+        first = network.network_address + 1
+        if first.packed[-1] == 1:
+            routers.add(str(first))
+    return routers
+
+
 def _sorted_ips(ips):
     return sorted(ips, key=ipaddress.ip_address)
 
@@ -361,7 +385,7 @@ def budgets_for(pool_size):
 
 class _Scan:
     def __init__(self, targets, devices, known, progress, cancel, budget, address_budget,
-                 clock, only):
+                 clock, only, routers):
         self.clock = clock
         self.started = clock()
         self.cancel = cancel or threading.Event()
@@ -393,6 +417,8 @@ class _Scan:
             if known_ip and known_ip not in ips:
                 ips.append(known_ip)
         self.ips = ips
+        # A remembered device's own address is never taken for the router.
+        self.routers = set(routers or ()) - {self.known.get(d["id"], {}).get("ip") for d in self.pool}
 
         self.lock = threading.Lock()
         self.labels = {}
@@ -601,15 +627,22 @@ class _Scan:
                 gateway_id=sub.get("gateway_id"),
             )
 
+        refused = {ip for ip, s in self.labels.items() if s == REFUSED}
+        # Only addresses asked with every key: one that ran out of time, or that
+        # a cancel stopped, may still belong to a device here.
+        unmatched = {ip for ip in self.finished
+                     if ip not in self.claimed and self.labels.get(ip) == OPEN}
+        late = {ip for ip in self.out_of_budget if ip not in self.claimed}
+        # The likely router acts like nothing of ours, so it isn't listed as if
+        # it might be one. "routers" records what was left out.
+        routers = self.routers & (refused | unmatched | late)
         summary = {
             "addresses": len(self.ips),
             "open": len(open_ips),
-            "refused": _sorted_ips(ip for ip, s in self.labels.items() if s == REFUSED),
-            # Only addresses asked with every key: one that ran out of time, or
-            # that a cancel stopped, may still belong to a device here.
-            "unmatched": _sorted_ips(ip for ip in self.finished if ip not in self.claimed
-                                     and self.labels.get(ip) == OPEN),
-            "out_of_budget": _sorted_ips(ip for ip in self.out_of_budget if ip not in self.claimed),
+            "refused": _sorted_ips(refused - routers),
+            "unmatched": _sorted_ips(unmatched - routers),
+            "out_of_budget": _sorted_ips(late - routers),
+            "routers": _sorted_ips(routers),
             "devices": len(self.pool),
             "matched": len(self.matched),
             "sub_devices": len(self.subs),
@@ -642,7 +675,7 @@ class _Scan:
 
 
 def scan(targets, devices, known=None, progress=None, cancel=None,
-         budget=None, address_budget=None, clock=time.monotonic, only=None):
+         budget=None, address_budget=None, clock=time.monotonic, only=None, routers=None):
     """Match `devices` to addresses among `targets` and learn their versions.
 
     targets:  IPs from parse_targets(). Addresses in `known` are added.
@@ -656,12 +689,15 @@ def scan(targets, devices, known=None, progress=None, cancel=None,
     only:     device ids to look for, for a check of one device. The rest of
               `devices` still tell which are gateways, and the sub-devices of
               the ones looked for get results through them.
+    routers:  addresses that are probably the router (likely_routers()). They
+              are scanned like the rest, but unless a device answers there they
+              are left out of the summary's lists (and recorded under "routers").
 
     Returns {"results": {device id: result}, "summary": {...}}. No key appears
     in either. Raises ScannerUnavailable when tinytuya can't do the job.
     """
     return _Scan(targets, devices, known, progress, cancel, budget, address_budget,
-                 clock, only).run()
+                 clock, only, routers).run()
 
 
 # --------------------------------------------------------------------------- #

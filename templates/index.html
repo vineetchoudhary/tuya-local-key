@@ -390,7 +390,7 @@
           <button id="scanClose" type="button">Close</button>
         </div>
       </form>
-      <p class="hint">Enter the subnet your Tuya devices are on, such as your IoT VLAN. Several can be separated by commas. Finds each device's local IP and protocol version by connecting to it on TCP port <b>6668</b> with its local key. Devices on another VLAN work too, as long as your firewall lets this machine reach port 6668 there. Up to 1,024 addresses. A first scan takes about 30 seconds, and longer for an account with many devices.</p>
+      <p class="hint">Enter the subnet your Tuya devices are on, such as your IoT VLAN. Several can be separated by commas. Finds each device's local IP and protocol version by connecting to it on TCP port <b>6668</b> with its local key. Devices on another VLAN work too, as long as your firewall lets this machine reach port 6668 there. Up to 1,024 addresses. If you have many devices, the scan may take longer.</p>
       <div id="scanProgress" class="scan-progress hidden" aria-live="polite"></div>
       <div id="scanError" class="scan-error hidden" role="alert"></div>
     </div>
@@ -904,14 +904,22 @@ function lanSummaryNotice() {
   const ips = (list) => `<span class="ips mono">${list.map(esc).join(", ")}</span>`;
   const refused = s.refused || [], unmatched = s.unmatched || [], late = s.out_of_budget || [];
   if (s.cancelled) lines.push("The scan was cancelled, so only the devices it matched were updated.");
-  if (refused.length)
-    lines.push(`${plural(refused.length, "address", "addresses")} refused connections. A device already connected ` +
-      `to another local client refuses new ones.${ips(refused)}`);
+  if (refused.length) {
+    // A refusal is all any device sends when nothing on it uses the port, so
+    // say so, rather than imply every one is a busy Tuya device.
+    const one = refused.length === 1;
+    lines.push(`${plural(refused.length, "address", "addresses")} refused ` +
+      `${one ? "the connection" : "connections"} on port 6668. ` +
+      `${one ? "It may not be a Tuya device" : "They may not be Tuya devices"} at all, since any device ` +
+      `that doesn't use that port refuses. A Tuya device also refuses while another local client, ` +
+      `such as Home Assistant, holds its only connection.${ips(refused)}`);
+  }
   if (unmatched.length)
     lines.push(`${plural(unmatched.length, "address", "addresses")} answered on port 6668 but not to any key in ` +
       `this account.${ips(unmatched)}`);
   if (late.length)
     lines.push(`${plural(late.length, "address", "addresses")} ran out of time before every key was tried.${ips(late)}`);
+  // The likely router (s.routers) is left out of these lists without a word.
   return `<div class="notice" id="lanSummaryNotice"><div class="grow">` +
     `<span class="notice-title">Network scan</span>${lines.map(l => `<div>${l}</div>`).join("")}</div>` +
     `<button type="button" class="icon-btn" data-dismiss-lan-summary ` +

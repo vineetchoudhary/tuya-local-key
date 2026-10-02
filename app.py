@@ -516,7 +516,7 @@ def _merge_lan(job, outcome, current):
     _save_lan(key, body)
 
 
-def _run_lan_job(job, targets, devices, known, only):
+def _run_lan_job(job, targets, devices, known, only, routers):
     def progress(snapshot):
         with _lan_lock:
             job["progress"] = snapshot
@@ -525,7 +525,7 @@ def _run_lan_job(job, targets, devices, known, only):
     # the stored results are never touched by a scan that didn't finish.
     try:
         outcome = lan_scan.scan(targets, devices, known, progress=progress,
-                                cancel=job["cancel"], only=only)
+                                cancel=job["cancel"], only=only, routers=routers)
     except lan_scan.ScannerUnavailable as e:
         app.logger.warning("LAN scan unavailable: %s", e)
         with _lan_lock:
@@ -624,8 +624,9 @@ def lan_scan_start():
             return _bad_targets("Enter one IP address.")
         known = {device_id: dict(remembered.get(device_id, {}), ip=targets[0])}
         # The whole list goes along, so a gateway is known as one, but only this
-        # device (and its sub-devices) is looked for.
-        kind, text, only = "device", targets[0], [device_id]
+        # device (and its sub-devices) is looked for. An IP typed for one device
+        # is wanted, so it is never taken for the router.
+        kind, text, only, routers = "device", targets[0], [device_id], None
     else:
         text = str(data.get("targets") or "").strip()
         try:
@@ -633,6 +634,7 @@ def lan_scan_start():
         except lan_scan.TargetError as e:
             return _bad_targets(str(e))
         known, kind, only = remembered, "scan", None
+        routers = lan_scan.likely_routers(text)
 
     try:
         lan_scan.require_scanner()
@@ -663,7 +665,8 @@ def lan_scan_start():
         view = _job_view(job)
     # Its own thread, so a scan doesn't hold one of waitress's request threads.
     thread = threading.Thread(
-        target=_run_lan_job, args=(job, targets, devices, known, only), name="lan-scan", daemon=True
+        target=_run_lan_job, args=(job, targets, devices, known, only, routers),
+        name="lan-scan", daemon=True,
     )
     try:
         thread.start()

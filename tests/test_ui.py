@@ -572,8 +572,9 @@ def _scans(app, monkeypatch, *rounds):
     remaining = list(rounds)
     calls = []
 
-    def scan(targets, devices, known, progress=None, cancel=None, only=None):
-        calls.append({"targets": targets, "devices": [d["id"] for d in devices], "only": only})
+    def scan(targets, devices, known, progress=None, cancel=None, only=None, routers=None):
+        calls.append({"targets": targets, "devices": [d["id"] for d in devices], "only": only,
+                      "routers": routers})
         if progress:
             progress({"phase": "probe", "addresses": len(targets), "open": 3, "devices": 3, "matched": 1})
         results = remaining.pop(0) if remaining else {}
@@ -583,6 +584,7 @@ def _scans(app, monkeypatch, *rounds):
                                        for r in results.values()),
             "matched": sum(r["status"] == "ok" for r in results.values()),
             "refused": ["192.168.1.42"], "unmatched": ["192.168.1.77"], "out_of_budget": [],
+            "routers": sorted(routers or ()),   # as if each likely router refused
             "cancelled": False, "duration": 1.2, "finished_at": 1_752_000_000 + len(calls),
         }}
 
@@ -595,14 +597,14 @@ def _held_scan(app, monkeypatch):
     way one waits on the checks already under way after a cancel."""
     release = threading.Event()
 
-    def scan(targets, devices, known, progress=None, cancel=None, only=None):
+    def scan(targets, devices, known, progress=None, cancel=None, only=None, routers=None):
         if progress:
             progress({"phase": "probe", "addresses": len(targets), "open": 1, "devices": 3, "matched": 0})
         release.wait(10)
         return {"results": {}, "summary": {
             "addresses": len(targets), "open": 1, "devices": 3, "sub_devices": 1,
             "sub_devices_reached": 0, "matched": 0, "refused": [], "unmatched": [],
-            "out_of_budget": [], "cancelled": bool(cancel and cancel.is_set()),
+            "out_of_budget": [], "routers": [], "cancelled": bool(cancel and cancel.is_set()),
             "duration": 1.0, "finished_at": 1_752_000_100,
         }}
 
@@ -637,6 +639,7 @@ def test_a_scan_fills_the_protocol_column_and_the_status_badges(page, running_ap
     scanned(page, "192.168.1.0/30")
 
     assert calls[0]["targets"] == ["192.168.1.1", "192.168.1.2"]
+    assert calls[0]["routers"] == {"192.168.1.1"}, "scanned, but taken for the router"
     assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "3.4"
     assert "3.3" in row(page, LAMP).locator("td:nth-child(5)").inner_text()
     assert "device22" in row(page, LAMP).locator("td:nth-child(5)").inner_text()
@@ -646,8 +649,10 @@ def test_a_scan_fills_the_protocol_column_and_the_status_badges(page, running_ap
     assert "not found" in row(page, BARE).inner_text()
     notice = page.locator("#lanSummaryNotice").inner_text()
     assert "Found 1 of 3 devices on the local network" in notice
-    assert "1 address refused connections" in notice and "192.168.1.42" in notice
+    assert "1 address refused the connection on port 6668" in notice and "192.168.1.42" in notice
+    assert "It may not be a Tuya device at all" in notice
     assert "192.168.1.77" in notice
+    assert "router" not in notice, "the likely router (192.168.1.1) is left out without a word"
 
 
 def test_a_devices_status_falls_back_to_the_cloud_flag_without_a_scan(page):

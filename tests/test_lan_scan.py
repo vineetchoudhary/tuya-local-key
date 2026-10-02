@@ -156,6 +156,14 @@ def test_targets_reject_anything_but_private_ipv4(text):
         lan_scan.parse_targets(text)
 
 
+def test_the_likely_router_is_the_dot_one_that_starts_each_subnet():
+    routers = lan_scan.likely_routers(
+        "192.168.2.0/24, 192.168.3.7, 10.0.4.0/23, 192.168.5.64/26, 192.168.6.1/32, 10.1.1.200/24")
+
+    # Not 10.0.5.1 in the middle of the /23, not .65 starting a slice, not a single IP.
+    assert routers == {"192.168.2.1", "10.0.4.1", "10.1.1.1"}
+
+
 def test_targets_reject_more_than_1024_addresses():
     four = ", ".join(f"10.0.{n}.0/24" for n in range(4))
     assert len(lan_scan.parse_targets(four)) == 4 * 254
@@ -495,6 +503,40 @@ def test_a_remembered_address_taken_by_another_device_is_not_found(lan):
     assert out["results"]["a"]["status"] == "not_found"
     assert out["results"]["a"]["ip"] is None
     assert out["results"]["b"]["status"] == "ok"
+
+
+def test_the_likely_router_is_scanned_but_not_listed(lan):
+    lan({
+        "10.0.0.1": lan_scan.REFUSED,                      # the router: nothing on 6668
+        "10.0.0.2": lan_scan.REFUSED,                      # a busy device, or not a Tuya one
+        "10.0.0.3": FakeTuya("stranger", KEYS["h"], "3.3"),
+    })
+
+    out = lan_scan.scan(lan_scan.parse_targets("10.0.0.0/29"), [dev("a", KEYS["a"])],
+                        routers={"10.0.0.1"})
+
+    assert out["summary"]["refused"] == ["10.0.0.2"]
+    assert out["summary"]["unmatched"] == ["10.0.0.3"]
+    assert out["summary"]["routers"] == ["10.0.0.1"]
+
+
+def test_a_device_at_the_routers_address_is_still_found(lan):
+    lan({"10.0.0.1": FakeTuya("a", KEYS["a"], "3.3")})
+
+    out = lan_scan.scan(["10.0.0.1", "10.0.0.2"], [dev("a", KEYS["a"])], routers={"10.0.0.1"})
+
+    assert out["results"]["a"]["ip"] == "10.0.0.1"
+    assert out["summary"]["routers"] == [], "it's a device, so it isn't named as the router"
+
+
+def test_a_remembered_devices_address_is_never_taken_for_the_router(lan):
+    lan({"10.0.0.1": lan_scan.REFUSED})
+    known = {"a": {"ip": "10.0.0.1", "version": "3.3"}}
+
+    out = lan_scan.scan(["10.0.0.1"], [dev("a", KEYS["a"])], known, routers={"10.0.0.1"})
+
+    assert out["results"]["a"]["status"] == "busy"
+    assert out["summary"]["refused"] == ["10.0.0.1"] and out["summary"]["routers"] == []
 
 
 def test_an_open_address_with_no_matching_key_is_reported(lan):

@@ -171,5 +171,6 @@ def lan_summary(results):
         "sub_devices": 0, "sub_devices_reached": 0,
         "refused": [f"192.168.2.{20 + n}" for n in sorted(LAN_BUSY)],
         "unmatched": ["192.168.2.4", "192.168.2.250"], "out_of_budget": [],
+        "routers": ["192.168.2.1"],
         "duration": 28.4, "cancelled": False, "finished_at": LAN_CHECKED,
     }
