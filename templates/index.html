@@ -25,11 +25,39 @@
     background: var(--bg); color: var(--fg);
   }
   header {
-    padding: 18px 20px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 10px;
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; min-height: 69px;
   }
-  .app-icon { width: 32px; height: 32px; border-radius: 7px; display: block; }
-  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  /* The device list's actions, on the right of the header once it is showing.
+     They stay on one line: whatever doesn't fit moves into the ⋮ menu. */
+  .header-actions {
+    margin-left: auto; display: flex; flex-wrap: nowrap; align-items: center; gap: 10px;
+  }
+  .header-actions > button { flex: 0 0 auto; white-space: nowrap; }
+  .more-wrap { position: relative; flex: 0 0 auto; }
+  /* The same box as a text button: one line of text, 9px padding, 1px border.
+     Doubled class, so it wins over the generic .icon-btn size further down. */
+  .icon-btn.more-btn { width: calc(1.5em + 20px); height: calc(1.5em + 20px); border-radius: 8px; }
+  .icon-btn.more-btn svg { width: 18px; height: 18px; }
+  .more-menu {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 190px;
+    display: flex; flex-direction: column; gap: 2px; padding: 6px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .18);
+  }
+  .more-menu.hidden { display: none; }
+  .more-menu .menu-item {
+    width: 100%; padding: 9px 12px; border: 0; border-radius: 7px;
+    background: none; text-align: left; white-space: nowrap;
+  }
+  .more-menu .menu-item:hover, .more-menu .menu-item:focus-visible {
+    background: color-mix(in srgb, var(--accent) 11%, transparent); outline: none;
+  }
+  .app-icon { width: 32px; height: 32px; border-radius: 7px; display: block; flex: 0 0 auto; }
+  header h1 {
+    font-size: 17px; margin: 0; font-weight: 650; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   main { max-width: 1300px; margin: 0 auto; padding: 22px 16px 60px; }
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
@@ -124,6 +152,31 @@
   .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
   .badge.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
   .badge.off { color: var(--off); background: color-mix(in srgb, var(--off) 14%, transparent); }
+  .badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+  .badge.muted { color: var(--muted); background: var(--code-bg); }
+  /* LAN results carry a tag, so they can't be mistaken for the cloud's flag */
+  .badge-tag {
+    margin-right: 1px; padding-right: 5px; font-size: 10px; letter-spacing: .04em;
+    border-right: 1px solid currentColor; opacity: .75;
+  }
+  .protocol-note { margin-left: 5px; font-size: 12px; }
+  /* Scan network */
+  .scan-box {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 14px;
+  }
+  .scan-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .scan-row input { flex: 1 1 260px; min-width: 0; }
+  .scan-box .hint { margin-top: 10px; }
+  .scan-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; font-size: 14px; }
+  .scan-progress .grow { flex: 1 1 auto; }
+  .scan-error { margin-top: 10px; color: var(--off); font-size: 13.5px; }
+  .notice .ips { display: block; margin-top: 4px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+  /* The details panel's single-device check */
+  .lan-check { display: flex; gap: 8px; margin-top: 10px; }
+  .lan-check input { flex: 1 1 auto; min-width: 0; padding: 7px 10px; font-size: 14px; }
+  .lan-check button { padding: 7px 12px; font-size: 13.5px; }
+  .lan-note { margin-top: 8px; font-size: 13px; color: var(--muted); }
   .muted { color: var(--muted); }
   /* Notices above the table: what changed, and whether this list is a snapshot */
   .notices { display: grid; gap: 10px; margin-bottom: 14px; }
@@ -160,6 +213,20 @@
   .change-badge.added {
     color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent);
   }
+  .change-badge.version_changed, .change-badge.local_key_failed {
+    color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent);
+  }
+  /* Log out confirmation */
+  dialog.confirm {
+    width: min(420px, calc(100% - 32px)); padding: 22px; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+  }
+  dialog.confirm::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog.confirm h2 { margin: 0 0 8px; }
+  dialog.confirm p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--muted); }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+  button.danger { background: var(--off); border-color: var(--off); color: #fff; }
   .banner { background: color-mix(in srgb, var(--off) 14%, transparent); color: var(--off);
             border:1px solid var(--off); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:14px; }
   .hidden { display: none; }
@@ -246,6 +313,17 @@
 <header>
   <img class="app-icon" src="icon.png" alt="" aria-hidden="true">
   <h1>Tuya Local Key</h1>
+  <div class="header-actions hidden" id="headerActions">
+    <button id="csvBtn">Export CSV</button>
+    <button id="scanBtn" aria-expanded="false" aria-controls="scanBox">Scan network</button>
+    <button id="refreshBtn">Refresh</button>
+    <button id="logoutBtn">Log out</button>
+    <div class="more-wrap hidden" id="moreWrap">
+      <button id="moreBtn" class="icon-btn more-btn" type="button" aria-haspopup="menu"
+              aria-expanded="false" aria-controls="moreMenu" aria-label="More actions" title="More actions"></button>
+      <div id="moreMenu" class="more-menu hidden" role="menu" aria-label="More actions"></div>
+    </div>
+  </div>
 </header>
 <main>
   <div id="banner" class="banner hidden"></div>
@@ -280,7 +358,7 @@
       <li>Tap <b>Confirm login</b> in the app</li>
     </ol>
     <div class="note">
-      ℹ️ The app will ask you to confirm login for <b>“Home Assistant”</b> — that's expected. This tool signs in through Home Assistant's Tuya app, so please make sure it was <b>you</b> who started this.
+      ℹ️ The app will ask you to confirm login for <b>“Home Assistant”</b>. That's expected. This tool signs in through Home Assistant's Tuya app, so please make sure it was <b>you</b> who started this.
     </div>
     <p class="hint" style="text-align:center; margin-top:18px"><span class="spinner"></span> Waiting for you to confirm…</p>
     <div style="text-align:center; margin-top:8px"><button id="cancelBtn">Cancel</button></div>
@@ -299,12 +377,22 @@
     <div class="toolbar">
       <span class="count" id="count"></span>
       <span class="updated hidden" id="updated"></span>
+      <span class="refresh-status hidden" id="refreshStatus" aria-live="polite"></span>
       <span class="grow"></span>
       <input id="filter" type="text" placeholder="Filter…" style="max-width:200px" autocomplete="off">
-      <button id="csvBtn">Export CSV</button>
-      <button id="refreshBtn">Refresh</button>
-      <span class="refresh-status hidden" id="refreshStatus" aria-live="polite"></span>
-      <button id="logoutBtn">Log out</button>
+    </div>
+    <div class="scan-box hidden" id="scanBox">
+      <form id="scanForm">
+        <label for="scanTargets">Your IoT VLAN or subnet, or device IP addresses</label>
+        <div class="scan-row">
+          <input id="scanTargets" type="text" placeholder="e.g. 192.168.2.0/24" autocomplete="off" spellcheck="false">
+          <button id="scanStart" class="primary" type="submit">Start scan</button>
+          <button id="scanClose" type="button">Close</button>
+        </div>
+      </form>
+      <p class="hint">Enter the subnet your Tuya devices are on, such as your IoT VLAN. Several can be separated by commas. Finds each device's local IP and protocol version by connecting to it on TCP port <b>6668</b> with its local key. Devices on another VLAN work too, as long as your firewall lets this machine reach port 6668 there. Up to 1,024 addresses. A first scan takes about 30 seconds, and longer for an account with many devices.</p>
+      <div id="scanProgress" class="scan-progress hidden" aria-live="polite"></div>
+      <div id="scanError" class="scan-error hidden" role="alert"></div>
     </div>
     <div class="table-scroll">
       <table id="table">
@@ -315,6 +403,18 @@
     <p class="hint">Select a device to see everything Tuya reports for it.</p>
   </section>
 </main>
+
+<!-- LOG OUT CONFIRMATION -->
+<dialog id="logoutDialog" class="confirm" aria-labelledby="logoutTitle" aria-describedby="logoutText">
+  <form method="dialog">
+    <h2 id="logoutTitle">Log out?</h2>
+    <p id="logoutText">This removes your login, the saved device list with its local keys, and the network scan results from this app. To see them again, log in with a new QR code from the Smart Life app.</p>
+    <div class="confirm-actions">
+      <button id="logoutCancel" value="cancel" autofocus>Cancel</button>
+      <button id="logoutConfirm" value="logout" class="danger">Log out</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- DEVICE DETAILS -->
 <div id="scrim" class="scrim"></div>
@@ -343,15 +443,21 @@ let deviceChanges = null;                // what the last fetch found had change
 let changeById = new Map();              // device id -> the change to badge its row with
 let snapshotReason = null;               // set when the list on screen couldn't be refreshed
 let panelOpener = null;                  // element to refocus when the panel closes
+// LAN scan results (/api/lan), merged into each device by applyLan().
+let lanData = { results: {}, summary: null, changes: null, changes_at: null, targets: "", job: null };
+let lanPollTimer = null;                 // the next scan progress poll, while one is watched
+let lanWatch = 0;                        // bumped by every watch and stop, to drop stale polls
+let panelCheck = null;                   // {id, text, kind}: the panel's last single-device check
 
 // Column definitions drive both the header and the rows (kept in sync). The
 // fields left out here (uuid, category, specs, …) live in the details panel.
 const COLUMNS = [
   { key: "name",         label: "Name",         sortable: true,
     render: d => esc(d.name) + changeBadge(d.id) },
-  { key: "online",       label: "Status",       sortable: true, render: d => badge(d.online) },
+  { key: "online",       label: "Status",       sortable: true, render: statusBadge, sortValue: statusRank },
   { key: "id",           label: "ID",           cls: "mono" },
   { key: "local_key",    label: "Local Key",    header: renderLocalKeyHeader, render: d => renderLocalKey(d.local_key) },
+  { key: "protocol_version", label: "Protocol", sortable: true, cls: "mono", render: protocolCell },
   { key: "product_id",   label: "Product ID",   cls: "mono" },
   { key: "product_name", label: "Product Name" },
   { key: "update_time",  label: "Update Time",  sortable: true, render: d => renderTime(d, "update_time") },
@@ -363,11 +469,14 @@ const TIME_KEYS = ["create_time", "active_time", "update_time"];
 // Per-device maps from the SDK; rendered as the data point list, not as fields.
 const SPEC_KEYS = ["status", "function", "status_range", "local_strategy"];
 const MONO_FIELDS = new Set(["id", "uuid", "local_key", "product_id", "model", "icon",
-  "ip", "lat", "lon", "time_zone", "uid", "owner_id", "asset_id", "node_id", "gateway_id"]);
+  "ip", "lat", "lon", "time_zone", "uid", "owner_id", "asset_id", "node_id", "gateway_id",
+  "local_ip", "protocol_version"]);
 const FIELD_LABELS = {
   name: "Name", id: "Device ID", uuid: "UUID", local_key: "Local key",
   category: "Category", product_id: "Product ID", product_name: "Product name",
-  model: "Model", icon: "Icon path", online: "Status", ip: "IP address",
+  model: "Model", icon: "Icon path", online: "Cloud status", ip: "IP address (cloud)",
+  local_ip: "Local IP", protocol_version: "Protocol version", lan_status: "Status",
+  lan_checked_at: "Last checked",
   support_local: "Local control", sub: "Sub-device", node_id: "Node ID",
   gateway_id: "Gateway ID", set_up: "Set up", time_zone: "Time zone",
   lat: "Latitude", lon: "Longitude", uid: "User ID", owner_id: "Owner ID",
@@ -378,12 +487,124 @@ const FIELD_LABELS = {
 const DETAIL_SECTIONS = [
   { title: "Identity", keys: ["name", "id", "uuid", "local_key", "category", "product_id", "product_name", "model", "icon"] },
   { title: "Connectivity", keys: ["online", "ip", "support_local", "sub", "node_id", "gateway_id", "set_up", "time_zone", "lat", "lon"] },
+  { title: "Local network", keys: [], render: lanSection },
   { title: "Account", keys: ["uid", "owner_id", "asset_id", "biz_type"] },
   { title: "Timeline", keys: ["create_time", "active_time", "update_time"] },
 ];
 
+// ---- LAN scan results ----
+// What applyLan() adds to each device, so the filter, the panel and the CSV
+// export all see them like any other field.
+const LAN_KEYS = ["local_ip", "protocol_version", "device22", "lan_status", "lan_checked_at"];
+const LAN_BADGES = {
+  ok:           { cls: "on",    text: "reachable" },
+  via_gateway:  { cls: "on",    text: "via gateway" },
+  busy:         { cls: "warn",  text: "busy" },
+  key_mismatch: { cls: "off",   text: "key mismatch" },
+  unreachable:  { cls: "off",   text: "unreachable" },
+  not_found:    { cls: "muted", text: "not found" },
+};
+const LAN_EXPLAIN = {
+  ok: "Answered on port 6668 to its local key.",
+  via_gateway: "A sub-device: it is reached through its gateway, at the gateway's IP and protocol version.",
+  busy: "Refused the connection at its last known IP. A device already connected to another local client (Home Assistant, say) refuses new ones. The IP may also have changed.",
+  key_mismatch: "Answered at its last known IP, but not to its local key. The key may have changed, so try Refresh. Another device may also have taken that IP.",
+  unreachable: "Didn't answer at its last known IP.",
+  not_found: "No scanned address answered to its local key.",
+};
+// tuya-local's names for a version with the device22 quirk.
+const TUYA_LOCAL_DEVICE22 = { "3.3": "3.22", "3.4": "3.42", "3.5": "3.52" };
+// Status column order: reachable on the LAN first, never seen on it last.
+const STATUS_RANK = { ok: 0, via_gateway: 1, cloud_online: 2, busy: 3, key_mismatch: 4,
+                      unreachable: 5, not_found: 6, cloud_offline: 7 };
+
+function lanStatus(d) {
+  return LAN_BADGES[d.lan_status] ? d.lan_status : null;
+}
+// A sub-device whose gateway the scan didn't find: it says nothing about the
+// sub-device itself, so it reads greyed out and sorts with "not found".
+function gatewayMissed(d) {
+  return d.lan_status === "via_gateway" && !d.local_ip;
+}
+function lanExplain(d) {
+  return gatewayMissed(d)
+    ? "A sub-device: it is reached through its gateway, which the last scan didn't find."
+    : LAN_EXPLAIN[d.lan_status];
+}
+function statusBadge(d) {
+  const status = lanStatus(d);
+  if (!status) return badge(d.online);
+  const when = localTime(d.epochs && d.epochs.lan_checked_at);
+  const title = `Checked on the local network${when ? ` ${when}` : ""}. ` +
+    `The cloud says ${d.online ? "online" : "offline"}.`;
+  const cls = gatewayMissed(d) ? "muted" : LAN_BADGES[status].cls;
+  return `<span class="badge ${cls}" title="${esc(title)}">` +
+    `<span class="badge-tag">LAN</span> ${LAN_BADGES[status].text}</span>`;
+}
+function statusRank(d) {
+  const status = lanStatus(d);
+  if (status) return gatewayMissed(d) ? STATUS_RANK.not_found : STATUS_RANK[status];
+  return d.online ? STATUS_RANK.cloud_online : STATUS_RANK.cloud_offline;
+}
+// For the header count: seen on the LAN (even if busy) counts as online.
+function isOnline(d) {
+  const status = lanStatus(d);
+  if (!status) return !!d.online;
+  if (status === "via_gateway") return !!d.local_ip;
+  return ["ok", "busy", "key_mismatch"].includes(status);
+}
+function protocolCell(d) {
+  if (!d.protocol_version) return '<span class="dash">-</span>';
+  return esc(d.protocol_version) +
+    (d.device22 ? '<span class="protocol-note muted">device22</span>' : "");
+}
+function isSubDevice(d) {
+  return !!d.sub || !!(d.gateway_id && d.gateway_id !== d.id);
+}
+function utcStamp(epoch) {
+  const ms = epochMs(epoch);
+  if (ms === null) return "";
+  return new Date(ms).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+}
+// Folds lanData.results into deviceData, replacing what an earlier call added.
+function applyLan() {
+  for (const d of deviceData) {
+    for (const key of LAN_KEYS) delete d[key];
+    if (d.epochs) {
+      delete d.epochs.lan_checked_at;
+      if (!Object.keys(d.epochs).length) delete d.epochs;
+    }
+    const r = (lanData.results || {})[d.id];
+    if (!r) continue;
+    d.local_ip = r.ip || "";
+    d.protocol_version = r.version || "";
+    d.device22 = !!r.device22;
+    d.lan_status = r.status || "";
+    d.lan_checked_at = utcStamp(r.checked_at);
+    if (r.checked_at) d.epochs = { ...(d.epochs || {}), lan_checked_at: r.checked_at };
+  }
+}
+async function loadLan() {
+  const { ok, body } = await api("/api/lan");
+  if (!ok) return false;
+  lanData = {
+    results: body.results || {}, summary: body.summary || null, changes: body.changes || null,
+    changes_at: body.changes_at || null, targets: body.targets || "", job: body.job || null,
+  };
+  return true;
+}
+// Re-reads the LAN results and repaints everything that shows them.
+async function refreshLan() {
+  if (!(await loadLan())) return;
+  applyLan(); indexChanges(); indexDevices(); render();
+}
+
 function show(name) {
   for (const k in views) views[k].classList.toggle("hidden", k !== name);
+  // The list's actions stay put while a refresh reloads it, and go with the session.
+  $("headerActions").classList.toggle("hidden",
+    !(name === "devices" || (name === "loading" && deviceData.length)));
+  layoutActions();
   // A refresh (devices -> loading -> devices) keeps the open device; losing the
   // session does not.
   if (name === "login" || name === "qr") closePanel();
@@ -466,14 +687,14 @@ function startPolling(token) {
   const started = Date.now();
   pollTimer = setInterval(async () => {
     if (Date.now() - started > 180000) { // 3 min safety
-      stopPolling(); banner("QR expired — try again."); show("login"); return;
+      stopPolling(); banner("QR expired. Try again."); show("login"); return;
     }
     const { status, body } = await api("/api/login/poll", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
     });
     if (body.status === "confirmed") { stopPolling(); banner(""); loadDevices(); }
-    else if (status === 404 || body.status === "expired") { stopPolling(); banner("QR expired — try again."); show("login"); }
+    else if (status === 404 || body.status === "expired") { stopPolling(); banner("QR expired. Try again."); show("login"); }
     else if (status >= 500) { stopPolling(); banner("Couldn't save your login session. Please try again."); }
   }, 2000);
 }
@@ -494,11 +715,15 @@ async function loadDevices(msg, inline, refresh) {
     show("loading");
   }
   try {
+    // The LAN results are local and quick; fetch them alongside the list, and
+    // merge them in without ever waiting on the network for them.
+    const lanLoaded = loadLan();
     const { ok, status, body } = await api(refresh ? "/api/devices?refresh=1" : "/api/devices");
     if (!ok) {
       if (status === 401) {
         deviceData = [];
         deviceChanges = snapshotReason = null;
+        resetLan();
         indexChanges();
         refreshStatus("");
         stopCacheStatusTimer();
@@ -520,6 +745,8 @@ async function loadDevices(msg, inline, refresh) {
     deviceChanges = body.changes || null;
     snapshotReason = body.stale ? (body.stale_reason || "fetch_failed") : null;
     devicesCachedAt = body.cached_at || Date.now() / 1000;
+    await lanLoaded;
+    applyLan();
     indexChanges();
     indexDevices();
     render();
@@ -532,6 +759,11 @@ async function loadDevices(msg, inline, refresh) {
       refreshStatusTimer = setTimeout(() => refreshStatus(""), 3000);
     }
     show("devices");
+    // A scan still running (e.g. the page was reloaded mid-scan) picks up again.
+    // One already watched carries on as it is, scan box shut or not.
+    if (lanData.job && lanData.job.state === "running" && !lanPollTimer) {
+      watchScan(lanData.job.kind === "scan");
+    }
   } catch (err) {
     if (inline) refreshStatus("Refresh failed.", "error");
     banner(refresh ? "Refresh failed. Try again." : "Failed to load devices.");
@@ -549,51 +781,102 @@ function badge(on) {
 // ---- what changed since the previous list ----
 // A rotated key is the change that silently breaks LocalTuya/tinytuya/tuya-local
 // setups, so it outranks a rename on the same row and leads the summary.
-const CHANGE_BADGES = { key_changed: "key changed", added: "new", renamed: "renamed" };
+// A LAN scan adds its own: a moved protocol version or IP breaks a local
+// integration as surely as a new key does, so they rank just below it.
+const CHANGE_BADGES = {
+  key_changed: "key changed", local_key_failed: "key failed", version_changed: "version changed",
+  ip_changed: "IP changed", added: "new", renamed: "renamed",
+};
 const CHANGES_DISMISSED_KEY = "tuya-local-key.changes-dismissed";
+const LAN_CHANGES_DISMISSED_KEY = "tuya-local-key.lan-changes-dismissed";
+const LAN_SUMMARY_DISMISSED_KEY = "tuya-local-key.lan-summary-dismissed";
 
 function indexChanges() {
   changeById = new Map();
-  if (!deviceChanges) return;
-  for (const kind of ["renamed", "added", "key_changed"]) {   // last write wins
-    for (const entry of deviceChanges[kind] || []) changeById.set(entry.id, kind);
+  const sources = [[deviceChanges, ["renamed", "added"]],
+                   [lanData.changes, ["ip_changed", "version_changed", "local_key_failed"]],
+                   [deviceChanges, ["key_changed"]]];
+  for (const [changes, kinds] of sources) {   // last write wins
+    if (!changes) continue;
+    for (const kind of kinds) {
+      for (const entry of changes[kind] || []) changeById.set(entry.id, kind);
+    }
   }
 }
 function changeBadge(id) {
   const kind = changeById.get(id);
   return kind ? `<span class="change-badge ${kind}">${CHANGE_BADGES[kind]}</span>` : "";
 }
-function dismissedChangesAt() {
-  try { return Number(localStorage.getItem(CHANGES_DISMISSED_KEY)) || 0; }
+function storedNumber(key) {
+  try { return Number(localStorage.getItem(key)) || 0; }
   catch (e) { return 0; }   // private mode / storage blocked: just keep showing it
 }
-function dismissChanges() {
-  try { localStorage.setItem(CHANGES_DISMISSED_KEY, String(devicesCachedAt || 0)); }
+function storeNumber(key, value) {
+  try { localStorage.setItem(key, String(value || 0)); }
   catch (e) {}
+}
+function dismissedChangesAt() { return storedNumber(CHANGES_DISMISSED_KEY); }
+function cloudChangesShown() { return !!deviceChanges && dismissedChangesAt() !== devicesCachedAt; }
+function lanChangesShown() {
+  return !!lanData.changes && storedNumber(LAN_CHANGES_DISMISSED_KEY) !== lanData.changes_at;
+}
+function dismissChanges() {
+  storeNumber(CHANGES_DISMISSED_KEY, devicesCachedAt);
+  if (lanData.changes_at) storeNumber(LAN_CHANGES_DISMISSED_KEY, lanData.changes_at);
   renderNotices();
 }
-function plural(n, noun) { return `${n} ${noun}${n === 1 ? "" : "s"}`; }
+function lanSummaryShown() {
+  const s = lanData.summary;
+  return !!s && storedNumber(LAN_SUMMARY_DISMISSED_KEY) !== s.finished_at;
+}
+function dismissLanSummary() {
+  if (lanData.summary) storeNumber(LAN_SUMMARY_DISMISSED_KEY, lanData.summary.finished_at);
+  renderNotices();
+}
+function plural(n, noun, many) { return `${n} ${n === 1 ? noun : (many || `${noun}s`)}`; }
 function deviceLink(entry) {
   return `<button type="button" class="link-btn" data-open-device="${esc(entry.id)}">` +
     `${esc(entry.name || entry.id)}</button>`;
 }
 function changeItems() {
-  const c = deviceChanges, items = [];
+  const c = cloudChangesShown() ? deviceChanges : {};
+  const lan = lanChangesShown() ? lanData.changes : {};
+  const items = [];
   const links = (entries) => entries.map(deviceLink).join(", ");
+  const moved = (entries) => entries.map(e =>
+    `${deviceLink(e)} <span class="muted">(${esc(e.was)} → ${esc(e.now)})</span>`).join(", ");
   const keys = c.key_changed || [];
   if (keys.length) {
     const it = keys.length === 1 ? "it" : "them";
-    items.push(`<li class="rotated"><b>${plural(keys.length, "local key")} changed</b> — ` +
+    items.push(`<li class="rotated"><b>${plural(keys.length, "local key")} changed:</b> ` +
       `${links(keys)}. Anything still holding the old ` +
       `${keys.length === 1 ? "key" : "keys"} will fail until you update ${it}.</li>`);
   }
+  const failed = lan.local_key_failed || [];
+  if (failed.length) {
+    // Tuya may already list the new key; say so, rather than send them to Refresh.
+    const rotated = new Set(((deviceChanges || {}).key_changed || []).map(e => e.id));
+    const unexplained = failed.some(e => !rotated.has(e.id));
+    items.push(`<li class="rotated"><b>${plural(failed.length, "device")} stopped answering to ` +
+      `${failed.length === 1 ? "its" : "their"} local key:</b> ` +
+      failed.map(e => deviceLink(e) +
+        (rotated.has(e.id) ? ' <span class="muted">(Tuya lists a new key for it)</span>' : "")).join(", ") +
+      `.${unexplained ? " Refresh the device list to check for a new key." : ""}</li>`);
+  }
+  const versions = lan.version_changed || [];
+  if (versions.length)
+    items.push(`<li class="rotated"><b>${plural(versions.length, "protocol version")} changed:</b> ` +
+      `${moved(versions)}. A local integration set to the old version will fail until you update it.</li>`);
+  if ((lan.ip_changed || []).length)
+    items.push(`<li>${plural(lan.ip_changed.length, "device")} moved to a new IP: ` +
+      `${moved(lan.ip_changed)}.</li>`);
   if ((c.added || []).length)
-    items.push(`<li>${plural(c.added.length, "device")} added — ${links(c.added)}.</li>`);
+    items.push(`<li>${plural(c.added.length, "device")} added: ${links(c.added)}.</li>`);
   if ((c.removed || []).length)
-    items.push(`<li>${plural(c.removed.length, "device")} removed — ` +
+    items.push(`<li>${plural(c.removed.length, "device")} removed: ` +
       `${c.removed.map(e => esc(e.name || e.id)).join(", ")}.</li>`);
   if ((c.renamed || []).length)
-    items.push(`<li>${plural(c.renamed.length, "device")} renamed — ` +
+    items.push(`<li>${plural(c.renamed.length, "device")} renamed: ` +
       `${c.renamed.map(e => `${deviceLink(e)} <span class="muted">(was ${esc(e.was)})</span>`)
         .join(", ")}.</li>`);
   return items;
@@ -605,28 +888,55 @@ function snapshotNotice() {
     return `<div class="notice warn" data-snapshot="session_invalid"><div class="grow">` +
       `<span class="notice-title">Your login expired</span>` +
       `Showing the device list saved${when}. These keys are still the ones your devices ` +
-      `use — log in again to check for changes.</div>` +
+      `use. Log in again to check for changes.</div>` +
       `<button type="button" class="primary" data-relogin>Log in again</button></div>`;
   }
   return `<div class="notice warn" data-snapshot="fetch_failed"><div class="grow">` +
     `<span class="notice-title">Could not reach Tuya</span>` +
     `Showing the device list saved${when}. Try Refresh again in a moment.</div></div>`;
 }
+function lanSummaryNotice() {
+  const s = lanData.summary;
+  const reached = s.sub_devices_reached || 0;   // only sub-devices whose gateway answered
+  const lines = [`Found ${s.matched} of ${plural(s.devices, "device")} on the local network` +
+    (reached ? `, plus ${plural(reached, "sub-device")} reached through ` +
+      `${reached === 1 ? "its gateway" : "their gateways"}` : "") + "."];
+  const ips = (list) => `<span class="ips mono">${list.map(esc).join(", ")}</span>`;
+  const refused = s.refused || [], unmatched = s.unmatched || [], late = s.out_of_budget || [];
+  if (s.cancelled) lines.push("The scan was cancelled, so only the devices it matched were updated.");
+  if (refused.length)
+    lines.push(`${plural(refused.length, "address", "addresses")} refused connections. A device already connected ` +
+      `to another local client refuses new ones.${ips(refused)}`);
+  if (unmatched.length)
+    lines.push(`${plural(unmatched.length, "address", "addresses")} answered on port 6668 but not to any key in ` +
+      `this account.${ips(unmatched)}`);
+  if (late.length)
+    lines.push(`${plural(late.length, "address", "addresses")} ran out of time before every key was tried.${ips(late)}`);
+  return `<div class="notice" id="lanSummaryNotice"><div class="grow">` +
+    `<span class="notice-title">Network scan</span>${lines.map(l => `<div>${l}</div>`).join("")}</div>` +
+    `<button type="button" class="icon-btn" data-dismiss-lan-summary ` +
+    `aria-label="Dismiss" title="Dismiss">${icon("close")}</button></div>`;
+}
 function renderNotices() {
   const parts = [];
   if (snapshotReason) parts.push(snapshotNotice());
-  if (deviceChanges && dismissedChangesAt() !== devicesCachedAt) {
+  const cloud = cloudChangesShown(), lan = lanChangesShown();
+  if (cloud || lan) {
+    const title = cloud && lan ? "What changed"
+      : cloud ? "What changed since the previous list" : "What changed since the previous scan";
     parts.push(`<div class="notice" id="changesNotice"><div class="grow">` +
-      `<span class="notice-title">What changed since the previous list</span>` +
+      `<span class="notice-title">${title}</span>` +
       `<ul>${changeItems().join("")}</ul></div>` +
       `<button type="button" class="icon-btn" data-dismiss-changes ` +
       `aria-label="Dismiss" title="Dismiss">${icon("close")}</button></div>`);
   }
+  if (lanSummaryShown()) parts.push(lanSummaryNotice());
   $("notices").innerHTML = parts.join("");
 }
 
 $("notices").addEventListener("click", (e) => {
   if (e.target.closest("[data-dismiss-changes]")) { dismissChanges(); return; }
+  if (e.target.closest("[data-dismiss-lan-summary]")) { dismissLanSummary(); return; }
   // Re-login without logging out: the saved list stays put if the scan is abandoned.
   if (e.target.closest("[data-relogin]")) { show("login"); return; }
   const link = e.target.closest("[data-open-device]");
@@ -638,6 +948,7 @@ function icon(name) {
     eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m3 3 18 18M10.6 10.6A3 3 0 0 0 12 15a3 3 0 0 0 2.4-1.2M9.9 4.2A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a16.8 16.8 0 0 1-2.8 4.2M6.6 6.6C3.7 8.5 2 12 2 12s3.5 8 10 8a10.7 10.7 0 0 0 4.1-.8"/></svg>',
     clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 2"/></svg>',
     chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 6 6 6-6 6"/></svg>',
+    more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="19" r="1.8" fill="currentColor"/></svg>',
     close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6 6 18"/></svg>',
   };
   return icons[name] || "";
@@ -720,7 +1031,8 @@ async function copyText(text) {
 }
 
 function cmp(a, b) {
-  // Booleans (Status): online sorts first when ascending.
+  if (typeof a === "number" && typeof b === "number") return a - b;   // e.g. the Status rank
+  // Booleans: true sorts first when ascending.
   if (typeof a === "boolean" || typeof b === "boolean") return (a === b) ? 0 : (a ? -1 : 1);
   // Timestamps are "YYYY-MM-DD HH:MM:SS" strings — lexical order == chronological.
   a = (a ?? "").toString().toLowerCase();
@@ -735,9 +1047,11 @@ function indexDevices() {
   for (const d of deviceData) {
     // Local times are rendered, not sent, so add them to match what is on screen.
     const times = TIME_KEYS.map(key => localTime(d.epochs && d.epochs[key])).join(" ");
-    // The change badge is rendered, not sent, so filtering on "key changed" works.
+    // The change and LAN badges are rendered, not sent, so filtering on
+    // "key changed" or "busy" works.
     const change = CHANGE_BADGES[changeById.get(d.id)] || "";
-    searchIndex.set(d, `${JSON.stringify(d)} ${times} ${change}`.toLowerCase());
+    const lan = lanStatus(d) ? LAN_BADGES[d.lan_status].text : "";
+    searchIndex.set(d, `${JSON.stringify(d)} ${times} ${change} ${lan}`.toLowerCase());
   }
 }
 
@@ -746,7 +1060,9 @@ function computeList() {
   if (filterText) list = list.filter(d => (searchIndex.get(d) || "").includes(filterText));
   if (sortState.key) {
     const { key, dir } = sortState;
-    list = [...list].sort((a, b) => cmp(a[key], b[key]) * dir);
+    const column = COLUMNS.find(c => c.key === key);
+    const value = column && column.sortValue ? column.sortValue : (d => d[key]);
+    list = [...list].sort((a, b) => cmp(value(a), value(b)) * dir);
   }
   return list;
 }
@@ -762,7 +1078,7 @@ function renderHead() {
 }
 
 function renderRows(list) {
-  const online = list.filter(d => d.online).length;
+  const online = list.filter(isOnline).length;
   $("count").innerHTML = `${list.length} device${list.length===1?"":"s"} ` +
     `<span class="muted">· ${online} online · ${list.length-online} offline</span>`;
   $("rows").innerHTML = list.map(d => {
@@ -855,17 +1171,27 @@ function renderPanel() {
   if (!selectedId) return false;
   const d = deviceData.find(dev => dev.id === selectedId);
   if (!d) { closePanel(); return false; }   // the device is gone after a refresh
+  // An IP half-typed into this device's Check field survives the repaint, and
+  // so does its focus.
+  const typing = $("panelBody").querySelector("[data-lan-check] input");
+  const same = !!typing && typing.form.dataset.lanCheck === d.id;
+  const draft = same && typing.value !== typing.defaultValue ? typing.value : null;
+  const caret = same && document.activeElement === typing
+    ? [typing.selectionStart, typing.selectionEnd] : null;
   $("panelTitle").textContent = d.name || "(unnamed)";
-  $("panelSub").innerHTML = [badge(d.online), esc(d.product_name), esc(d.category)]
+  $("panelSub").innerHTML = [statusBadge(d), esc(d.product_name), esc(d.category)]
     .filter(part => part && part !== "-").join("<span>·</span>");
   $("panelBody").innerHTML = fieldSections(d) + dpSection(d) + rawSection(d);
+  const input = $("panelBody").querySelector("[data-lan-check] input");
+  if (input && draft !== null) input.value = draft;
+  if (input && caret) { input.focus(); input.setSelectionRange(...caret); }
   return true;
 }
 
 function labelFor(key) {
   return FIELD_LABELS[key] || key.replace(/_/g, " ").replace(/^./, c => c.toUpperCase());
 }
-function dash() { return '<span class="dash">—</span>'; }
+function dash() { return '<span class="dash">-</span>'; }
 function section(title, body) {
   return `<h3 class="section-title">${esc(title)}</h3>${body}`;
 }
@@ -893,6 +1219,17 @@ function fieldValue(d, key) {
   const value = d[key];
   if (key === "local_key") return `<span class="key-heading">${renderLocalKey(value)}${renderLocalKeyToggle()}</span>`;
   if (key === "online") return badge(value);
+  if (key === "lan_status") {
+    const status = lanStatus(d);
+    return status ? statusBadge(d) + `<div class="field-sub">${esc(lanExplain(d))}</div>` : dash();
+  }
+  if (key === "protocol_version" && value) {
+    const name = TUYA_LOCAL_DEVICE22[value];
+    return copyable(String(value), true) + (d.device22
+      ? `<div class="field-sub">Has the device22 quirk: choose <b>${esc(name || value)}</b> in ` +
+        `tuya-local, or dev_type "device22" in tinytuya.</div>`
+      : "");
+  }
   if (value === null || value === undefined || value === "") return dash();
   if (d.epochs && key in d.epochs) return timeValue(d, key);
   if (typeof value === "boolean") return value ? "Yes" : "No";
@@ -901,15 +1238,48 @@ function fieldValue(d, key) {
 }
 
 function fieldSections(d) {
-  const shown = new Set(["epochs", ...SPEC_KEYS]);
+  const shown = new Set(["epochs", ...SPEC_KEYS, ...LAN_KEYS]);
   let html = "";
-  for (const { title, keys } of DETAIL_SECTIONS) {
+  for (const { title, keys, render: custom } of DETAIL_SECTIONS) {
+    if (custom) { html += section(title, custom(d)); continue; }
     const present = keys.filter(key => key in d);
     present.forEach(key => shown.add(key));
     if (present.length) html += section(title, fieldList(d, present));
   }
   const rest = Object.keys(d).filter(key => !shown.has(key));
   if (rest.length) html += section("Other fields", fieldList(d, rest));
+  return html;
+}
+
+// Local IP and protocol version from the LAN scan, and a check for this device.
+function lanSection(d) {
+  const sub = isSubDevice(d), keyless = !sub && !d.local_key;
+  let html = "";
+  if (lanStatus(d)) {
+    const keys = ["lan_status", "local_ip", "protocol_version", "lan_checked_at"]
+      .filter(key => key === "lan_status" || d[key]);
+    html += fieldList(d, keys);
+  } else if (!sub && !keyless) {
+    html += `<p class="lan-note">Not checked on the local network yet. Use <b>Scan network</b>, ` +
+      `or check it at an IP address below.</p>`;
+  }
+  if (sub) {
+    const gateway = deviceData.find(g => g.id === d.gateway_id);
+    return html + `<p class="lan-note">A sub-device is reached through its gateway` +
+      (gateway ? `: ${deviceLink(gateway)}` : "") + `. Check the gateway instead.</p>`;
+  }
+  if (keyless) {
+    return html + `<p class="lan-note">Tuya doesn't return a local key for this device, so it ` +
+      `can't be checked on the local network. Bluetooth-only devices have none.</p>`;
+  }
+  const running = !!(lanData.job && lanData.job.state === "running");
+  const note = panelCheck && panelCheck.id === d.id ? panelCheck : null;
+  html += `<form class="lan-check" data-lan-check="${esc(d.id)}">` +
+    `<input type="text" name="ip" value="${esc(d.local_ip || "")}" placeholder="Device IP, e.g. 192.168.2.1" ` +
+    `aria-label="IP address to check" autocomplete="off" spellcheck="false">` +
+    `<button type="submit"${running ? " disabled" : ""}>` +
+    `${running && lanData.job.device_id === d.id ? "Checking…" : "Check"}</button></form>`;
+  if (note) html += `<p class="lan-note${note.kind === "error" ? " scan-error" : ""}" aria-live="polite">${esc(note.text)}</p>`;
   return html;
 }
 
@@ -941,7 +1311,7 @@ function dpRows(d) {
       values: spec.values || fn.values || "",
       access: `${ranges[code] ? "R" : ""}${fns[code] ? "W" : ""}`,
       reportType: spec.report_type || "",
-      hint: [fn.name, fn.desc].filter(Boolean).join(" — "),
+      hint: [fn.name, fn.desc].filter(Boolean).join(": "),
     };
   });
 }
@@ -984,7 +1354,7 @@ function dpSection(d) {
       r.reportType,
     ].filter(Boolean).map(esc).join(" · ");
     return `<li><div class="dp-head">` +
-      `<span class="dp-id mono" title="Local data point id">${r.dpId === undefined ? "—" : esc(r.dpId)}</span>` +
+      `<span class="dp-id mono" title="Local data point id">${r.dpId === undefined ? "-" : esc(r.dpId)}</span>` +
       `<span class="dp-code mono"${r.hint ? ` title="${esc(r.hint)}"` : ""}>${esc(r.code)}</span>` +
       `<span class="dp-val">${dpValue(r)}</span></div>` +
       (meta ? `<div class="dp-meta">${meta}</div>` : "") + `</li>`;
@@ -1007,16 +1377,255 @@ function rawSection(d) {
 $("panelClose").innerHTML = icon("close");
 $("panelClose").onclick = closePanel;
 $("scrim").onclick = closePanel;
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePanel(); });
+document.addEventListener("keydown", (e) => {
+  // Escape in the confirmation closes only the dialog, not the panel behind it.
+  if (e.key === "Escape" && !$("logoutDialog").open) closePanel();
+});
+
+// ---- header actions: whatever doesn't fit on the header's line goes in the ⋮ menu ----
+const ACTION_IDS = ["csvBtn", "scanBtn", "refreshBtn", "logoutBtn"];     // display order
+const OVERFLOW_FIRST = ["logoutBtn", "csvBtn", "scanBtn", "refreshBtn"]; // least needed first
+let actionsWidth = null;
+
+function layoutActions() {
+  const bar = $("headerActions");
+  if (bar.classList.contains("hidden")) return;
+  closeMoreMenu();
+  // Everything back on the bar, in order, so each button can be measured.
+  for (const id of ACTION_IDS) {
+    const button = $(id);
+    button.classList.remove("menu-item");
+    button.removeAttribute("role");
+    bar.insertBefore(button, $("moreWrap"));
+  }
+  $("moreWrap").classList.add("hidden");
+
+  const header = bar.parentElement, css = getComputedStyle(header);
+  const gap = parseFloat(css.columnGap) || 10;
+  const inner = header.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+  const title = header.querySelector(".app-icon").offsetWidth + gap +
+    header.querySelector("h1").scrollWidth + gap;
+  const room = inner - title;
+  const width = (ids) => ids.reduce((sum, id) => sum + $(id).offsetWidth, 0) +
+    gap * Math.max(0, ids.length - 1);
+  if (width(ACTION_IDS) <= room) return;
+
+  $("moreWrap").classList.remove("hidden");
+  const more = $("moreWrap").offsetWidth;
+  let kept = [...ACTION_IDS];
+  for (const id of OVERFLOW_FIRST) {
+    if (width(kept) + (kept.length ? gap : 0) + more <= room) break;
+    kept = kept.filter(k => k !== id);
+  }
+  for (const id of ACTION_IDS) {
+    if (kept.includes(id)) continue;
+    const button = $(id);
+    button.classList.add("menu-item");
+    button.setAttribute("role", "menuitem");
+    $("moreMenu").appendChild(button);
+  }
+}
+function menuItems() { return [...$("moreMenu").querySelectorAll(".menu-item:not(:disabled)")]; }
+function openMoreMenu() {
+  $("moreMenu").classList.remove("hidden");
+  $("moreBtn").setAttribute("aria-expanded", "true");
+  const first = menuItems()[0];
+  if (first) first.focus();
+}
+function closeMoreMenu(refocus) {
+  if ($("moreMenu").classList.contains("hidden")) return;
+  $("moreMenu").classList.add("hidden");
+  $("moreBtn").setAttribute("aria-expanded", "false");
+  if (refocus) $("moreBtn").focus();
+}
+$("moreBtn").innerHTML = icon("more");
+$("moreBtn").onclick = () => {
+  if ($("moreMenu").classList.contains("hidden")) openMoreMenu(); else closeMoreMenu();
+};
+// A chosen item runs its own handler first, then the menu closes.
+$("moreMenu").addEventListener("click", (e) => { if (e.target.closest(".menu-item")) closeMoreMenu(); });
+document.addEventListener("click", (e) => { if (!e.target.closest("#moreWrap")) closeMoreMenu(); });
+$("moreWrap").addEventListener("keydown", (e) => {
+  if ($("moreMenu").classList.contains("hidden")) return;
+  const items = menuItems(), at = items.indexOf(document.activeElement);
+  if (e.key === "Escape") { e.stopPropagation(); closeMoreMenu(true); }
+  else if (e.key === "Tab") closeMoreMenu();
+  else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const step = e.key === "ArrowDown" ? 1 : -1;
+    if (items.length) items[(at + step + items.length) % items.length].focus();
+  }
+});
+// The header narrows with the window, and when the details panel opens beside it.
+if (window.ResizeObserver) {
+  new ResizeObserver(() => {
+    const width = document.querySelector("header").clientWidth;
+    if (width !== actionsWidth) { actionsWidth = width; layoutActions(); }
+  }).observe(document.querySelector("header"));
+} else {
+  window.addEventListener("resize", layoutActions);
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutActions);
 
 // filter
 $("filter").oninput = (e) => { filterText = e.target.value.toLowerCase(); renderRows(computeList()); };
 
 $("refreshBtn").onclick = () => loadDevices("Updating device list from Tuya…", false, true);
-$("logoutBtn").onclick = async () => {
-  await api("/api/logout", { method: "POST" });
-  deviceData = []; $("usercode").value = ""; $("filter").value = ""; filterText = ""; refreshStatus(""); stopCacheStatusTimer(); show("login");
+// Logging out deletes the saved list and scan results too, so it asks first.
+$("logoutBtn").onclick = () => {
+  const dialog = $("logoutDialog");
+  if (dialog.open) return;
+  dialog.returnValue = "";
+  dialog.showModal();
 };
+$("logoutDialog").addEventListener("click", (e) => {
+  if (e.target === $("logoutDialog")) $("logoutDialog").close("cancel");   // the backdrop
+});
+$("logoutDialog").addEventListener("close", () => {
+  if ($("logoutDialog").returnValue === "logout") { logOut(); return; }
+  // Back to the button that opened it, or to ⋮ when that button is in the menu.
+  ($("logoutBtn").closest("#moreMenu") ? $("moreBtn") : $("logoutBtn")).focus();
+});
+async function logOut() {
+  await api("/api/logout", { method: "POST" });
+  deviceData = []; resetLan(); $("usercode").value = ""; $("filter").value = ""; filterText = ""; refreshStatus(""); stopCacheStatusTimer(); show("login");
+}
+
+// ---- scan network ----
+function resetLan() {
+  stopScanWatch();
+  lanData = { results: {}, summary: null, changes: null, changes_at: null, targets: "", job: null };
+  panelCheck = null;
+  $("scanTargets").value = "";
+  showScanBox(false);
+}
+function showScanBox(open) {
+  $("scanBox").classList.toggle("hidden", !open);
+  $("scanBtn").setAttribute("aria-expanded", String(open));
+  if (open && !$("scanTargets").value) $("scanTargets").value = lanData.targets || "";
+}
+function scanError(msg) {
+  $("scanError").textContent = msg || "";
+  $("scanError").classList.toggle("hidden", !msg);
+}
+function scanProgress(job) {
+  const el = $("scanProgress");
+  if (!job) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  const p = job.progress || {};
+  let text;
+  if (job.state === "running") {
+    text = job.cancelling ? "Cancelling… The checks already under way finish first."
+      : p.phase === "probe"
+      ? `Checking ${plural(p.open || 0, "open address", "open addresses")} for ` +
+        `${plural(p.devices || 0, "device")} · ${p.matched || 0} found so far`
+      : `Looking for devices on ${plural(p.addresses || 0, "address", "addresses")}…`;
+    el.innerHTML = `<span class="spinner"></span><span class="grow">${esc(text)}</span>` +
+      `<button type="button" id="scanCancel"${job.cancelling ? " disabled" : ""}>Cancel</button>`;
+  } else {
+    const s = job.summary || {};
+    text = job.state === "done" ? `Done in ${s.duration ?? "?"} s: found ${s.matched ?? 0} of ${plural(s.devices ?? 0, "device")}.`
+      : job.state === "cancelled" ? "Scan cancelled."
+      : job.error === "scanner_unavailable" ? SCANNER_UNAVAILABLE
+      : "The scan stopped with an error. Try again.";
+    el.innerHTML = `<span class="grow">${esc(text)}</span>`;
+  }
+  el.classList.remove("hidden");
+  $("scanStart").disabled = job.state === "running";
+}
+function stopScanWatch() {
+  lanWatch++;   // a poll still in flight finds it isn't wanted any more
+  clearTimeout(lanPollTimer);
+  lanPollTimer = null;
+  $("scanStart").disabled = false;
+}
+// Polls the running job; when it ends, reloads the results and repaints. Each
+// poll waits for the one before it, so a slow reply can't overtake a newer one.
+function watchScan(showBox) {
+  stopScanWatch();
+  const watch = lanWatch;
+  if (showBox) { showScanBox(true); scanProgress(lanData.job); }
+  $("scanStart").disabled = true;
+  const next = () => { lanPollTimer = setTimeout(poll, 1000); };
+  const poll = async () => {
+    const { ok, status, body } = await api("/api/lan/scan");
+    if (watch !== lanWatch) return;   // stopped, or a newer watch took over
+    if (!ok && status === 401) { stopScanWatch(); return; }
+    if (!ok) { next(); return; }      // a blip: ask again
+    const job = body.job;
+    if (!job) { stopScanWatch(); scanProgress(null); return; }
+    lanData.job = job;
+    if (job.kind === "scan") scanProgress(job);
+    if (job.state === "running") { next(); return; }
+    stopScanWatch();
+    if (job.kind === "device") panelCheck = checkMessage(job);
+    await refreshLan();
+  };
+  next();
+}
+const SCANNER_UNAVAILABLE = "The network scan isn't available because its tinytuya library " +
+  "couldn't be loaded. The device list and local keys still work. Restarting or updating the app may fix it.";
+function checkMessage(job) {
+  const r = job.result;
+  if (job.error === "scanner_unavailable") return { id: job.device_id, kind: "error", text: SCANNER_UNAVAILABLE };
+  if (job.state !== "done") return { id: job.device_id, kind: "error", text: "The check didn't finish. Try again." };
+  if (!r) return { id: job.device_id, kind: "error", text: "The check didn't return a result." };
+  if (r.status === "ok")
+    return { id: job.device_id, text: `Found at ${r.ip}, protocol ${r.version}${r.device22 ? " (device22)" : ""}.` };
+  const badgeText = (LAN_BADGES[r.status] || {}).text || r.status;
+  return { id: job.device_id, kind: "error", text: `Checked ${job.targets}: ${badgeText}.` };
+}
+function scanFailure(body) {
+  if (body.error === "bad_targets") return body.message || "Check the addresses and try again.";
+  if (body.error === "scan_running") return "A scan is already running.";
+  if (body.error === "no_devices") return "Load the device list first.";
+  if (body.error === "scanner_unavailable") return SCANNER_UNAVAILABLE;
+  if (body.error === "sub_device") return "Sub-devices are reached through their gateway. Check the gateway instead.";
+  if (body.error === "no_local_key") return "This device has no local key, so it can't be checked on the local network.";
+  return "Couldn't start the scan. Try again.";
+}
+async function startScan(payload) {
+  const { ok, body } = await api("/api/lan/scan", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  if (ok) lanData.job = body.job;
+  return { ok, body };
+}
+
+$("scanBtn").onclick = () => showScanBox($("scanBox").classList.contains("hidden"));
+$("scanClose").onclick = () => showScanBox(false);
+$("scanForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  scanError("");
+  const { ok, body } = await startScan({ targets: $("scanTargets").value });
+  if (!ok) {
+    scanError(scanFailure(body));
+    if (body.error === "scan_running") watchScan(true);
+    return;
+  }
+  watchScan(true);
+  renderPanel();   // disables the panel's Check while the scan runs
+});
+$("scanProgress").addEventListener("click", async (e) => {
+  if (!e.target.closest("#scanCancel")) return;
+  // Say so straight away: the checks under way take a few seconds to finish.
+  if (lanData.job) { lanData.job = { ...lanData.job, cancelling: true }; scanProgress(lanData.job); }
+  await api("/api/lan/scan", { method: "DELETE" });
+});
+$("panelBody").addEventListener("submit", async (e) => {
+  const form = e.target.closest("[data-lan-check]");
+  if (!form) return;
+  e.preventDefault();
+  const id = form.dataset.lanCheck;
+  panelCheck = { id, text: "Checking…" };
+  const { ok, body } = await startScan({ device_id: id, ip: form.elements.ip.value });
+  if (!ok) {
+    panelCheck = { id, kind: "error", text: scanFailure(body) };
+    renderPanel();
+    return;
+  }
+  renderPanel();
+  watchScan(false);
+});
 
 // Every flat field of the fetched devices, in the order the server sent them.
 function csvColumns() {

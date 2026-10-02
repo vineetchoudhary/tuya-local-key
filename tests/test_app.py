@@ -1,6 +1,7 @@
 import importlib
 import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -966,3 +967,551 @@ def test_a_served_snapshot_is_never_written_back_as_fresh(webapp, monkeypatch):
     )
     assert "stale" not in stored["body"]
     assert "refresh_failed" not in stored["body"]
+
+
+# --------------------------------------------------------------------------- #
+# LAN scan (see lan_scan)
+# --------------------------------------------------------------------------- #
+LAN_DEVICES = [
+    {"id": "plug", "name": "Kitchen Plug", "local_key": "plug-key-0123456"},
+    {"id": "lamp", "name": "Lamp", "local_key": "lamp-key-0123456"},
+    {"id": "sensor", "name": "Door Sensor", "local_key": "gw-key-012345678",
+     "sub": True, "gateway_id": "plug"},
+]
+
+
+def _ok(ip, version="3.3", device22=False, checked_at=1.0):
+    return {"status": "ok", "ip": ip, "version": version, "device22": device22,
+            "checked_at": checked_at}
+
+
+def _lan_logged_in(webapp, monkeypatch, devices=None, user_code=None):
+    """Log in with a loaded device list, ready to scan."""
+    session = {"token_info": {}}
+    if user_code:
+        session["user_code"] = user_code
+    webapp.core.save_session(os.environ["SESSION_FILE"], session)
+    listed = [dict(d) for d in (devices or LAN_DEVICES)]
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda s, p: listed)
+    monkeypatch.setattr(webapp.core, "web_dict", lambda d: dict(d))
+    client = webapp.app.test_client()
+    assert client.get("/api/devices").status_code == 200
+    return client
+
+
+class FakeScan:
+    """Stands in for lan_scan.scan, answering from a queue of outcomes."""
+
+    def __init__(self, *outcomes, gate=None):
+        self.outcomes = list(outcomes)
+        self.calls = []
+        self.gate = gate
+
+    def __call__(self, targets, devices, known, progress=None, cancel=None, only=None):
+        self.calls.append({"targets": targets, "devices": devices, "known": known,
+                           "cancel": cancel, "only": only})
+        if progress:
+            progress({"phase": "probe", "addresses": len(targets), "matched": 0})
+        if self.gate is not None:
+            assert self.gate.wait(5)
+        results = self.outcomes.pop(0) if self.outcomes else {}
+        cancelled = bool(cancel and cancel.is_set())
+        return {"results": results, "summary": {
+            "addresses": len(targets), "matched": sum(r["status"] == "ok" for r in results.values()),
+            "devices": 2, "refused": [], "unmatched": [], "out_of_budget": [],
+            "cancelled": cancelled, "duration": 0.1, "finished_at": 2.0,
+        }}
+
+
+def _wait_for_job(client):
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        job = client.get("/api/lan/scan").json["job"]
+        if job and job["state"] != "running":
+            return job
+        time.sleep(0.01)
+    raise AssertionError("the scan job never finished")
+
+
+def _scan(client, targets="10.0.0.0/30", **body):
+    body = body or {"targets": targets}
+    response = client.post("/api/lan/scan", json=body)
+    assert response.status_code == 202, response.json
+    return _wait_for_job(client)
+
+
+def test_lan_endpoints_require_a_login(webapp):
+    client = webapp.app.test_client()
+
+    assert client.get("/api/lan").status_code == 401
+    assert client.post("/api/lan/scan", json={"targets": "10.0.0.1"}).status_code == 401
+    assert client.get("/api/lan/scan").status_code == 401
+    assert client.delete("/api/lan/scan").status_code == 401
+
+
+def test_a_scan_needs_a_loaded_device_list(webapp):
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"token_info": {}})
+
+    response = webapp.app.test_client().post("/api/lan/scan", json={"targets": "10.0.0.1"})
+
+    assert response.status_code == 409
+    assert response.json == {"error": "no_devices"}
+
+
+@pytest.mark.parametrize("targets", ["", "8.8.8.8", "10.0.0.0/16", "nonsense"])
+def test_bad_targets_are_rejected_with_a_message(webapp, monkeypatch, targets):
+    client = _lan_logged_in(webapp, monkeypatch)
+
+    response = client.post("/api/lan/scan", json={"targets": targets})
+
+    assert response.status_code == 400
+    assert response.json["error"] == "bad_targets"
+    assert response.json["message"]
+
+
+def test_a_scan_runs_in_the_background_and_stores_its_results(webapp, monkeypatch):
+    fake = FakeScan({"plug": _ok("10.0.0.1", "3.4"),
+                     "sensor": {"status": "via_gateway", "ip": "10.0.0.1", "version": "3.4",
+                                "device22": False, "checked_at": 1.0, "gateway_id": "plug"}})
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch)
+
+    job = _scan(client, "10.0.0.0/30")
+
+    assert job["state"] == "done" and job["kind"] == "scan"
+    assert job["summary"]["matched"] == 1
+    assert fake.calls[0]["targets"] == ["10.0.0.1", "10.0.0.2"]
+    assert [d["id"] for d in fake.calls[0]["devices"]] == ["plug", "lamp", "sensor"]
+    assert fake.calls[0]["only"] is None
+    lan = client.get("/api/lan").json
+    assert lan["results"]["plug"]["version"] == "3.4"
+    assert lan["results"]["sensor"]["status"] == "via_gateway"
+    assert lan["summary"]["matched"] == 1
+    assert lan["targets"] == "10.0.0.0/30", "the last targets prefill the next scan"
+
+
+def test_the_lan_subnet_setting_prefills_the_first_scan(webapp, monkeypatch, tmp_path):
+    monkeypatch.setenv("LAN_SUBNET", "192.168.2.0/24")
+    restarted = _restart(webapp)
+    client = _lan_logged_in(restarted, monkeypatch)
+
+    assert client.get("/api/lan").json["targets"] == "192.168.2.0/24"
+
+
+def test_only_one_scan_runs_at_a_time(webapp, monkeypatch):
+    gate = threading.Event()
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({}, gate=gate))
+    client = _lan_logged_in(webapp, monkeypatch)
+
+    first = client.post("/api/lan/scan", json={"targets": "10.0.0.1"})
+    second = client.post("/api/lan/scan", json={"targets": "10.0.0.2"})
+    gate.set()
+    _wait_for_job(client)
+
+    assert first.status_code == 202
+    assert second.status_code == 409
+    assert second.json == {"error": "scan_running"}
+
+
+def test_a_scan_can_be_cancelled(webapp, monkeypatch):
+    gate = threading.Event()
+    fake = FakeScan({"plug": _ok("10.0.0.1")}, gate=gate)
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch)
+    client.post("/api/lan/scan", json={"targets": "10.0.0.1"})
+
+    assert client.delete("/api/lan/scan").json == {"ok": True}
+    gate.set()
+    job = _wait_for_job(client)
+
+    assert fake.calls[0]["cancel"].is_set()
+    assert job["state"] == "cancelled"
+
+
+def test_remembered_addresses_are_passed_to_the_next_scan(webapp, monkeypatch):
+    fake = FakeScan({"plug": _ok("10.0.0.1", "3.5", True)}, {})
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+
+    _scan(client)
+
+    assert fake.calls[1]["known"] == {"plug": {"ip": "10.0.0.1", "version": "3.5", "device22": True}}
+
+
+def test_checking_one_device_uses_the_given_ip(webapp, monkeypatch):
+    fake = FakeScan({"lamp": _ok("10.0.0.9", "3.3")})
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch)
+
+    job = _scan(client, device_id="lamp", ip="10.0.0.9")
+
+    assert job["kind"] == "device" and job["result"]["ip"] == "10.0.0.9"
+    assert fake.calls[0]["targets"] == ["10.0.0.9"]
+    assert fake.calls[0]["only"] == ["lamp"]
+    # The whole list goes along, so a gateway is known as one by its sub-devices.
+    assert [d["id"] for d in fake.calls[0]["devices"]] == ["plug", "lamp", "sensor"]
+    assert fake.calls[0]["known"] == {"lamp": {"ip": "10.0.0.9"}}
+    assert client.get("/api/lan").json["summary"] is None, "a single check is not a scan"
+
+
+def test_checking_one_device_falls_back_to_its_remembered_ip(webapp, monkeypatch):
+    fake = FakeScan({"lamp": _ok("10.0.0.9", "3.4")}, {"lamp": _ok("10.0.0.9", "3.4")})
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+
+    _scan(client, device_id="lamp")
+
+    assert fake.calls[1]["targets"] == ["10.0.0.9"]
+    assert fake.calls[1]["known"]["lamp"]["version"] == "3.4"
+
+
+@pytest.mark.parametrize("body,status,error", [
+    ({"device_id": "nope", "ip": "10.0.0.1"}, 404, "unknown_device"),
+    ({"device_id": "sensor", "ip": "10.0.0.1"}, 400, "sub_device"),
+    ({"device_id": "lamp"}, 400, "bad_targets"),
+    ({"device_id": "lamp", "ip": "10.0.0.0/30"}, 400, "bad_targets"),
+])
+def test_checking_one_device_validates_its_input(webapp, monkeypatch, body, status, error):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan())
+    client = _lan_logged_in(webapp, monkeypatch)
+
+    response = client.post("/api/lan/scan", json=body)
+
+    assert response.status_code == status
+    assert response.json["error"] == error
+
+
+def test_a_scan_reports_version_and_ip_changes(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"plug": _ok("10.0.0.1", "3.3"), "lamp": _ok("10.0.0.2", "3.3")},
+        {"plug": _ok("10.0.0.1", "3.4"), "lamp": _ok("10.0.0.7", "3.3")},
+        {"plug": _ok("10.0.0.1", "3.4"), "lamp": _ok("10.0.0.7", "3.3")},
+    ))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+    assert client.get("/api/lan").json["changes"] is None, "nothing to compare a first scan against"
+
+    _scan(client)
+    changes = client.get("/api/lan").json["changes"]
+    assert changes["version_changed"] == [{"id": "plug", "name": "Kitchen Plug", "was": "3.3", "now": "3.4"}]
+    assert changes["ip_changed"] == [{"id": "lamp", "name": "Lamp", "was": "10.0.0.2", "now": "10.0.0.7"}]
+
+    _scan(client)
+    assert client.get("/api/lan").json["changes"] is None, "an unchanged scan clears the notice"
+
+
+def test_a_single_check_adds_to_the_changes_instead_of_replacing_them(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"plug": _ok("10.0.0.1", "3.3"), "lamp": _ok("10.0.0.2", "3.3")},
+        {"plug": _ok("10.0.0.1", "3.4"), "lamp": _ok("10.0.0.2", "3.3")},
+        {"lamp": {"status": "key_mismatch", "ip": "10.0.0.2", "version": "3.3",
+                  "device22": False, "checked_at": 3.0}},
+    ))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+    _scan(client)
+
+    _scan(client, device_id="lamp", ip="10.0.0.2")
+
+    changes = client.get("/api/lan").json["changes"]
+    assert [e["id"] for e in changes["version_changed"]] == ["plug"]
+    assert changes["local_key_failed"] == [{"id": "lamp", "name": "Lamp"}]
+
+
+def test_a_result_is_dropped_when_a_refresh_changes_its_key_mid_scan(webapp, monkeypatch):
+    gate = threading.Event()
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"plug": _ok("10.0.0.1"), "lamp": _ok("10.0.0.2")}, gate=gate))
+    client = _lan_logged_in(webapp, monkeypatch)
+    client.post("/api/lan/scan", json={"targets": "10.0.0.0/30"})
+
+    rotated = [dict(d, local_key="ROTATED-KEY-0000") if d["id"] == "lamp" else dict(d)
+               for d in LAN_DEVICES]
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda s, p: rotated)
+    client.get("/api/devices?refresh=1")
+    gate.set()
+    _wait_for_job(client)
+
+    assert set(client.get("/api/lan").json["results"]) == {"plug"}
+
+
+def test_lan_results_survive_a_restart_and_are_encrypted(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1", "3.4")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+
+    blob = Path(webapp.LAN_CACHE_FILE).read_bytes()
+    restarted = _restart(webapp)
+
+    assert b"10.0.0.1" not in blob and b"plug" not in blob
+    assert restarted.app.test_client().get("/api/lan").json["results"]["plug"]["version"] == "3.4"
+
+
+def test_lan_results_are_ignored_after_switching_accounts(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+
+    webapp.core.save_session(os.environ["SESSION_FILE"], {"user_code": "someone-else", "token_info": {}})
+    response = _restart(webapp).app.test_client().get("/api/lan")
+
+    assert response.json["results"] == {}
+
+
+def test_logout_removes_the_lan_results(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+    assert os.path.exists(webapp.LAN_CACHE_FILE)
+
+    client.post("/api/logout")
+
+    assert not os.path.exists(webapp.LAN_CACHE_FILE)
+    client = _lan_logged_in(webapp, monkeypatch)
+    assert client.get("/api/lan").json["results"] == {}
+
+
+def test_logging_in_again_clears_the_lan_results(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+    monkeypatch.setattr(
+        webapp.core, "poll_login", lambda token, user_code: {"token_info": {}})
+    with webapp._lock:
+        webapp._pending["t"] = {"user_code": "u", "created_at": time.time()}
+
+    assert client.post("/api/login/poll", json={"token": "t"}).json == {"status": "confirmed"}
+
+    assert not os.path.exists(webapp.LAN_CACHE_FILE)
+    assert client.get("/api/lan").json["results"] == {}
+
+
+def test_an_invalid_session_with_no_saved_list_clears_the_lan_results(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+    with webapp._devices_cache_lock:
+        webapp._devices_cache = None
+    os.remove(webapp.DEVICE_CACHE_FILE)
+    monkeypatch.setattr(webapp.core, "devices_from_session",
+                        lambda s, p: (_ for _ in ()).throw(KeyError("t")))
+
+    assert client.get("/api/devices").status_code == 401
+
+    assert not os.path.exists(webapp.LAN_CACHE_FILE)
+
+
+def test_a_scan_that_finishes_after_logout_saves_nothing(webapp, monkeypatch):
+    gate = threading.Event()
+    fake = FakeScan({"plug": _ok("10.0.0.1")}, gate=gate)
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch)
+    client.post("/api/lan/scan", json={"targets": "10.0.0.1"})
+
+    client.post("/api/logout")
+    client = _lan_logged_in(webapp, monkeypatch)   # the same account, straight back in
+    gate.set()
+    for thread in threading.enumerate():
+        if thread.name == "lan-scan":
+            thread.join(5)
+
+    assert fake.calls[0]["cancel"].is_set()
+    assert client.get("/api/lan").json["results"] == {}
+    assert client.get("/api/lan/scan").json["job"] is None
+    assert not os.path.exists(webapp.LAN_CACHE_FILE)
+
+
+def test_device_cache_off_keeps_lan_results_in_memory_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("SESSION_FILE", str(tmp_path / "session.json"))
+    monkeypatch.setenv("HASS_OPTIONS_FILE", str(tmp_path / "missing-options.json"))
+    monkeypatch.setenv("DEVICE_CACHE", "off")
+    import app
+
+    app = importlib.reload(app)
+    app.app.config.update(TESTING=True)
+    monkeypatch.setattr(app.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1")}))
+    client = _lan_logged_in(app, monkeypatch)
+    _scan(client)
+
+    assert client.get("/api/lan").json["results"]["plug"]["status"] == "ok"
+    assert not os.path.exists(app.LAN_CACHE_FILE)
+
+
+def test_no_key_appears_in_the_lan_responses(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    started = client.post("/api/lan/scan", json={"targets": "10.0.0.1"}).json
+    _wait_for_job(client)
+
+    text = json.dumps([started, client.get("/api/lan").json, client.get("/api/lan/scan").json])
+    for device in LAN_DEVICES:
+        assert device["local_key"] not in text
+        assert webapp._key_digest(device["local_key"]) not in text
+
+
+def test_the_app_starts_and_lists_devices_without_tinytuya(webapp, monkeypatch):
+    monkeypatch.setitem(sys.modules, "tinytuya", None)   # import now raises ImportError
+    restarted = _restart(webapp)
+    client = _lan_logged_in(restarted, monkeypatch)
+
+    assert client.get("/api/devices").json["devices"][0]["local_key"] == LAN_DEVICES[0]["local_key"]
+    assert client.get("/api/lan").status_code == 200
+
+    response = client.post("/api/lan/scan", json={"targets": "10.0.0.1"})
+    assert response.status_code == 503
+    assert response.json == {"error": "scanner_unavailable"}
+    assert client.get("/api/lan/scan").json["job"] is None
+
+
+def test_a_scanner_failure_mid_scan_keeps_the_stored_results(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1", "3.4")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+
+    def broken(*args, **kwargs):
+        raise webapp.lan_scan.ScannerUnavailable("tinytuya failed on every probe")
+
+    monkeypatch.setattr(webapp.lan_scan, "scan", broken)
+    client.post("/api/lan/scan", json={"targets": "10.0.0.1"})
+    job = _wait_for_job(client)
+
+    assert job["state"] == "failed" and job["error"] == "scanner_unavailable"
+    assert client.get("/api/lan").json["results"]["plug"]["version"] == "3.4"
+    assert client.get("/api/devices").status_code == 200
+
+
+def test_an_unexpected_scan_error_is_contained_in_the_job(webapp, monkeypatch):
+    def crash(*args, **kwargs):
+        raise RuntimeError("anything at all")
+
+    monkeypatch.setattr(webapp.lan_scan, "scan", crash)
+    client = _lan_logged_in(webapp, monkeypatch)
+    client.post("/api/lan/scan", json={"targets": "10.0.0.1"})
+
+    job = _wait_for_job(client)
+    assert job["state"] == "failed" and job["error"] == "scan_failed"
+    assert client.get("/api/devices").status_code == 200
+
+
+def test_a_device_without_a_local_key_cant_be_checked(webapp, monkeypatch):
+    fake = FakeScan()
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch,
+                            devices=LAN_DEVICES + [{"id": "ble", "name": "Bluetooth Lock"}])
+
+    response = client.post("/api/lan/scan", json={"device_id": "ble", "ip": "10.0.0.9"})
+
+    assert response.status_code == 400
+    assert response.json == {"error": "no_local_key"}
+    assert fake.calls == []
+
+
+def _unreachable(ip, checked_at=2.0):
+    return dict(_ok(ip, checked_at=checked_at), status="unreachable")
+
+
+def test_a_failed_check_at_a_new_ip_keeps_the_saved_result(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"lamp": _ok("10.0.0.2")}, {"lamp": _unreachable("10.0.0.99")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+
+    job = _scan(client, device_id="lamp", ip="10.0.0.99")   # a typo
+
+    assert job["result"]["status"] == "unreachable", "the check still says what it found"
+    stored = client.get("/api/lan").json["results"]["lamp"]
+    assert (stored["status"], stored["ip"]) == ("ok", "10.0.0.2")
+
+
+def test_a_failed_check_at_the_known_ip_is_saved(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"lamp": _ok("10.0.0.2")}, {"lamp": dict(_ok("10.0.0.2"), status="busy")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+
+    _scan(client, device_id="lamp", ip="10.0.0.2")
+
+    assert client.get("/api/lan").json["results"]["lamp"]["status"] == "busy"
+
+
+def test_a_passing_check_clears_its_key_failed_entry(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"plug": _ok("10.0.0.1"), "lamp": _ok("10.0.0.2")},
+        {"plug": _ok("10.0.0.1", "3.4"), "lamp": dict(_ok("10.0.0.2"), status="key_mismatch")},
+        {"lamp": _ok("10.0.0.2")},
+    ))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+    _scan(client)
+    before = client.get("/api/lan").json
+    assert before["changes"]["local_key_failed"] == [{"id": "lamp", "name": "Lamp"}]
+
+    _scan(client, device_id="lamp", ip="10.0.0.2")
+
+    after = client.get("/api/lan").json
+    assert after["changes"]["local_key_failed"] == []
+    assert [e["id"] for e in after["changes"]["version_changed"]] == ["plug"], "the rest stays"
+    assert after["changes_at"] == before["changes_at"], "nothing new, so a dismissed notice stays dismissed"
+
+
+@pytest.mark.parametrize("path", ["/api/lan/scan", "/api/login/start", "/api/login/poll"])
+def test_a_json_body_that_isnt_an_object_is_refused_not_a_crash(webapp, monkeypatch, path):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan())
+    client = _lan_logged_in(webapp, monkeypatch)
+
+    response = client.post(path, json=["10.0.0.1"])
+
+    assert 400 <= response.status_code < 500
+
+
+def test_a_failure_while_saving_doesnt_leave_the_job_running(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1")}, {}))
+    client = _lan_logged_in(webapp, monkeypatch)
+
+    def broken(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(webapp, "_merge_lan", broken)
+    job = _scan(client)
+
+    assert job["state"] == "failed" and job["error"] == "scan_failed"
+    assert client.post("/api/lan/scan", json={"targets": "10.0.0.1"}).status_code == 202, "not stuck"
+    _wait_for_job(client)
+
+
+def test_a_scan_that_gets_no_thread_isnt_left_running(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({}))
+    client = _lan_logged_in(webapp, monkeypatch)
+
+    class NoThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    with monkeypatch.context() as m:
+        m.setattr(webapp.threading, "Thread", NoThread)
+        response = client.post("/api/lan/scan", json={"targets": "10.0.0.1"})
+
+    assert response.status_code == 503 and response.json == {"error": "scan_failed"}
+    assert client.get("/api/lan/scan").json["job"]["state"] == "failed"
+    assert client.post("/api/lan/scan", json={"targets": "10.0.0.1"}).status_code == 202
+    _wait_for_job(client)
+
+
+def test_the_job_says_when_a_cancel_is_under_way(webapp, monkeypatch):
+    gate = threading.Event()
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({}, gate=gate))
+    client = _lan_logged_in(webapp, monkeypatch)
+    client.post("/api/lan/scan", json={"targets": "10.0.0.1"})
+    assert client.get("/api/lan/scan").json["job"]["cancelling"] is False
+
+    client.delete("/api/lan/scan")
+    job = client.get("/api/lan/scan").json["job"]
+    gate.set()
+
+    assert job["state"] == "running" and job["cancelling"] is True
+    assert _wait_for_job(client)["cancelling"] is False

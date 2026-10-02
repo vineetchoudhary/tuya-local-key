@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Encrypted, on-disk cache of the device list.
+Encrypted, on-disk cache of the device list, and of the LAN scan results that
+go with it. Both files share one key, so clearing the key makes both unreadable.
 """
 
 import json
@@ -79,7 +80,7 @@ def load(path, key_path):
     return {"body": body, "cached_at": float(cached_at), "session_key": session_key}
 
 
-def save(path, key_path, entry):
+def save(path, key_path, entry, prefix=".devices-"):
     try:
         payload = json.dumps({
             "version": CACHE_VERSION,
@@ -90,12 +91,13 @@ def save(path, key_path, entry):
         cipher = _cipher(key_path, create=True)
         if cipher is None:
             return False
-        core.atomic_write(path, cipher.encrypt(payload), prefix=".devices-")
+        core.atomic_write(path, cipher.encrypt(payload), prefix=prefix)
     except (OSError, TypeError, ValueError):
         return False
     return True
 
 
-def clear(path, key_path):
-    _unlink(path)
+def clear(path, key_path, *others):
+    for stored in (path, *others):
+        _unlink(stored)
     _unlink(key_path)

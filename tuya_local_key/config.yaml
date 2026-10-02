@@ -1,5 +1,5 @@
 name: Tuya Local Key
-version: "2.1"
+version: "3.0"
 slug: tuya_local_key
 description: Retrieve Smart Life / Tuya device local keys with QR-code login.
 url: https://github.com/vineetchoudhary/tuya-local-key
@@ -32,3 +32,4 @@ schema:
   DEVICE_CACHE: "list(on|off)"
   AUTH_USERNAME: "str?"
   AUTH_PASSWORD: "password?"
+  LAN_SUBNET: "str?"

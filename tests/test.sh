@@ -84,6 +84,8 @@ run "$PYTHON_BIN" -m pip install -r requirements-dev.txt -r requirements-web.txt
 run "$PYTHON_BIN" -m pytest \
   --cov=app \
   --cov=tuya_devices \
+  --cov=lan_scan \
+  --cov=device_cache \
   --cov-report=term-missing \
   --cov-report=html:htmlcov
 log "Coverage HTML report: ${ROOT_DIR}/htmlcov/index.html"
@@ -114,5 +116,5 @@ open_browser
 
 log "Running ${CONTAINER_NAME} at ${APP_URL}"
 if [[ "$AUTH_ENABLED" == 1 ]]; then
-  log "Basic Auth enabled — sign in with ${AUTH_USERNAME} / ${AUTH_PASSWORD}"
+  log "Basic Auth enabled. Sign in with ${AUTH_USERNAME} / ${AUTH_PASSWORD}"
 fi

@@ -10,7 +10,9 @@ services:
       - QR_SCHEME=smartlife      # or "tuyaSmart"
       # The device list is kept in the volume, encrypted, so it survives a restart. Set to "off" to hold it in memory only.
       # - DEVICE_CACHE=off
-      # Optional login. Set BOTH to require a username + password (recommended when the port is reachable beyond localhost); leave unset for no auth.
+      # Prefills "Scan network" (local IPs and protocol versions over TCP 6668). Several subnets are fine, comma-separated.
+      # - LAN_SUBNET=192.168.2.0/24    # your IoT VLAN or subnet
+      # Optional login. Set BOTH to require a username + password (recommended when the port is reachable beyond localhost). Leave unset for no auth.
       # - AUTH_USERNAME=admin
       # - AUTH_PASSWORD=change-me
     restart: unless-stopped

@@ -14,7 +14,7 @@ def test_home_assistant_metadata_matches_release_image():
 
     assert repository["name"] == "Tuya Local Key"
     assert config["slug"] == "tuya_local_key"
-    assert config["version"] == "2.1"
+    assert config["version"] == "3.0"
     assert config["image"] == "ghcr.io/vineetchoudhary/tuya-local-key"
     assert "legacy" not in config
     assert config["arch"] == ["aarch64", "amd64"]
@@ -30,6 +30,7 @@ def test_home_assistant_metadata_matches_release_image():
     assert config["schema"]["DEVICE_CACHE"] == "list(on|off)"
     assert config["schema"]["AUTH_USERNAME"] == "str?"
     assert config["schema"]["AUTH_PASSWORD"] == "password?"
+    assert config["schema"]["LAN_SUBNET"] == "str?"
 
 
 def test_release_version_is_consistent_across_metadata():
@@ -67,6 +68,7 @@ def test_dockerfile_has_home_assistant_labels_and_runtime_contract():
     assert "USER appuser" not in dockerfile
     assert "SESSION_FILE=/data/session.json" in dockerfile
     assert "device_cache.py" in dockerfile
+    assert "lan_scan.py" in dockerfile
     assert 'VOLUME ["/data"]' in dockerfile
     assert "waitress-serve --listen=0.0.0.0:${PORT:-8000}" in dockerfile
 
@@ -111,3 +113,19 @@ def test_every_readme_screenshot_can_be_regenerated():
 
     assert shots, "SHOTS table not found in tools/screenshots.py"
     assert embedded == shots
+
+
+def test_downloads_badge_workflow_feeds_the_readme_badge():
+    path = ROOT / ".github" / "workflows" / "downloads-badge.yml"
+    workflow = yaml.safe_load(path.read_text())
+    text = path.read_text()
+    readme = (ROOT / "README.md").read_text()
+
+    assert workflow[True]["schedule"] and "workflow_dispatch" in workflow[True]
+    assert workflow["permissions"] == {"contents": "write"}
+    # It writes to the badges branch only, never to main.
+    pushes = re.findall(r"git push[^\n]*", text)
+    assert pushes == ["git push -q origin HEAD:badges"]
+    # It refuses to overwrite a good badge when the count can't be read.
+    assert 'if [ -z "$count" ]' in text and "exit 1" in text
+    assert "badges%2Fdownloads.json" in readme

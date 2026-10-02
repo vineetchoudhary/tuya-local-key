@@ -42,12 +42,14 @@ BROWSER_CHANNELS = (None, "msedge", "chrome")   # None = playwright's own Chromi
 DEMO_USER_CODE = "abcdef123456"
 DEMO_QR_TOKEN = "demo0000-0000-4000-8000-000000000000"
 
-# The hero crop: the device list without the app header, at half the page width.
-HERO_WIDTH, HERO_HEIGHT, HERO_MARGIN = 1120, 520, 20
+# The hero crop: the header and the top of the device list, in a narrower window.
+HERO_WIDTH, HERO_HEIGHT = 1120, 560
 # Breathing room under the last panel row, so it is not flush with the frame.
 PANEL_TAIL = 28
 # Enough of the table under the change summary to show the badged rows.
 CHANGES_ROWS = 13
+# The same for the scan: the summary, the scan box and the first rows under them.
+SCAN_ROWS = 8
 
 
 def changed_fleet():
@@ -83,6 +85,7 @@ class Fixture:
         self.app.core.devices_from_session = lambda session, path: self._devices
         self.app.core.mint_qr_token = lambda user_code: DEMO_QR_TOKEN
         self.app.core.poll_login = lambda token, user_code: None   # stays pending
+        self.app.lan_scan.scan = self._scan
 
         self._server = make_server("127.0.0.1", 0, self.app.app, threaded=True)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -109,8 +112,24 @@ class Fixture:
         with self.app._lock:
             self.app._devices_cache = None
             self.app._devices_cache_loaded = True
+        self.app._clear_lan()
         self.app.device_cache.clear(self.app.DEVICE_CACHE_FILE,
-                                    self.app.DEVICE_CACHE_KEY_FILE)
+                                    self.app.DEVICE_CACHE_KEY_FILE,
+                                    self.app.LAN_CACHE_FILE)
+
+    def remember_scan(self):
+        """Store a finished scan, as if one ran earlier: results, no notice."""
+        with open(self.session_file) as fh:
+            key = self.app._session_cache_key(json.load(fh))
+        with self.app._lan_lock:
+            self.app._save_lan(key, {
+                "results": demo_fleet.lan_results(), "summary": None,
+                "targets": demo_fleet.LAN_SUBNET, "changes": None, "changes_at": None,
+            })
+
+    def _scan(self, targets, devices, known, progress=None, cancel=None, only=None):
+        results = demo_fleet.lan_results()
+        return {"results": results, "summary": demo_fleet.lan_summary(results)}
 
     def close(self):
         self._server.shutdown()
@@ -121,11 +140,13 @@ class Fixture:
 # Each takes the page and the fixture, leaves the UI in the state to capture,
 # and returns the keyword arguments to screenshot it with.
 
-def open_list(page, fx):
+def open_list(page, fx, scanned=True):
     """Log in and land on the device table, local keys revealed."""
     fx.log_in()
     fx.serve(demo_fleet.fleet())
     fx.forget_devices()
+    if scanned:
+        fx.remember_scan()
     page.goto(fx.url, wait_until="networkidle")
     page.wait_for_selector("#rows tr")
     page.click("[data-key-toggle]")
@@ -154,10 +175,10 @@ def shot_devices(page, fx):
 
 
 def shot_header_devices(page, fx):
+    # A window the width of the crop, so the header's actions are in frame.
+    page.set_viewport_size({"width": HERO_WIDTH, "height": HEIGHT})
     open_list(page, fx)
-    box = page.locator(".toolbar").bounding_box()
-    return {"clip": {"x": box["x"] - HERO_MARGIN, "y": box["y"] - HERO_MARGIN,
-                     "width": HERO_WIDTH, "height": HERO_HEIGHT}}
+    return {"clip": {"x": 0, "y": 0, "width": HERO_WIDTH, "height": HERO_HEIGHT}}
 
 
 def shot_filter(page, fx):
@@ -180,6 +201,19 @@ def shot_details(page, fx):
     return {}
 
 
+def shot_scan(page, fx):
+    open_list(page, fx, scanned=False)
+    page.click("#scanBtn")
+    page.fill("#scanTargets", demo_fleet.LAN_SUBNET)
+    page.click("#scanStart")
+    page.wait_for_selector("#lanSummaryNotice")
+    page.wait_for_function("!lanPollTimer")
+    height = page.evaluate(
+        "n => Math.round(document.querySelectorAll('#rows tr')[n - 1]"
+        ".getBoundingClientRect().bottom)", SCAN_ROWS)
+    return {"clip": {"x": 0, "y": 0, "width": WIDTH, "height": height}}
+
+
 def shot_changes(page, fx):
     open_list(page, fx)
     fx.serve(changed_fleet())
@@ -198,6 +232,7 @@ SHOTS = {
     "devices": shot_devices,
     "header-devices": shot_header_devices,
     "changes": shot_changes,
+    "scan": shot_scan,
     "details": shot_details,
     "filter": shot_filter,
 }

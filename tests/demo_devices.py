@@ -113,7 +113,7 @@ def _sensor():
         node_id="a4c1380000112233",
         gateway_id="ebd8f1c0a1b2c3d4e5",
         # Undocumented by the SDK: proves unrecognised Tuya fields still surface.
-        protocol_version="3.3",
+        firmware_channel="beta",
         create_time=CREATE_TIME,
         active_time=ACTIVE_TIME,
         update_time=UPDATE_TIME,

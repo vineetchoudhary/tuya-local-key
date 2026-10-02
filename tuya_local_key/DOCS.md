@@ -18,7 +18,9 @@ In the Smart Life app, go to Me > Settings > Account and Security > User Code.
 
 ## Configuration
 
-Use the app configuration page to choose the QR scheme. The default is `smartlife`; switch to `tuyaSmart` if scanning or confirmation does not work for your account.
+Use the app configuration page to choose the QR scheme. The default is `smartlife`. Switch to `tuyaSmart` if scanning or confirmation does not work for your account.
+
+`LAN_SUBNET` prefills the Scan network box with your IoT VLAN or subnet, for example `192.168.2.0/24`. See [Protocol Version](#protocol-version).
 
 `DEVICE_CACHE` controls whether the device list is stored. Leave it `on` to keep the list across restarts and app updates, or set it to `off` to hold the list in memory only.
 
@@ -28,7 +30,7 @@ The device list is cached for 3 days and stored in the app's `/data` directory, 
 
 That list contains every local key in your account, so it is encrypted at rest: `/data/devices.cache` holds the encrypted list and `/data/cache.key` holds the key that decrypts it. Both are readable only by the app. Logging out deletes both, which also makes any copy of `devices.cache` in an older Home Assistant backup permanently unreadable.
 
-This protects the cache file on its own, not the `/data` directory as a whole — the key sits beside the file it unlocks, and that directory already holds the session tokens that can fetch the same keys from Tuya. Home Assistant backups include `/data`, so treat a backup of this app as sensitive. Set `DEVICE_CACHE` to `off` if you would rather the device list never reach disk.
+This protects the cache file on its own, not the `/data` directory as a whole. The key sits beside the file it unlocks, and that directory already holds the session tokens that can fetch the same keys from Tuya. Home Assistant backups include `/data`, so treat a backup of this app as sensitive. Set `DEVICE_CACHE` to `off` if you would rather the device list never reach disk.
 
 ### When Tuya Cannot Be Reached
 
@@ -40,13 +42,23 @@ Every refresh is compared against the list you saw before it. Devices added, rem
 
 A rotated local key is the one worth watching for: Tuya changes it when a device is re-paired, and anything holding the old one, such as LocalTuya or tuya-local, stops working with no explanation. Changed rows are badged in the table, and the filter box matches the badge text, so typing `key changed` narrows the list to them.
 
+## Protocol Version
+
+Click **Scan network** and enter your IoT VLAN or subnet (for example `192.168.2.0/24`) to find each device's local IP and protocol version, which tinytuya, tuya-local and LocalTuya need along with the local key. Tuya's device-sharing API doesn't return a version, so the app connects to each address on TCP port 6668 and asks with each device's key, trying 3.3, 3.4, 3.5 and then 3.1.
+
+The scan never uses broadcasts, so it reaches devices on another VLAN, as long as your firewall allows TCP port 6668 from the Home Assistant host to that network. The app's connections leave with the host's address, and no host networking is needed.
+
+A device that is already connected to another local client, such as Home Assistant's own Tuya integration, refuses new connections and shows as **busy**. Sub-devices show **via gateway** and take their gateway's IP and version, greyed out when the scan didn't find the gateway. A version marked **device22** is what tuya-local calls 3.22 (on 3.3) or 3.42 (on 3.4).
+
+Scan results are encrypted in `/data/lan.cache` with the same key as the device list, and are cleared when you log out or log in again. A changed protocol version or IP is listed in the change summary.
+
 ## Bluetooth Devices
 
 Bluetooth-only devices show `-` in the Local Key column. Tuya's device-sharing API does not return a local key for them, so there is nothing to display. See [Bluetooth Devices](https://github.com/vineetchoudhary/tuya-local-key#bluetooth-devices) in the README for more information.
 
 ## Security
 
-The app exposes device `localKey` values after login. Keep access restricted to trusted Home Assistant users. The device list is also stored in `/data`, encrypted; see [Device List Cache](#device-list-cache).
+The app exposes device `localKey` values after login. Keep access restricted to trusted Home Assistant users. The device list is also stored in `/data`, encrypted. See [Device List Cache](#device-list-cache).
 
 The direct `8000/tcp` port is disabled by default. Use Home Assistant ingress unless you intentionally enable the direct port.
 

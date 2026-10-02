@@ -6,6 +6,8 @@ import threading
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 import tuya_devices as core
 
 
@@ -245,7 +247,7 @@ def demo_device(**overrides):
         create_time=1_690_000_000,
         update_time=1_752_000_000,
         # Tuya returns fields the SDK does not declare; they must survive too.
-        protocol_version="3.3",
+        firmware_channel="beta",
         status={"switch_1": True, "cur_power": 812,
                 "cycle_time": [{"start": "0800"}, {"start": "2000"}]},
         function={"switch_1": SimpleNamespace(code="switch_1", type="Boolean", values="{}")},
@@ -264,7 +266,7 @@ def test_device_dict_exposes_specs_and_undeclared_fields():
     # Known scalars keep their display order, and the spec maps come last.
     assert list(data)[:6] == ["name", "id", "uuid", "local_key", "product_id", "product_name"]
     assert list(data)[-4:] == ["status", "function", "status_range", "local_strategy"]
-    assert data["protocol_version"] == "3.3"
+    assert data["firmware_channel"] == "beta"
     assert data["status"]["cur_power"] == 812
     assert data["status"]["cycle_time"] == [{"start": "0800"}, {"start": "2000"}]
     # Namespaces flatten to dicts and int dp ids become JSON-safe strings.
@@ -303,7 +305,7 @@ def test_export_csv_covers_every_flat_field(tmp_path):
     with path.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert rows[0]["local_key"] == "5vps+n4FwxR2?df;"
-    assert rows[0]["protocol_version"] == "3.3"
+    assert rows[0]["firmware_channel"] == "beta"
     assert rows[0]["update_time"] == core.fmt_time(1_752_000_000)
     # A column only the second device has still gets a header, and the maps do not.
     assert rows[1]["room_name"] == "Study"
@@ -315,7 +317,7 @@ def test_print_devices_lists_fields_and_counts_spec_maps(capsys):
     core.print_devices([demo_device()])
 
     out = capsys.readouterr().out
-    assert "protocol_version: 3.3" in out
+    assert "firmware_channel: beta" in out
     assert "asset_id      : -" in out            # empty values read as "-"
     assert "status        : 3 entries" in out    # maps are counted; --json has the detail
     assert "function      : 1 entry" in out
@@ -683,3 +685,89 @@ def test_diff_handles_a_missing_name():
     changes = core.diff_devices([], [{"id": "a"}])
 
     assert changes["added"] == [{"id": "a", "name": ""}]
+
+
+# --------------------------------------------------------------------------- #
+# --scan
+# --------------------------------------------------------------------------- #
+def _fake_lan_scan(monkeypatch, results, refused=()):
+    import lan_scan
+
+    calls = []
+
+    def scan(targets, devices, known=None, **kwargs):
+        calls.append({"targets": targets, "devices": devices, "known": known})
+        return {"results": results, "summary": {
+            "matched": sum(r["status"] == "ok" for r in results.values()),
+            "devices": len(devices), "refused": list(refused), "duration": 1.5,
+        }}
+
+    monkeypatch.setattr(lan_scan, "scan", scan)
+    return calls
+
+
+def test_scan_adds_lan_fields_to_json_and_csv(tmp_path, monkeypatch, capsys):
+    csv_path = tmp_path / "devices.csv"
+    plug, lamp = demo_device(), demo_device(id="lamp-1", name="Lamp")
+    monkeypatch.setattr(core, "get_devices", lambda args: [plug, lamp])
+    calls = _fake_lan_scan(monkeypatch, {plug.id: {
+        "status": "ok", "ip": "192.168.1.61", "version": "3.4", "device22": False, "checked_at": 1.0,
+    }}, refused=["192.168.1.9"])
+
+    core.main(["--json", "--csv", str(csv_path), "--scan", "192.168.1.0/30"])
+
+    captured = capsys.readouterr()
+    listed = json.loads(captured.out[:captured.out.rindex("]") + 1])
+    assert listed[0]["protocol_version"] == "3.4"
+    assert listed[0]["local_ip"] == "192.168.1.61"
+    assert listed[0]["lan_status"] == "ok"
+    assert listed[1]["protocol_version"] == "" and listed[1]["lan_status"] == ""
+    assert calls[0]["targets"] == ["192.168.1.1", "192.168.1.2"]
+    assert calls[0]["known"] is None, "the CLI keeps no LAN state"
+    # Progress goes to stderr, so the JSON on stdout stays parseable.
+    assert "Found 1 of 2 device(s)" in captured.err
+    assert "192.168.1.9" in captured.err
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["protocol_version"] == "3.4" and rows[0]["device22"] == "False"
+
+
+def test_scan_fields_show_in_the_text_listing(monkeypatch, capsys):
+    plug = demo_device()
+    monkeypatch.setattr(core, "get_devices", lambda args: [plug])
+    _fake_lan_scan(monkeypatch, {plug.id: {
+        "status": "busy", "ip": "192.168.1.61", "version": "3.3", "device22": True, "checked_at": 1.0,
+    }})
+
+    core.main(["--scan", "192.168.1.61"])
+
+    out = capsys.readouterr().out
+    assert "local_ip      : 192.168.1.61" in out
+    assert "protocol_version: 3.3" in out
+    assert "lan_status    : busy" in out
+
+
+def test_scan_rejects_bad_targets_before_logging_in(monkeypatch):
+    monkeypatch.setattr(core, "get_devices", lambda args: pytest.fail("must not log in"))
+
+    with pytest.raises(SystemExit) as exc:
+        core.main(["--scan", "8.8.8.8"])
+
+    assert "--scan" in str(exc.value) and "private" in str(exc.value)
+
+
+def test_a_broken_scanner_still_prints_the_device_list(monkeypatch, capsys):
+    import lan_scan
+
+    plug = demo_device()
+    monkeypatch.setattr(core, "get_devices", lambda args: [plug])
+
+    def broken(*args, **kwargs):
+        raise lan_scan.ScannerUnavailable("tinytuya could not be loaded (ImportError)")
+
+    monkeypatch.setattr(lan_scan, "scan", broken)
+    core.main(["--json", "--scan", "192.168.2.0/30"])
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)[0]["id"] == plug.id
+    assert "Skipping --scan: tinytuya could not be loaded" in captured.err

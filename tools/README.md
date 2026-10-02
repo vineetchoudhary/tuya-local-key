@@ -4,14 +4,14 @@ Developer scripts. Nothing here is copied into the Docker image or needed at run
 
 ## Screenshots
 
-`screenshots.py` regenerates every image the README embeds. It runs the real app against the fake account in `demo_fleet.py`, drives it with Playwright, and writes a light and a dark PNG per shot into `docs/screenshots/`.
+`screenshots.py` regenerates every image the README embeds. It runs the real app against the fake account in `demo_fleet.py` (with a stubbed network scan), drives it with Playwright, and writes a light and a dark PNG per shot into `docs/screenshots/`.
 
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
 
-Chromium is optional — the script falls back to a system Edge or Chrome.
+Chromium is optional. The script falls back to a system Edge or Chrome.
 
 ```bash
 python tools/screenshots.py
@@ -28,5 +28,6 @@ python tools/screenshots.py filter details
 | `devices` | `devices-{light,dark}.png` | Device Table |
 | `header-devices` | `header-devices-{light,dark}.png` | The preview at the top |
 | `changes` | `changes-{light,dark}.png` | Change Summary |
+| `scan` | `scan-{light,dark}.png` | Network Scan |
 | `details` | `details-{light,dark}.png` | Device Details |
 | `filter` | `filter-{light,dark}.png` | Filtering |

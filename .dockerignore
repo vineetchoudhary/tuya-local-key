@@ -25,6 +25,8 @@ tuya-login-qr.png
 *.csv
 session.json
 *session*.json
+devices.cache
+lan.cache
 .env
 .env.*
 *.pem

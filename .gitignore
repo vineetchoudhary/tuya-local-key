@@ -15,6 +15,7 @@ tuya-login-qr.png
 session.json
 *session*.json
 devices.cache
+lan.cache
 cache.key
 .env
 .env.*
@@ -25,3 +26,4 @@ cache.key
 .claude/
 .coverage
 test-results/
+plans/

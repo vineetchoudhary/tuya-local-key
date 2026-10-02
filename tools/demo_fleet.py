@@ -79,7 +79,7 @@ def device(n):
         category="cz",
         model="SP20-EU",
         icon=ICON.format(digit=(n - 1) % 10, slug=id_[9:15]),
-        ip=f"192.168.1.{9 + n}",
+        ip=f"203.0.113.{9 + n}",   # the cloud reports a WAN address (TEST-NET-3)
         lat="12.9716",
         lon="77.5946",
         time_zone="+05:30",
@@ -130,3 +130,46 @@ def device(n):
 
 def fleet(count=60):
     return [device(n) for n in range(1, count + 1)]
+
+
+# What a LAN scan of the fake account finds. Mostly 3.3, as on a real network,
+# with a handful of 3.4/3.5, two device22 quirks, and a few devices that are
+# busy (another client holds their one local connection) or never answered.
+LAN_SUBNET = "192.168.2.0/24"
+LAN_CHECKED = UPDATED + 3 * 3600
+LAN_BUSY = {5, 26, 47}
+LAN_DEVICE22 = {13, 38}
+
+
+def lan_version(n):
+    if n % 9 == 2:
+        return "3.5"
+    if n % 4 == 3:
+        return "3.4"
+    return "3.3"
+
+
+def lan_results(count=60):
+    results = {}
+    for n in range(1, count + 1):
+        result = {"ip": f"192.168.2.{20 + n}", "version": lan_version(n),
+                  "device22": n in LAN_DEVICE22, "checked_at": LAN_CHECKED}
+        if n % OFFLINE_EVERY == OFFLINE_AT:
+            result.update(status="not_found", ip=None)
+        elif n in LAN_BUSY:
+            result.update(status="busy")
+        else:
+            result.update(status="ok")
+        results[device_id(n)] = result
+    return results
+
+
+def lan_summary(results):
+    matched = sum(r["status"] == "ok" for r in results.values())
+    return {
+        "addresses": 254, "open": matched + 2, "devices": len(results), "matched": matched,
+        "sub_devices": 0, "sub_devices_reached": 0,
+        "refused": [f"192.168.2.{20 + n}" for n in sorted(LAN_BUSY)],
+        "unmatched": ["192.168.2.4", "192.168.2.250"], "out_of_budget": [],
+        "duration": 28.4, "cancelled": False, "finished_at": LAN_CHECKED,
+    }

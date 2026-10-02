@@ -141,7 +141,7 @@ def render_qr(content, png_path):
     # Reliable PNG fallback in case the terminal QR won't scan.
     try:
         qr.make_image().save(png_path)
-        print(f"(Saved {png_path} — open it and scan if the one above won't.)\n")
+        print(f"(Saved {png_path}. Open it and scan that if the one above won't scan.)\n")
     except Exception:
         pass
 
@@ -217,7 +217,7 @@ def qr_login(user_code, scheme, png_path, poll_seconds=150):
 
     if not session:
         raise SystemExit(
-            "Login timed out — the QR code expires quickly. Re-run and scan promptly."
+            "Login timed out. The QR code expires quickly, so re-run and scan promptly."
         )
     print("Logged in.\n")
     return session
@@ -264,7 +264,7 @@ def get_devices(args):
         try:
             return devices_from_session(session, args.session)
         except Exception as e:
-            print(f"Saved session unusable ({e}); re-authenticating…\n")
+            print(f"Saved session unusable ({e}). Re-authenticating…\n")
 
     session = qr_login(args.user_code, args.scheme, args.qr_png)
     save_session(args.session, session)
@@ -402,15 +402,27 @@ def diff_devices(previous, current):
     return changes
 
 
-def print_devices(devices):
+def _with_lan(device, lan):
+    """device_dict(), plus the LAN scan's fields for it when there was a scan."""
+    data = device_dict(device)
+    if lan is not None:
+        data.update(lan.get(data.get("id"), LAN_FIELDS_MISSING))
+    return data
+
+
+# What --scan adds to each device, and what a device the scan didn't reach gets.
+LAN_FIELDS_MISSING = {"local_ip": "", "protocol_version": "", "device22": False, "lan_status": ""}
+
+
+def print_devices(devices, lan=None):
     online = sum(1 for d in devices if g(d, "online"))
-    print(f"Found {len(devices)} device(s) — "
+    print(f"Found {len(devices)} device(s): "
           f"{online} online, {len(devices) - online} offline\n")
     for i, d in enumerate(devices, 1):
-        data = device_dict(d)
+        data = _with_lan(d, lan)
         title = data.get("name") or "(unnamed)"
         status = "online" if data.get("online") else "offline"
-        print(f"[{i:>3}] {title}  —  {status}")
+        print(f"[{i:>3}] {title} ({status})")
         for key, value in data.items():
             if isinstance(value, dict):  # status/function/status_range/…: --json has the detail
                 count = len(value)
@@ -423,11 +435,11 @@ def print_devices(devices):
         print()
 
 
-def export_csv(devices, path):
+def export_csv(devices, path, lan=None):
     """One row per device, one column per flat field any device has."""
     import csv
 
-    rows = [device_dict(d) for d in devices]
+    rows = [_with_lan(d, lan) for d in devices]
     columns = []
     for row in rows:
         for key, value in row.items():
@@ -442,6 +454,35 @@ def export_csv(devices, path):
         writer.writerows(rows)
 
 
+def scan_lan(devices, targets):
+    """Run lan_scan over `targets` for these devices: {device id: LAN fields}.
+
+    Progress and the summary go to stderr, so --json output stays clean. The
+    CLI keeps no state, so every run is a first scan.
+    """
+    import lan_scan
+
+    print(f"Scanning {len(targets)} address(es) on TCP port {lan_scan.PORT}…", file=sys.stderr)
+    outcome = lan_scan.scan(targets, [device_dict(d) for d in devices])
+    summary = outcome["summary"]
+    line = (f"Found {summary['matched']} of {summary['devices']} device(s) on the local "
+            f"network in {summary['duration']} s.")
+    if summary["refused"]:
+        line += (f" {len(summary['refused'])} address(es) refused the connection. A device "
+                 "already connected to another local client refuses new ones: "
+                 + ", ".join(summary["refused"]))
+    print(line + "\n", file=sys.stderr)
+    return {
+        dev_id: {
+            "local_ip": result.get("ip") or "",
+            "protocol_version": result.get("version") or "",
+            "device22": bool(result.get("device22")),
+            "lan_status": result.get("status") or "",
+        }
+        for dev_id, result in outcome["results"].items()
+    }
+
+
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
@@ -451,7 +492,7 @@ def parse_args(argv=None):
     )
     p.add_argument("--user-code", help="Smart Life user code (else you'll be prompted)")
     p.add_argument("--scheme", default="smartlife", choices=["tuyaSmart", "smartlife"],
-                   help="QR login scheme prefix (default: smartlife; Smart Life scans both)")
+                   help="QR login scheme prefix (default: smartlife). The Smart Life app scans both.")
     p.add_argument("--session", default=DEFAULT_SESSION,
                    help=f"Session cache file (default: {DEFAULT_SESSION})")
     p.add_argument("--qr-png", default=DEFAULT_QR_PNG,
@@ -462,6 +503,10 @@ def parse_args(argv=None):
                    help="Delete the cached session and exit")
     p.add_argument("--json", action="store_true", help="Output raw JSON")
     p.add_argument("--csv", metavar="PATH", help="Also write results to a CSV file")
+    p.add_argument("--scan", metavar="TARGETS",
+                   help="Also find each device on the local network and its protocol "
+                        "version, over TCP port 6668: your IoT VLAN or subnet, or device "
+                        "IPs, comma-separated, e.g. 192.168.2.0/24")
     return p.parse_args(argv)
 
 
@@ -476,15 +521,37 @@ def main(argv=None):
             print("No cached session to remove.")
         return
 
+    targets = None
+    if args.scan:
+        import lan_scan
+
+        try:
+            targets = lan_scan.parse_targets(args.scan)
+        except lan_scan.TargetError as e:
+            sys.exit(f"--scan: {e}")
+
     devices = get_devices(args)
+    lan = None
+    if targets:
+        # The scan is an extra: whatever goes wrong in it, the list still prints.
+        try:
+            lan = scan_lan(devices, targets)
+        except Exception as e:
+            import lan_scan
+
+            # Only our own messages are safe to print: another error's text
+            # could carry a device's repr, key included.
+            why = str(e) if isinstance(e, lan_scan.ScannerUnavailable) else type(e).__name__
+            print(f"Skipping --scan: {why}. The device list below doesn't include "
+                  "local IPs or protocol versions.\n", file=sys.stderr)
 
     if args.json:
-        print(json.dumps([device_dict(d) for d in devices], indent=2, ensure_ascii=False))
+        print(json.dumps([_with_lan(d, lan) for d in devices], indent=2, ensure_ascii=False))
     else:
-        print_devices(devices)
+        print_devices(devices, lan)
 
     if args.csv:
-        export_csv(devices, args.csv)
+        export_csv(devices, args.csv, lan)
         print(f"Wrote {len(devices)} row(s) to {args.csv}")
 
     if not devices:

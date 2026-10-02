@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tuya-local-key"
-version = "2.1.0"
+version = "3.0.0"
 description = "List your Smart Life / Tuya devices via QR-code login (no developer account needed)."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -12,6 +12,7 @@ dependencies = [
     "tuya-device-sharing-sdk>=0.2.15",
     "qrcode[pil]>=7.4",
     "cryptography>=41.0",
+    "tinytuya>=1.20",
 ]
 
 [project.scripts]
@@ -24,4 +25,4 @@ markers = [
 ]
 
 [tool.setuptools]
-py-modules = ["tuya_devices"]
+py-modules = ["tuya_devices", "lan_scan"]

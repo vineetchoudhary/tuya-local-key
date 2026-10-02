@@ -211,7 +211,7 @@ def test_table_shows_the_scan_columns_only(page):
     headers = page.locator("#thead th").all_inner_texts()
 
     assert [h.strip() for h in headers] == [
-        "Name", "Status", "ID", "Local Key", "Product ID", "Product Name",
+        "Name", "Status", "ID", "Local Key", "Protocol", "Product ID", "Product Name",
         "Update Time", "Details",
     ]
     assert page.locator("#rows tr").count() == len(DEVICES)
@@ -259,7 +259,7 @@ def test_panel_shows_the_fields_the_table_leaves_out(page):
     assert field_value(page, "ip") == PLUG.ip
     assert field_value(page, "model") == PLUG.model
     assert field_value(page, "support_local") == "Yes"
-    assert field_value(page, "asset_id") == "—"          # empty string, not "None"
+    assert field_value(page, "asset_id") == "-"          # empty string, not "None"
     assert page.locator("#rows tr.selected").count() == 1
 
 
@@ -267,7 +267,7 @@ def test_panel_surfaces_fields_the_sdk_does_not_document(page):
     open_panel(page, "Balcony Door Sensor")
 
     assert "OTHER FIELDS" in page.locator("#panelBody").inner_text().upper()
-    assert field_value(page, "protocol_version") == "3.3"
+    assert field_value(page, "firmware_channel") == "beta"
     assert field_value(page, "sub") == "Yes"
     assert field_value(page, "gateway_id") == "ebd8f1c0a1b2c3d4e5"
 
@@ -282,7 +282,7 @@ def test_panel_shows_local_time_utc_and_epoch(page):
     assert "2025-07-08 18:40:00 UTC" in updated
     assert str(demo_devices.UPDATE_TIME) in updated
     # The table reads local, not UTC.
-    assert "2025-07-09 00:10:00" in cell_texts(page, 7)[0]
+    assert "2025-07-09 00:10:00" in cell_texts(page, 8)[0]
 
 
 def data_points(page):
@@ -314,7 +314,7 @@ def test_data_points_fall_back_when_the_device_has_no_local_mapping(page):
 
     points = data_points(page)
 
-    assert points["battery_percentage"] == ("—", "84", "Integer · read-only · 0–100 %")
+    assert points["battery_percentage"] == ("-", "84", "Integer · read-only · 0–100 %")
 
 
 def test_panel_degrades_for_a_device_with_no_specs_or_timestamps(page):
@@ -404,7 +404,8 @@ def _forget_devices(app):
     with app._devices_cache_lock:
         app._devices_cache = None
         app._devices_cache_loaded = True
-    app.device_cache.clear(app.DEVICE_CACHE_FILE, app.DEVICE_CACHE_KEY_FILE)
+    app._clear_lan()
+    app.device_cache.clear(app.DEVICE_CACHE_FILE, app.DEVICE_CACHE_KEY_FILE, app.LAN_CACHE_FILE)
 
 
 @pytest.fixture()
@@ -463,8 +464,8 @@ def test_added_removed_and_renamed_devices_are_listed(page, running_app, monkeyp
     refreshed(page, "#changesNotice")
 
     notice = page.locator("#changesNotice").inner_text()
-    assert f"1 device added — Hallway Sensor" in notice
-    assert f"1 device removed — {dropped.name}" in notice
+    assert f"1 device added: Hallway Sensor" in notice
+    assert f"1 device removed: {dropped.name}" in notice
     assert "1 device renamed" in notice
     assert f"Utility Room Plug (was {was})" in notice
     assert "local key changed" not in notice
@@ -543,3 +544,488 @@ def test_an_expired_login_keeps_the_saved_list_and_offers_a_relogin(page, runnin
     page.wait_for_selector("#login:not(.hidden)")
 
     assert page.locator("#devices").is_hidden()
+
+
+# --------------------------------------------------------------------------- #
+# Scan network: local IPs and protocol versions
+# --------------------------------------------------------------------------- #
+LAMP = DEVICES[demo_devices.LAMP]
+SENSOR = DEVICES[demo_devices.SENSOR]
+BARE = DEVICES[demo_devices.BARE]
+
+
+def _lan(status, ip=None, version=None, device22=False, **extra):
+    return dict(status=status, ip=ip, version=version, device22=device22,
+                checked_at=1_752_000_000, **extra)
+
+
+FIRST_SCAN = {
+    PLUG.id: _lan("ok", "192.168.1.61", "3.4"),
+    LAMP.id: _lan("busy", "192.168.1.42", "3.3", device22=True),
+    SENSOR.id: _lan("via_gateway", gateway_id=SENSOR.gateway_id),
+    BARE.id: _lan("not_found"),
+}
+
+
+def _scans(app, monkeypatch, *rounds):
+    """Each scan answers with the next of `rounds`: {device id: result}."""
+    remaining = list(rounds)
+    calls = []
+
+    def scan(targets, devices, known, progress=None, cancel=None, only=None):
+        calls.append({"targets": targets, "devices": [d["id"] for d in devices], "only": only})
+        if progress:
+            progress({"phase": "probe", "addresses": len(targets), "open": 3, "devices": 3, "matched": 1})
+        results = remaining.pop(0) if remaining else {}
+        return {"results": results, "summary": {
+            "addresses": len(targets), "open": 3, "devices": 3, "sub_devices": 1,
+            "sub_devices_reached": sum(r["status"] == "via_gateway" and bool(r["ip"])
+                                       for r in results.values()),
+            "matched": sum(r["status"] == "ok" for r in results.values()),
+            "refused": ["192.168.1.42"], "unmatched": ["192.168.1.77"], "out_of_budget": [],
+            "cancelled": False, "duration": 1.2, "finished_at": 1_752_000_000 + len(calls),
+        }}
+
+    monkeypatch.setattr(app.lan_scan, "scan", scan)
+    return calls
+
+
+def _held_scan(app, monkeypatch):
+    """A scan that keeps running until the test sets the returned event, the
+    way one waits on the checks already under way after a cancel."""
+    release = threading.Event()
+
+    def scan(targets, devices, known, progress=None, cancel=None, only=None):
+        if progress:
+            progress({"phase": "probe", "addresses": len(targets), "open": 1, "devices": 3, "matched": 0})
+        release.wait(10)
+        return {"results": {}, "summary": {
+            "addresses": len(targets), "open": 1, "devices": 3, "sub_devices": 1,
+            "sub_devices_reached": 0, "matched": 0, "refused": [], "unmatched": [],
+            "out_of_budget": [], "cancelled": bool(cancel and cancel.is_set()),
+            "duration": 1.0, "finished_at": 1_752_000_100,
+        }}
+
+    monkeypatch.setattr(app.lan_scan, "scan", scan)
+    return release
+
+
+def start_scan(page, targets="192.168.1.0/30"):
+    if page.locator("#scanBox").is_hidden():
+        page.click("#scanBtn")
+    page.fill("#scanTargets", targets)
+    page.click("#scanStart")
+    page.wait_for_selector("#scanCancel")
+
+
+def scanned(page, targets="192.168.1.0/24"):
+    if page.locator("#scanBox").is_hidden():
+        page.click("#scanBtn")
+    page.fill("#scanTargets", targets)
+    page.click("#scanStart")
+    page.wait_for_selector("#lanSummaryNotice")
+    page.wait_for_function("!lanPollTimer")
+
+
+def row(page, device):
+    return page.locator(f"#rows tr:has-text('{device.name}')")
+
+
+def test_a_scan_fills_the_protocol_column_and_the_status_badges(page, running_app, monkeypatch):
+    calls = _scans(running_app, monkeypatch, FIRST_SCAN)
+
+    scanned(page, "192.168.1.0/30")
+
+    assert calls[0]["targets"] == ["192.168.1.1", "192.168.1.2"]
+    assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "3.4"
+    assert "3.3" in row(page, LAMP).locator("td:nth-child(5)").inner_text()
+    assert "device22" in row(page, LAMP).locator("td:nth-child(5)").inner_text()
+    assert row(page, PLUG).locator("td:nth-child(2)").inner_text().split() == ["LAN", "reachable"]
+    assert row(page, LAMP).locator("td:nth-child(2)").inner_text().split() == ["LAN", "busy"]
+    assert "via gateway" in row(page, SENSOR).inner_text()
+    assert "not found" in row(page, BARE).inner_text()
+    notice = page.locator("#lanSummaryNotice").inner_text()
+    assert "Found 1 of 3 devices on the local network" in notice
+    assert "1 address refused connections" in notice and "192.168.1.42" in notice
+    assert "192.168.1.77" in notice
+
+
+def test_a_devices_status_falls_back_to_the_cloud_flag_without_a_scan(page):
+    assert row(page, PLUG).locator("td:nth-child(2)").inner_text() == "online"
+    assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "-"
+
+
+def test_the_status_column_sorts_lan_results_ahead_of_the_cloud_flag(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.1.61", "3.4"),
+                                      BARE.id: _lan("busy", "192.168.1.9", "3.3")})
+    scanned(page)
+
+    page.click("#thead th[data-key='online']")
+
+    names = [n.strip() for n in cell_texts(page, 1)]
+    # reachable, then the cloud's online (the lamp), then busy, then the cloud's offline
+    assert names == [PLUG.name, LAMP.name, BARE.name, SENSOR.name]
+    assert "3 online" in page.locator("#count").inner_text()
+
+
+def test_the_panel_shows_the_local_network_section(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, FIRST_SCAN)
+    scanned(page)
+
+    open_panel(page, LAMP.name)
+
+    assert field_value(page, "local_ip") == "192.168.1.42"
+    assert "3.3" in field_value(page, "protocol_version")
+    assert "3.22" in field_value(page, "protocol_version"), "tuya-local's name for the quirk"
+    assert "busy" in field_value(page, "lan_status")
+    assert "another local client" in field_value(page, "lan_status")
+    assert page.locator("#panelBody [data-lan-check] input").input_value() == "192.168.1.42"
+
+
+def test_a_sub_device_points_to_its_gateway_instead_of_a_check(page):
+    open_panel(page, SENSOR.name)
+
+    body = page.locator("#panelBody").inner_text()
+    assert "reached through its gateway" in body
+    assert "check it at an IP address below" not in body, "there is no check below to point to"
+    assert page.locator("#panelBody [data-lan-check]").count() == 0
+
+
+def test_a_device_without_a_local_key_offers_no_check(page):
+    open_panel(page, BARE.name)   # Tuya returned no local_key for it
+
+    body = page.locator("#panelBody").inner_text()
+    assert "doesn't return a local key" in body
+    assert "check it at an IP address below" not in body
+    assert page.locator("#panelBody [data-lan-check]").count() == 0
+
+
+def test_a_sub_device_whose_gateway_wasnt_found_is_greyed_out(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, FIRST_SCAN)   # the sensor's gateway: not reached
+    scanned(page)
+
+    badge = row(page, SENSOR).locator("td:nth-child(2) .badge")
+    assert "muted" in badge.get_attribute("class")
+    assert "reached through" not in page.locator("#lanSummaryNotice").inner_text()
+    open_panel(page, SENSOR.name)
+    assert "which the last scan didn't find" in field_value(page, "lan_status")
+
+
+def test_a_sub_device_reached_through_its_gateway_reads_as_reachable(page, running_app, monkeypatch):
+    reached = dict(FIRST_SCAN, **{SENSOR.id: _lan("via_gateway", "192.168.1.61", "3.4",
+                                                  gateway_id=SENSOR.gateway_id)})
+    _scans(running_app, monkeypatch, reached)
+    scanned(page)
+
+    badge = row(page, SENSOR).locator("td:nth-child(2) .badge")
+    assert "on" in badge.get_attribute("class").split()
+    assert "plus 1 sub-device reached through its gateway" in page.locator("#lanSummaryNotice").inner_text()
+
+
+def test_an_ip_being_typed_survives_a_repaint(page):
+    open_panel(page, LAMP.name)
+    page.fill("#panelBody [data-lan-check] input", "192.168.1.5")
+
+    page.evaluate("render()")   # what a finished scan or the key toggle does
+
+    assert page.locator("#panelBody [data-lan-check] input").input_value() == "192.168.1.5"
+    assert page.evaluate("document.activeElement.name") == "ip", "and it keeps the focus"
+
+
+def test_cancel_says_so_until_the_scan_stops(page, running_app, monkeypatch):
+    release = _held_scan(running_app, monkeypatch)
+    try:
+        start_scan(page)
+        page.click("#scanCancel")
+        page.wait_for_selector("#scanProgress :text('Cancelling')")
+        page.wait_for_timeout(1500)   # a poll or two later: still cancelling, not cancellable again
+
+        assert "Cancelling" in page.locator("#scanProgress").inner_text()
+        assert page.locator("#scanCancel").is_disabled()
+    finally:
+        release.set()
+    page.wait_for_selector("#scanProgress :text('Scan cancelled')")
+
+
+def test_a_refresh_during_a_scan_keeps_a_closed_scan_box_closed(page, running_app, monkeypatch):
+    release = _held_scan(running_app, monkeypatch)
+    try:
+        start_scan(page)
+        page.click("#scanClose")
+
+        page.click("#refreshBtn")
+        page.wait_for_selector("#devices:not(.hidden)")
+        page.wait_for_function("!document.getElementById('refreshBtn').disabled")
+
+        assert page.locator("#scanBox").is_hidden()
+    finally:
+        release.set()
+    page.wait_for_function("!lanPollTimer")
+
+
+def test_one_device_can_be_checked_from_the_panel(page, running_app, monkeypatch):
+    calls = _scans(running_app, monkeypatch, {LAMP.id: _lan("ok", "192.168.1.50", "3.5")})
+    open_panel(page, LAMP.name)
+
+    page.fill("#panelBody [data-lan-check] input", "192.168.1.50")
+    page.click("#panelBody [data-lan-check] button")
+    page.wait_for_selector("#panelBody :text('Found at 192.168.1.50')")
+
+    assert calls[0]["targets"] == ["192.168.1.50"]
+    assert calls[0]["only"] == [LAMP.id], "the whole list goes along, but only the lamp is looked for"
+    assert row(page, LAMP).locator("td:nth-child(5)").inner_text() == "3.5"
+    assert page.locator("#lanSummaryNotice").count() == 0, "a single check is not a scan"
+
+
+def test_bad_targets_are_explained_in_the_scan_box(page, running_app):
+    page.click("#scanBtn")
+    page.fill("#scanTargets", "8.8.8.8")
+    page.click("#scanStart")
+
+    page.wait_for_selector("#scanError:not(.hidden)")
+    assert "not a private network" in page.locator("#scanError").inner_text()
+
+
+def test_the_last_targets_prefill_the_next_scan(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, FIRST_SCAN)
+    scanned(page, "192.168.2.0/24, 192.168.3.0/24")
+
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("#rows tr")
+    page.click("#scanBtn")
+
+    assert page.locator("#scanTargets").input_value() == "192.168.2.0/24, 192.168.3.0/24"
+    assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "3.4", "results come back on load"
+
+
+def test_a_version_change_is_called_out_and_dismissed_on_its_own(page, running_app, monkeypatch):
+    upgraded = dict(FIRST_SCAN, **{PLUG.id: _lan("ok", "192.168.1.61", "3.5")})
+    _scans(running_app, monkeypatch, FIRST_SCAN, upgraded)
+    scanned(page)
+    assert page.locator("#changesNotice").count() == 0
+    page.click("#lanSummaryNotice [data-dismiss-lan-summary]")
+
+    scanned(page)
+
+    notice = page.locator("#changesNotice").inner_text()
+    assert "What changed since the previous scan" in notice
+    assert "1 protocol version changed" in notice
+    assert f"{PLUG.name} (3.4 → 3.5)" in notice
+    assert "version changed" in row(page, PLUG).inner_text().lower()
+    page.click("#changesNotice [data-dismiss-changes]")
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("#rows tr")
+    assert page.locator("#changesNotice").count() == 0
+    assert "version changed" in row(page, PLUG).inner_text().lower()
+
+
+def test_filtering_matches_the_lan_badges(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, FIRST_SCAN)
+    scanned(page)
+
+    page.fill("#filter", "busy")
+
+    assert page.locator("#rows tr").count() == 1
+    assert LAMP.name in page.locator("#rows").inner_text()
+
+
+def test_csv_export_includes_the_lan_fields(page, running_app, monkeypatch, tmp_path):
+    _scans(running_app, monkeypatch, FIRST_SCAN)
+    scanned(page)
+
+    with page.expect_download() as download:
+        page.click("#csvBtn")
+    path = tmp_path / "devices.csv"
+    download.value.save_as(path)
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = {r["id"]: r for r in csv.DictReader(f)}
+
+    assert rows[PLUG.id]["protocol_version"] == "3.4"
+    assert rows[PLUG.id]["local_ip"] == "192.168.1.61"
+    assert rows[PLUG.id]["lan_status"] == "ok"
+    assert rows[PLUG.id]["online"] == "true", "the cloud flag stays as it was"
+    assert rows[LAMP.id]["device22"] == "true"
+    assert rows[PLUG.id]["lan_checked_at"] == "2025-07-08 18:40:00 UTC"
+
+
+# --------------------------------------------------------------------------- #
+# Header actions: what doesn't fit on the header's line goes in the ⋮ menu
+# --------------------------------------------------------------------------- #
+ACTIONS = ["csvBtn", "scanBtn", "refreshBtn", "logoutBtn"]
+
+
+def in_menu(page):
+    return [a for a in ACTIONS if page.locator(f"#moreMenu #{a}").count()]
+
+
+def test_every_action_fits_in_a_wide_header(page):
+    assert in_menu(page) == []
+    assert page.locator("#moreWrap").is_hidden()
+
+
+def test_a_narrow_header_moves_actions_into_the_menu_on_one_line(page):
+    one_line = page.locator("header").bounding_box()["height"]
+
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+
+    assert page.locator("header").bounding_box()["height"] == one_line
+    assert "refreshBtn" not in in_menu(page), "Refresh is the last to go"
+    assert "logoutBtn" in in_menu(page) and "csvBtn" in in_menu(page)
+    assert page.evaluate("document.documentElement.scrollWidth") <= 375
+    assert page.locator("#moreMenu").is_hidden()
+
+    page.click("#moreBtn")
+    assert page.locator("#moreMenu").is_visible()
+    assert page.evaluate("document.activeElement.id") == in_menu(page)[0]
+    page.click("#moreMenu #scanBtn")
+
+    assert page.locator("#moreMenu").is_hidden()
+    assert page.locator("#scanBox").is_visible()
+
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.wait_for_function("document.getElementById('moreWrap').classList.contains('hidden')")
+    assert in_menu(page) == []
+
+
+def test_the_menu_closes_on_escape_and_on_an_outside_click(page):
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+
+    page.click("#moreBtn")
+    page.keyboard.press("Escape")
+    assert page.locator("#moreMenu").is_hidden()
+    assert page.evaluate("document.activeElement.id") == "moreBtn"
+
+    page.click("#moreBtn")
+    page.click("#count")
+    assert page.locator("#moreMenu").is_hidden()
+
+
+def test_opening_the_panel_moves_actions_out_of_its_way(page):
+    page.set_viewport_size({"width": 1000, "height": 800})
+    page.wait_for_timeout(100)
+    assert in_menu(page) == []
+
+    open_panel(page, PLUG.name)
+    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+
+    assert "logoutBtn" in in_menu(page)
+
+
+def test_the_menu_button_is_as_tall_as_the_buttons_beside_it(page):
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+
+    more = page.locator("#moreBtn").bounding_box()
+    refresh = page.locator("#refreshBtn").bounding_box()
+    assert more["height"] == refresh["height"]
+    assert more["y"] == refresh["y"]
+
+
+def test_ui_text_uses_no_semicolons_or_em_dashes(page, running_app, monkeypatch):
+    # Every notice at once: a rotated key, a scan summary, a version change.
+    _scans(running_app, monkeypatch, FIRST_SCAN,
+           dict(FIRST_SCAN, **{PLUG.id: _lan("ok", "192.168.1.61", "3.5")}))
+    scanned(page)
+    scanned(page)
+    _serves(running_app, monkeypatch, _with_rotated_key())
+    refreshed(page, "#changesNotice")
+    open_panel(page, LAMP.name)
+
+    # innerText is only what shows: add closed dialogs, hidden boxes, tooltips,
+    # placeholders and labels, which are UI text too.
+    text = page.evaluate("""() => {
+      const parts = [document.body.innerText];
+      for (const el of document.querySelectorAll("dialog, #scanBox, .hint")) parts.push(el.textContent);
+      for (const el of document.querySelectorAll("[title], [placeholder], [aria-label]")) {
+        for (const name of ["title", "placeholder", "aria-label"]) {
+          if (el.hasAttribute(name)) parts.push(el.getAttribute(name));
+        }
+      }
+      return parts.join("\\n");
+    }""")
+    assert "Log out?" in text, "the closed dialog is checked too"
+    assert "—" not in text
+    assert ";" not in text.replace(PLUG.local_key, "").replace(LAMP.local_key, "")
+
+
+# --------------------------------------------------------------------------- #
+# Log out asks first
+# --------------------------------------------------------------------------- #
+@pytest.fixture()
+def restores_session(running_app):
+    """For a test that really logs out: put the shared session back afterwards."""
+    path = Path(running_app.SESSION_FILE)
+    saved = path.read_text()
+    yield running_app
+    path.write_text(saved)
+
+
+def test_log_out_asks_first_and_cancel_keeps_everything(page, running_app):
+    page.click("#logoutBtn")
+
+    dialog = page.locator("#logoutDialog")
+    assert dialog.is_visible()
+    assert "network scan results" in dialog.inner_text()
+    assert page.evaluate("document.activeElement.id") == "logoutCancel", "the safe choice has focus"
+
+    page.click("#logoutCancel")
+
+    assert dialog.is_hidden()
+    assert page.locator("#devices").is_visible()
+    assert os.path.exists(running_app.SESSION_FILE)
+    page.wait_for_function("document.activeElement.id === 'logoutBtn'")
+
+
+def test_escape_and_the_backdrop_cancel_without_closing_the_panel(page, running_app):
+    open_panel(page, PLUG.name)
+
+    page.click("#logoutBtn")
+    page.keyboard.press("Escape")
+    assert page.locator("#logoutDialog").is_hidden()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "false"
+
+    page.click("#logoutBtn")
+    page.mouse.click(5, 5)
+    assert page.locator("#logoutDialog").is_hidden()
+    assert os.path.exists(running_app.SESSION_FILE)
+
+
+def test_confirming_logs_out(page, restores_session):
+    page.click("#logoutBtn")
+    page.click("#logoutConfirm")
+
+    page.wait_for_selector("#login:not(.hidden)")
+    assert not os.path.exists(restores_session.SESSION_FILE)
+    assert page.locator("#headerActions").is_hidden()
+
+
+def test_log_out_from_the_menu_asks_too(page, running_app):
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+
+    page.click("#moreBtn")
+    page.click("#moreMenu #logoutBtn")
+    assert page.locator("#logoutDialog").is_visible()
+    assert page.locator("#moreMenu").is_hidden()
+
+    page.click("#logoutCancel")
+    # The dialog's close event, which moves focus, fires just after the click.
+    page.wait_for_function("document.activeElement.id === 'moreBtn'")
+    assert os.path.exists(running_app.SESSION_FILE)
+
+
+def test_an_unavailable_scanner_is_explained_and_the_list_stays(page, running_app, monkeypatch):
+    def unavailable():
+        raise running_app.lan_scan.ScannerUnavailable("tinytuya could not be loaded (ImportError)")
+
+    monkeypatch.setattr(running_app.lan_scan, "require_scanner", unavailable)
+    page.click("#scanBtn")
+    page.fill("#scanTargets", "192.168.2.0/24")
+    page.click("#scanStart")
+
+    page.wait_for_selector("#scanError:not(.hidden)")
+    assert "tinytuya library couldn't be loaded" in page.locator("#scanError").inner_text()
+    assert "device list and local keys still work" in page.locator("#scanError").inner_text()
+    assert page.locator("#rows tr").count() == len(DEVICES)

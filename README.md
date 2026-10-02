@@ -1,6 +1,7 @@
+
 # Tuya Local Key
 
-Tuya Local Key helps you retrieve the local keys for devices in your Smart Life / Tuya account, along with device ID, UUID, product details, category, IP address, online status, timestamps, and every data point the device reports.
+Tuya Local Key helps you retrieve the local keys for devices in your Smart Life / Tuya account, along with device ID, UUID, product details, category, online status, timestamps, and every data point the device reports. A network scan adds each device's local IP address and Tuya protocol version.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/header-devices-dark.png">
@@ -22,6 +23,7 @@ Use it as a self-hosted web UI with Docker or as a local CLI tool.
 - Session caching so you do not need to scan a QR code every time.
 - Encrypted device-list cache that survives restarts, so the list loads without waiting on Tuya.
 - Change detection on every refresh, including the local key rotations that silently break local integrations.
+- Network scan for each device's local IP and protocol version (3.1, 3.3, 3.4, 3.5, device22), across VLANs, with changed versions flagged like changed keys.
 - Saved list stays readable when Tuya is unreachable or your login expires.
 - Docker and Docker Compose support.
 - Home Assistant app support.
@@ -95,7 +97,8 @@ Selecting a device row opens a side panel with everything the device-sharing SDK
 | Section | Contents |
 |---|---|
 | Identity | Name, device ID, UUID, local key, category, product ID and name, model, icon path. |
-| Connectivity | Online status, IP address, local-control support, sub-device flag, node and gateway ids, time zone, coordinates. |
+| Connectivity | Cloud online status, the IP address Tuya reports (your WAN address, not the device's), local-control support, sub-device flag, node and gateway ids, time zone, coordinates. |
+| Local network | What the last [network scan](#protocol-version) found: local IP, protocol version, status, and when it was checked, with a Check button for this one device. |
 | Account | User, owner, and asset ids. |
 | Timeline | First paired, last paired, and status-updated times in your local timezone, with the UTC reading and the raw epoch below each one. |
 | Data points | Every data point: local dp id, code, current value, type, read/write access, and value range. |
@@ -103,7 +106,7 @@ Selecting a device row opens a side panel with everything the device-sharing SDK
 
 Fields Tuya returns that are not listed above appear under "Other fields", so nothing is hidden. The dp id shown next to each data point code is the mapping local integrations such as LocalTuya and tuya-local need.
 
-The device table shows the columns you scan most; UUID, category, IP address, and the last-paired time live in the panel. CSV export and `--json` still include every field.
+The device table shows the columns you scan most. UUID, category, IP address, and the last-paired time live in the panel. CSV export and `--json` still include every field.
 
 Timestamps in the web UI use your browser's timezone, so the same list reads differently on different machines. CSV export and the CLI stay in UTC.
 
@@ -116,9 +119,10 @@ That cached list contains every local key in your account, so it is encrypted at
 | File | Contents |
 |---|---|
 | `devices.cache` | The encrypted device list. |
-| `cache.key` | The key that decrypts it. |
+| `lan.cache` | The encrypted [network scan](#protocol-version) results. |
+| `cache.key` | The key that decrypts both. |
 
-Both are written readable only by the user the app runs as. Logging out deletes both. Deleting the key is the deliberate part: any copy of `devices.cache` that survives somewhere else, in a backup or a volume snapshot, can never be read again.
+They are written readable only by the user the app runs as. Logging out deletes them all. Deleting the key is the deliberate part: any copy of `devices.cache` that survives somewhere else, in a backup or a volume snapshot, can never be read again.
 
 This protects a cache file that leaks on its own. It is **not** protection against someone who can read the whole data directory, because the key sits next to the file it unlocks. That directory already holds `session.json`, whose tokens can fetch the same local keys from Tuya, so treat the directory itself as the secret either way.
 
@@ -138,9 +142,53 @@ Every refresh is compared against the list you saw before it, and anything that 
 - **Devices added or removed.**
 - **Devices renamed**, with the name they had before.
 
+A [network scan](#protocol-version) is compared against the scan before it in the same way, and its findings join the same summary:
+
+- **Protocol version changed.** A firmware update can move a device from 3.3 to 3.4 or 3.5, and a local integration still set to the old version stops working.
+- **Local IP changed**, with the old and new address.
+- **Local key no longer accepted.** The device answered at its address but not to its key. If Tuya lists a new key for it, the summary says so. Otherwise, click Refresh to check.
+
 Changed rows are badged in the table so they are findable in a long list, and the filter box matches the badge text: type `key changed` to narrow to just those. Selecting a device name in the summary opens its details panel, where the new key is ready to copy.
 
 The summary is a comparison, so the first list after logging in never has one, and switching accounts does not report every device as new. Dismissing it hides it until the next refresh finds something. Key values never appear in the summary itself, only the fact that one changed.
+
+## Protocol Version
+
+Local-control tools such as tinytuya, tuya-local and LocalTuya need each device's protocol version as well as its local key. Tuya's device-sharing API doesn't return one, and the IP address it reports is your WAN address, so both have to come from the device itself.
+
+Click **Scan network**, enter your IoT VLAN or subnet, the one your Tuya devices are on (for example `192.168.2.0/24`, or several separated by commas, up to 1,024 addresses), and start the scan. The app then:
+
+1. Opens a plain TCP connection to port 6668 on every address, to find the ones listening.
+2. Asks each of those addresses for a device's status with that device's local key, trying 3.3, 3.4 and 3.5 in turn, then 3.1. A device only answers to its own key, so a reply identifies it.
+
+A first scan of a /24 takes about 30 seconds for a typical home. An account with many devices takes longer, up to a few minutes, because each address that answers is asked with every key not yet matched. The results are saved, so later visits show them straight away. The next scan checks each device at its last address first, so a device that hasn't moved is found in about a second, but the scan still starts by checking every address, which takes several seconds on a /24. A scan never runs on its own: Refresh only reloads the list from Tuya.
+
+For a device the scan missed, open its details panel and use **Check** with its IP address (for example `192.168.2.1`), which you can find in your router's client list. A Check that fails at an address the device wasn't known at only reports the result. It doesn't replace what the last scan saved.
+
+### Networks and Firewalls
+
+The scan makes ordinary routed TCP connections and never relies on broadcasts, so it works when your devices are on a different VLAN from the app. Allow TCP port 6668 from the machine running Tuya Local Key to the IoT network. From Docker or the Home Assistant app, connections leave with the host's address, so the rule is for the host. The IoT network needs no access back. Set `LAN_SUBNET` to prefill the scan box.
+
+### What the Status Column Shows
+
+After a scan, the Status column shows what the device did when asked, tagged `LAN`. Devices without a scan result still show the cloud's online flag, which is often wrong about devices that are on your network.
+
+| Status | Meaning |
+|---|---|
+| reachable | Answered on port 6668 to its local key. |
+| via gateway | A Zigbee or Bluetooth sub-device. It shares its gateway's key and is reached at the gateway's IP and version. It is greyed out when the scan didn't find the gateway. |
+| busy | Refused the connection at its last known IP. Tuya devices accept only one local connection, so a device already connected to Home Assistant or another local client refuses new ones. A manual Check will be refused too until that client lets go. |
+| key mismatch | Answered at its last known IP, but not to its key, at the version it used before, twice in a row. The key has probably changed, so click Refresh. Another device may also have taken that IP. |
+| unreachable | Didn't answer at its last known IP. |
+| not found | No scanned address answered to its key. |
+
+The scan never holds a connection itself. Each check opens a connection, asks once and closes it, usually within a fraction of a second, or after a few seconds for an address that doesn't answer. It never has more than one connection open to an address, so a local integration that reconnects at that exact moment only has to retry, as it does after any dropped connection.
+
+The scan summary lists the addresses that refused connections, the ones that answered but not to any key in your account, and any that ran out of time before every key was tried, so you can match them against your router's client list.
+
+### device22
+
+Some devices need a quirk tinytuya calls `device22`. The Protocol column marks it next to the version, and the details panel gives the name tuya-local uses: `3.22` for 3.3 with the quirk, `3.42` for 3.4. Version 3.2 behaves exactly like 3.3 with the quirk, so the scan reports it that way.
 
 ## Bluetooth Devices
 
@@ -163,9 +211,11 @@ Pairing a Bluetooth device to a Tuya Bluetooth or SigMesh gateway makes a local 
 | `AUTH_PASSWORD` | _(unset)_ | Password for optional HTTP Basic Auth. Ignored under Home Assistant ingress. |
 | `DEVICE_CACHE` | `on` | Set to `off` to keep the device list in memory only instead of storing it. See [Device List Cache](#device-list-cache). |
 | `DEVICE_CACHE_FILE` | `devices.cache` beside `SESSION_FILE` | Path of the encrypted device-list cache. |
-| `DEVICE_CACHE_KEY_FILE` | `cache.key` beside `SESSION_FILE` | Path of the key that decrypts the device-list cache. |
+| `DEVICE_CACHE_KEY_FILE` | `cache.key` beside `SESSION_FILE` | Path of the key that decrypts the device-list cache and the scan results. |
+| `LAN_CACHE_FILE` | `lan.cache` beside `SESSION_FILE` | Path of the encrypted network scan results. |
+| `LAN_SUBNET` | _(unset)_ | Your IoT VLAN or subnet, to prefill the Scan network box, e.g. `192.168.2.0/24`. Several can be comma-separated. See [Protocol Version](#protocol-version). |
 
-> Security note: by default the web UI has no authentication, anyone who can reach the port can see device `localKey` values. Set **both** `AUTH_USERNAME` and `AUTH_PASSWORD` to require a login. This is recommended whenever the port is reachable beyond localhost. Basic Auth sends credentials unencrypted over plain HTTP, so still keep it on a trusted network or behind a TLS reverse proxy, and do not expose it directly to the internet. On Home Assistant, ingress already authenticates access, so these credentials are **ignored for ingress requests**. Set them only if you enable the direct port access and want a separate login there. The device list is also stored on disk, encrypted; see [Device List Cache](#device-list-cache) for what that does and does not protect.
+> Security note: by default the web UI has no authentication, so anyone who can reach the port can see device `localKey` values. Set **both** `AUTH_USERNAME` and `AUTH_PASSWORD` to require a login. This is recommended whenever the port is reachable beyond localhost. Basic Auth sends credentials unencrypted over plain HTTP, so still keep it on a trusted network or behind a TLS reverse proxy, and do not expose it directly to the internet. On Home Assistant, ingress already authenticates access, so these credentials are **ignored for ingress requests**. Set them only if you enable the direct port access and want a separate login there. The device list is also stored on disk, encrypted. See [Device List Cache](#device-list-cache) for what that does and does not protect.
 
 ## CLI
 
@@ -195,6 +245,7 @@ First run prompts for your Smart Life user code, prints a QR code in the termina
 | `--user-code CODE` | Provide the Smart Life user code instead of being prompted. |
 | `--json` | Output raw JSON. |
 | `--csv PATH` | Also write results to a CSV file. |
+| `--scan TARGETS` | Also find each device's local IP and protocol version, using your IoT VLAN or subnet, e.g. `--scan 192.168.2.0/24`. Adds `local_ip`, `protocol_version`, `device22` and `lan_status` to every output. See [Protocol Version](#protocol-version). |
 | `--relogin` | Ignore the cached session and scan a new QR code. |
 | `--logout` | Delete the cached session and exit. |
 | `--session PATH` | Use a different session-cache file. |
@@ -247,6 +298,14 @@ The QR code expires within a minute or two. If it times out, start the login aga
   <img alt="Change summary above the device table naming a rotated local key, an added device, a removed device, and a renamed device, with the matching rows badged" src="docs/screenshots/changes-light.png">
 </picture>
 
+### Network Scan
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/scan-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/scan-light.png">
+  <img alt="Network scan summary above the scan box, with the Protocol column and LAN status badges filled in" src="docs/screenshots/scan-light.png">
+</picture>
+
 ### Device Details
 
 <picture>
@@ -267,7 +326,7 @@ The QR code expires within a minute or two. If it times out, start the login aga
 
 - Terminal QR will not scan: open the saved `tuya-login-qr.png` instead.
 - Login timed out or QR expired: start the login again and scan promptly.
-- `session_invalid` or redirected back to login: the cached login expired; scan again.
+- `session_invalid` or redirected back to login: the cached login expired. Scan the QR code again.
 - No devices found: confirm the devices are paired in the Smart Life app under the same account.
 - Local key shows `-`: the device is Bluetooth-only. See [Bluetooth Devices](#bluetooth-devices).
 - A device stopped working with a local integration: its local key may have rotated. Click Refresh and read the change summary. See [Change Detection](#change-detection).
