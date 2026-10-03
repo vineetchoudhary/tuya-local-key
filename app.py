@@ -699,6 +699,11 @@ def lan_scan_cancel():
     return jsonify({"ok": True})
 
 
+def run_dev_server():
+    """Flask's development server, for working on the app from source.
+    """
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "8000")))
+
+
 if __name__ == "__main__":
-    # Dev server. In Docker we run via waitress (see Dockerfile).
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), debug=True)
+    run_dev_server()

@@ -76,6 +76,16 @@ def test_home_assistant_options_override_qr_scheme_environment(tmp_path, monkeyp
     assert app.QR_SCHEME == "tuyaSmart"
 
 
+def test_dev_server_only_listens_on_this_machine(webapp, monkeypatch):
+    calls = []
+    monkeypatch.setattr(webapp.app, "run", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setenv("PORT", "8123")
+
+    webapp.run_dev_server()
+
+    assert calls == [{"host": "127.0.0.1", "port": 8123}]
+
+
 def _reload_app(monkeypatch, tmp_path, **env):
     monkeypatch.setenv("SESSION_FILE", str(tmp_path / "session.json"))
     monkeypatch.setenv("HASS_OPTIONS_FILE", str(tmp_path / "missing.json"))

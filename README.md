@@ -84,6 +84,23 @@ docker run -d --name tuya-local-key -p 8000:8000 -v tuya-session:/data tuya-loca
 
 Then open `http://localhost:8000`.
 
+## Web UI from Source
+
+Set up the local environment, then add the web dependencies:
+
+```bash
+./setup.sh
+.venv/bin/python -m pip install -r requirements-web.txt
+```
+
+Serve it with waitress, the same server the Docker image uses:
+
+```bash
+.venv/bin/waitress-serve --listen=127.0.0.1:8000 app:app
+```
+
+Then open `http://localhost:8000`. It shares the CLI's saved login in `~/.config/tuya-smartlife/session.json`. To reach it from other devices, listen on `0.0.0.0:8000` instead, and read the security note under [Configuration](#configuration) first.
+
 ## Web Login Flow
 
 1. Enter your Smart Life user code.
@@ -210,7 +227,7 @@ Pairing a Bluetooth device to a Tuya Bluetooth or SigMesh gateway makes a local 
 |---|---|---|
 | `SESSION_FILE` | `/data/session.json` | Path where the cached login session is stored. |
 | `QR_SCHEME` | `smartlife` | QR prefix. Use `tuyaSmart` if scanning or confirmation does not work for your account. |
-| `PORT` | `8000` | Server port used by the Flask development server. The Docker image listens on `8000`. |
+| `PORT` | `8000` | Port the web UI listens on, in the Docker image and in the Flask development server. |
 | `AUTH_USERNAME` | _(unset)_ | Username for optional HTTP Basic Auth. Login is required only when **both** `AUTH_USERNAME` and `AUTH_PASSWORD` are set. Ignored under Home Assistant ingress. |
 | `AUTH_PASSWORD` | _(unset)_ | Password for optional HTTP Basic Auth. Ignored under Home Assistant ingress. |
 | `DEVICE_CACHE` | `on` | Set to `off` to keep the device list in memory only instead of storing it. See [Device List Cache](#device-list-cache). |
