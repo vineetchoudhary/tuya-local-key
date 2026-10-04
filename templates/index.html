@@ -160,8 +160,11 @@
     border-right: 1px solid currentColor; opacity: .75;
   }
   .protocol-note { margin-left: 5px; font-size: 12px; }
-  /* Under the key, so it can't be read with the Protocol column beside it */
-  .key-note { display: block; margin-top: 3px; font-size: 12px; }
+  /* A gateway key Tuya lists on a sub-device: explained in its tooltip and below the table */
+  .key-mark {
+    margin-left: 2px; padding: 0 2px; color: var(--muted); font-size: 15px; font-weight: 700;
+    line-height: 1; vertical-align: top; cursor: help;
+  }
   /* Scan network */
   .scan-box {
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
@@ -404,7 +407,7 @@
         <tbody id="rows"></tbody>
       </table>
     </div>
-    <p class="hint">Select a device to see everything Tuya reports for it.</p>
+    <p id="keyMarkNote" class="hint hidden">* Tuya lists this key on the gateway's sub-devices, not on the gateway.</p>
   </section>
 </main>
 
@@ -613,8 +616,12 @@ function localKeyOf(d) {
 }
 function localKeyCell(d) {
   const source = keySource(d);
+  if (!source) return renderLocalKey(localKeyOf(d));
+  const tip = `Tuya lists this key on its sub-device ${source.name || source.id}, not on the gateway.`;
+  // The sub-device's name stays in the tooltip, so this row doesn't read as the sub-device's.
   return renderLocalKey(localKeyOf(d)) +
-    (source ? `<span class="key-note muted" title="${esc(`Tuya lists this key on ${source.name || source.id}`)}">key from sub-device</span>` : "");
+    `<span class="key-mark" title="${esc(tip)}" aria-hidden="true">*</span>` +
+    `<span class="sr-only">Key from a sub-device</span>`;
 }
 function utcStamp(epoch) {
   const ms = epochMs(epoch);
@@ -1136,7 +1143,7 @@ function indexDevices() {
     // "key changed" or "busy" works.
     const change = CHANGE_BADGES[changeById.get(d.id)] || "";
     const lan = lanStatus(d) ? LAN_BADGES[d.lan_status].text : "";
-    const lent = keySource(d) ? `${localKeyOf(d)} key from sub-device` : "";
+    const lent = keySource(d) ? `${localKeyOf(d)} key from a sub-device` : "";
     const check = needsCheck(d) ? "check needed" : "";
     searchIndex.set(d, `${JSON.stringify(d)} ${times} ${change} ${lan} ${lent} ${check}`.toLowerCase());
   }
@@ -1179,6 +1186,8 @@ function renderRows(list) {
       `aria-label="${label}" title="Details">${icon("chevron")}</button></td>`;
     return `<tr data-id="${esc(d.id)}"${d.id === selectedId ? ' class="selected"' : ""}>${cells}${open}</tr>`;
   }).join("");
+  // The footnote for the * on a key from a sub-device, while one is listed.
+  $("keyMarkNote").classList.toggle("hidden", !list.some(d => keySource(d)));
 }
 
 function render() { renderNotices(); renderHead(); renderRows(computeList()); renderPanel(); }

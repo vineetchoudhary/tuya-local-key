@@ -212,7 +212,7 @@ The scan summary lists the addresses that refused connections, the ones that ans
 
 Tuya's device-sharing API can list a Zigbee or Bluetooth gateway with no local key, and put the gateway's key on each of its sub-devices instead. It doesn't say which sub-devices belong to which gateway, and it can mark the gateway itself as a sub-device. The scan tells gateways apart by their category, and tries the keys on your sub-devices at each address that answers.
 
-- **One gateway without a key:** it gets the key its sub-devices carry. Its row shows that key, marked **key from sub-device**, along with its IP and version.
+- **One gateway without a key:** it gets the key its sub-devices carry. Its row shows that key, marked with an asterisk, along with its IP and version. The asterisk's tooltip and a note below the table say the key comes from a sub-device.
 - **Several gateways without a key:** the scan still finds where each key answers, so every sub-device gets its gateway's IP and version. Tuya's data doesn't say which gateway is at which address, so the gateways show **check needed**, and the scan summary lists each address with the sub-devices whose key answered there. Open a gateway and **Check** it at its IP, with one click on the address its sub-devices point to, or one from your router's client list. The key it answers to becomes its key, and later scans remember it. When that leaves only one gateway, it's checked too, so two gateways take one click. A gateway checked at the wrong IP takes the other gateway's key, so check it again at the right one.
 
 In the CSV export and the CLI, a sub-device keeps its gateway's IP and version, which local tools need to reach it, and `lan_gateway_id` names that gateway.

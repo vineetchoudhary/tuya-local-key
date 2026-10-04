@@ -815,9 +815,16 @@ def test_a_keyless_gateway_shows_the_key_it_answered_to(page, running_app, monke
 
     page.click("#thead [data-key-toggle]")
     key_cell = row(page, ZIGBEE_GATEWAY).locator("td:nth-child(4)")
-    assert VALVE.local_key in key_cell.inner_text() and "key from sub-device" in key_cell.inner_text()
-    key, note = key_cell.locator(".key").bounding_box(), key_cell.locator(".key-note").bounding_box()
-    assert note["y"] >= key["y"] + key["height"], "under the key, not read with the version beside it"
+    assert VALVE.local_key in key_cell.inner_text()
+    assert key_cell.locator(".key-mark").get_attribute("title") == \
+        "Tuya lists this key on its sub-device Garden Valve, not on the gateway."
+    gateway, plug = (row(page, d).bounding_box()["height"] for d in (ZIGBEE_GATEWAY, PLUG))
+    assert abs(gateway - plug) < 0.5, "one line, like every other row"
+    footnote = page.locator("#keyMarkNote")
+    assert footnote.inner_text() == "* Tuya lists this key on the gateway's sub-devices, not on the gateway."
+    page.fill("#filter", PLUG.name)
+    assert footnote.is_hidden(), "only while a key it explains is listed"
+    page.fill("#filter", "")
     open_panel(page, ZIGBEE_GATEWAY.name)
     assert VALVE.local_key in field_value(page, "local_key")
     assert "Tuya lists this key on its sub-device Garden Valve" in field_value(page, "local_key")
