@@ -629,6 +629,39 @@ def test_a_key_whose_sub_devices_name_another_gateway_never_names_one_here(lan):
     assert check["results"]["gw-ble"]["status"] == "not_found"
 
 
+def test_keys_borrowed_from_sub_devices_are_tried_last_at_each_version(lan):
+    net = lan({"10.0.0.3": FakeTuya("c", KEYS["c"], "3.5")})
+    devices = [dev("d", KEYS["d"]), zigbee_gateway(), valve(), dev("c", KEYS["c"])]
+    known = {"c": {"ip": "10.0.0.7", "version": "3.5"}}   # moved since the last scan
+
+    lan_scan.scan(["10.0.0.3"], devices, known)
+
+    # The gateway has the valve's key by elimination: it waits behind every
+    # device with a key of its own, the one that moved here included.
+    assert [(d, v) for ip, d, v in net.probes if ip == "10.0.0.3"] == [
+        ("d", "3.3"), ("c", "3.3"), ("gw-zigbee", "3.3"),
+        ("d", "3.4"), ("c", "3.4"), ("gw-zigbee", "3.4"),
+        ("d", "3.5"), ("c", "3.5"),
+    ]
+
+
+def test_sub_devices_of_a_gateway_with_its_own_key_add_no_probes(lan):
+    hosts = {"10.0.0.3": FakeTuya("c", KEYS["c"], "3.5"),
+             "10.0.0.8": FakeTuya("hub", KEYS["f"], "3.4", gateway=True)}
+    devices = [dev("a", KEYS["a"]), dev("c", KEYS["c"]), dev("hub", KEYS["f"], category="wg2")]
+    subs = [dev(f"sensor-{i}", KEYS["f"], sub=True, ip="") for i in range(3)]
+
+    # One address per scan, so no match elsewhere can change the order here.
+    for ip in hosts:
+        without = lan(hosts)
+        lan_scan.scan([ip], devices)
+        with_subs = lan(hosts)
+        out = lan_scan.scan([ip], devices + subs)
+
+        assert with_subs.probes == without.probes
+    assert out["results"]["sensor-0"]["ip"] == "10.0.0.8", "they share the hub's key, so its IP too"
+
+
 def test_lend_keys_follows_gateway_id_and_never_lends_another_gateways_key():
     named = dict(valve(), gateway_id="gw-zigbee")
     foreign = dict(timer(), gateway_id="gw-elsewhere")   # its gateway isn't in the list

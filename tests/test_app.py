@@ -1318,7 +1318,8 @@ def test_a_check_that_names_a_gateway_takes_its_key_from_the_one_that_had_it(web
         {"gw": dict(_ok("10.0.0.9", "3.4"), key_from="timer"), "timer": via("10.0.0.9", "gw")},
         # ...and the scan after it gave the Mesh Gateway the valve's key.
         {"gw": dict(_ok("10.0.0.9", "3.4"), key_from="timer"), "timer": via("10.0.0.9", "gw"),
-         "gw-2": dict(_ok("10.0.0.8", "3.4"), key_from="valve"), "valve": via("10.0.0.8", "gw-2")},
+         "gw-2": dict(_ok("10.0.0.8", "3.4"), key_from="valve"), "valve": via("10.0.0.8", "gw-2"),
+         "plug": _ok("10.0.0.1"), "sensor": via("10.0.0.1", "plug")},
         # Checked at its real IP, "gw" answers to the valve's key.
         {"gw": dict(_ok("10.0.0.8", "3.4"), key_from="valve"), "valve": via("10.0.0.8", "gw")},
     ))
@@ -1332,6 +1333,9 @@ def test_a_check_that_names_a_gateway_takes_its_key_from_the_one_that_had_it(web
     assert results["gw"]["key_from"] == "valve" and results["valve"]["gateway_id"] == "gw"
     assert "gw-2" not in results, "it waits to be named again"
     assert results["timer"]["gateway_id"] is None and results["timer"]["ip"] == "10.0.0.9"
+    # Devices with keys of their own, and their sub-devices, are left as they were.
+    assert results["plug"] == _ok("10.0.0.1")
+    assert results["sensor"] == via("10.0.0.1", "plug")
 
 
 def test_a_gateway_result_is_dropped_when_its_sub_devices_key_changes_mid_scan(webapp, monkeypatch):

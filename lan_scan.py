@@ -526,7 +526,9 @@ class _Scan:
             _, untied = lend_keys(devices, explicit_only=True)
             unclaimed = {first: ids for first, ids in untied.items()
                          if by_id[first]["local_key"] not in own}
-        candidates = []
+        # The account's own keys first, then the keys borrowed from sub-devices,
+        # so a 3.1 device is asked with its own id before any borrowed one.
+        candidates, borrowed = [], []
         for d in devices:
             dev_id = d.get("id")
             if not dev_id or dev_id in sub_ids:
@@ -535,8 +537,9 @@ class _Scan:
                 candidates.append(dict(d, _gateway=dev_id in gateways))
             elif dev_id in lent:
                 source = lent[dev_id]
-                candidates.append(dict(d, local_key=by_id[source]["local_key"], _gateway=True,
-                                       _key_from=source))
+                borrowed.append(dict(d, local_key=by_id[source]["local_key"], _gateway=True,
+                                     _key_from=source))
+        candidates += borrowed
         self.unclaimed = {}   # pool id -> the sub-devices listed with that key
         for first, ids in unclaimed.items():
             pool_id = UNCLAIMED + first
@@ -631,15 +634,19 @@ class _Scan:
         here = [d for d in self.pool if self.known.get(d["id"], {}).get("ip") == ip]
         elsewhere = [d for d in self.pool if d["id"] in self.known and d not in here]
         unknown = [d for d in self.pool if d["id"] not in self.known]
+        # Devices remembered at another address are likely to be found there.
+        rest = unknown + elsewhere
+        # Keys borrowed from sub-devices go last at each version, so a device
+        # with a key of its own is asked just as if there were none.
+        rest = [d for d in rest if "_key_from" not in d] + [d for d in rest if "_key_from" in d]
         steps = []
         for dev in here:
             remembered = self.known[dev["id"]].get("version")
             if remembered in PASS_VERSIONS + (V31,):
                 steps += [(dev, remembered, True)] * 2
             steps += [(dev, v, False) for v in PASS_VERSIONS if v != remembered]
-        # Devices remembered at another address are likely to be found there.
         for version in PASS_VERSIONS:
-            steps += [(dev, version, False) for dev in unknown + elsewhere]
+            steps += [(dev, version, False) for dev in rest]
         return steps
 
     def _claim(self, ip, dev_id, version, device22):
