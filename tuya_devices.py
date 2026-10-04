@@ -498,6 +498,9 @@ def scan_lan(devices, targets, routers=None):
             # A gateway Tuya lists without a key answered to its sub-device's.
             lan[dev_id]["local_key"] = (by_id.get(source) or {}).get("local_key") or ""
             lan[dev_id]["local_key_from"] = source
+        if result.get("gateway_id"):
+            # A sub-device's IP and version are its gateway's, so name that gateway.
+            lan[dev_id]["lan_gateway_id"] = result["gateway_id"]
     return lan
 
 

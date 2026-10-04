@@ -814,8 +814,10 @@ def test_a_keyless_gateway_shows_the_key_it_answered_to(page, running_app, monke
     scanned(page)
 
     page.click("#thead [data-key-toggle]")
-    gateway_row = row(page, ZIGBEE_GATEWAY).inner_text()
-    assert VALVE.local_key in gateway_row and "from sub-device" in gateway_row
+    key_cell = row(page, ZIGBEE_GATEWAY).locator("td:nth-child(4)")
+    assert VALVE.local_key in key_cell.inner_text() and "key from sub-device" in key_cell.inner_text()
+    key, note = key_cell.locator(".key").bounding_box(), key_cell.locator(".key-note").bounding_box()
+    assert note["y"] >= key["y"] + key["height"], "under the key, not read with the version beside it"
     open_panel(page, ZIGBEE_GATEWAY.name)
     assert VALVE.local_key in field_value(page, "local_key")
     assert "Tuya lists this key on its sub-device Garden Valve" in field_value(page, "local_key")
@@ -828,6 +830,41 @@ def test_a_keyless_gateway_shows_the_key_it_answered_to(page, running_app, monke
     assert rows[ZIGBEE_GATEWAY.id]["local_key"] == VALVE.local_key
     page.fill("#filter", VALVE.local_key)
     assert page.locator("#rows tr").count() == 2, "the gateway is found by the key it shows"
+
+
+def test_a_sub_device_shows_its_gateways_version_only_as_the_gateways(page, running_app, monkeypatch,
+                                                                      tmp_path):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, VALVE)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=VALVE.id),
+        VALVE.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+
+    protocol = row(page, VALVE).locator("td:nth-child(5)")
+    assert protocol.inner_text() == "-", "a sub-device has no protocol version of its own"
+    assert protocol.locator(".dash").get_attribute("title") == \
+        "Reached through its gateway, which uses protocol 3.4"
+    assert row(page, ZIGBEE_GATEWAY).locator("td:nth-child(5)").inner_text() == "3.4"
+    page.click("#thead th[data-key='protocol_version']")
+    names = page.locator("#rows tr td:first-child").all_inner_texts()
+    assert names[-1].startswith(ZIGBEE_GATEWAY.name), "the valve sorts with the devices that have none"
+
+    open_panel(page, VALVE.name)
+    labels = page.locator("#panelBody dl.fields dt").all_inner_texts()
+    assert "Gateway IP" in labels and "Gateway protocol" in labels
+    assert "Local IP" not in labels and "Protocol version" not in labels
+    assert field_value(page, "protocol_version") == "3.4"
+
+    with page.expect_download() as download:
+        page.click("#csvBtn")
+    path = tmp_path / "devices.csv"
+    download.value.save_as(path)
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = {r["id"]: r for r in csv.DictReader(f)}
+    assert rows[VALVE.id]["protocol_version"] == "3.4", "scripts still get the gateway's version"
+    assert rows[VALVE.id]["lan_gateway_id"] == ZIGBEE_GATEWAY.id
+    assert rows[ZIGBEE_GATEWAY.id]["lan_gateway_id"] == ""
 
 
 def test_a_check_that_moves_a_gateways_key_says_so(page, running_app, monkeypatch):

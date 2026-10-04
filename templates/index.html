@@ -160,6 +160,8 @@
     border-right: 1px solid currentColor; opacity: .75;
   }
   .protocol-note { margin-left: 5px; font-size: 12px; }
+  /* Under the key, so it can't be read with the Protocol column beside it */
+  .key-note { display: block; margin-top: 3px; font-size: 12px; }
   /* Scan network */
   .scan-box {
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
@@ -459,7 +461,8 @@ const COLUMNS = [
   { key: "online",       label: "Status",       sortable: true, render: statusBadge, sortValue: statusRank },
   { key: "id",           label: "ID",           cls: "mono" },
   { key: "local_key",    label: "Local Key",    header: renderLocalKeyHeader, render: localKeyCell },
-  { key: "protocol_version", label: "Protocol", sortable: true, cls: "mono", render: protocolCell },
+  { key: "protocol_version", label: "Protocol", sortable: true, cls: "mono", render: protocolCell,
+    sortValue: d => viaGateway(d) ? "" : d.protocol_version },
   { key: "product_id",   label: "Product ID",   cls: "mono" },
   { key: "product_name", label: "Product Name" },
   { key: "update_time",  label: "Update Time",  sortable: true, render: d => renderTime(d, "update_time") },
@@ -497,7 +500,8 @@ const DETAIL_SECTIONS = [
 // ---- LAN scan results ----
 // What applyLan() adds to each device, so the filter, the panel and the CSV
 // export all see them like any other field.
-const LAN_KEYS = ["local_ip", "protocol_version", "device22", "lan_status", "lan_checked_at"];
+const LAN_KEYS = ["local_ip", "protocol_version", "device22", "lan_status", "lan_checked_at",
+  "lan_gateway_id"];
 const LAN_BADGES = {
   ok:           { cls: "on",    text: "reachable" },
   via_gateway:  { cls: "on",    text: "via gateway" },
@@ -560,7 +564,16 @@ function isOnline(d) {
   if (status === "via_gateway") return !!d.local_ip;
   return ["ok", "busy", "key_mismatch"].includes(status);
 }
+// A sub-device has no protocol version of its own. The one the scan gives it
+// is its gateway's, so the table leaves it out and the panel labels it.
+function viaGateway(d) {
+  return d.lan_status === "via_gateway";
+}
 function protocolCell(d) {
+  if (d.protocol_version && viaGateway(d)) {
+    const version = d.protocol_version + (d.device22 ? " with device22" : "");
+    return `<span class="dash" title="${esc(`Reached through its gateway, which uses protocol ${version}`)}">-</span>`;
+  }
   if (!d.protocol_version) return '<span class="dash">-</span>';
   return esc(d.protocol_version) +
     (d.device22 ? '<span class="protocol-note muted">device22</span>' : "");
@@ -601,7 +614,7 @@ function localKeyOf(d) {
 function localKeyCell(d) {
   const source = keySource(d);
   return renderLocalKey(localKeyOf(d)) +
-    (source ? `<span class="protocol-note muted" title="${esc(`Tuya lists this key on ${source.name || source.id}`)}">from sub-device</span>` : "");
+    (source ? `<span class="key-note muted" title="${esc(`Tuya lists this key on ${source.name || source.id}`)}">key from sub-device</span>` : "");
 }
 function utcStamp(epoch) {
   const ms = epochMs(epoch);
@@ -624,6 +637,8 @@ function applyLan() {
     d.lan_status = r.status || "";
     d.lan_checked_at = utcStamp(r.checked_at);
     if (r.checked_at) d.epochs = { ...(d.epochs || {}), lan_checked_at: r.checked_at };
+    // For the CSV: a sub-device's IP and version are this gateway's.
+    if (r.gateway_id) d.lan_gateway_id = r.gateway_id;
   }
 }
 async function loadLan() {
@@ -1121,7 +1136,7 @@ function indexDevices() {
     // "key changed" or "busy" works.
     const change = CHANGE_BADGES[changeById.get(d.id)] || "";
     const lan = lanStatus(d) ? LAN_BADGES[d.lan_status].text : "";
-    const lent = keySource(d) ? `${localKeyOf(d)} from sub-device` : "";
+    const lent = keySource(d) ? `${localKeyOf(d)} key from sub-device` : "";
     const check = needsCheck(d) ? "check needed" : "";
     searchIndex.set(d, `${JSON.stringify(d)} ${times} ${change} ${lan} ${lent} ${check}`.toLowerCase());
   }
@@ -1278,9 +1293,9 @@ function dash() { return '<span class="dash">-</span>'; }
 function section(title, body) {
   return `<h3 class="section-title">${esc(title)}</h3>${body}`;
 }
-function fieldList(d, keys) {
+function fieldList(d, keys, labels = {}) {
   return `<dl class="fields">` + keys.map(key =>
-    `<dt title="${esc(key)}">${esc(labelFor(key))}</dt><dd>${fieldValue(d, key)}</dd>`
+    `<dt title="${esc(key)}">${esc(labels[key] || labelFor(key))}</dt><dd>${fieldValue(d, key)}</dd>`
   ).join("") + `</dl>`;
 }
 
@@ -1351,7 +1366,8 @@ function lanSection(d) {
   if (lanStatus(d)) {
     const keys = ["lan_status", "local_ip", "protocol_version", "lan_checked_at"]
       .filter(key => key === "lan_status" || d[key]);
-    html += fieldList(d, keys);
+    html += fieldList(d, keys, viaGateway(d)
+      ? { local_ip: "Gateway IP", protocol_version: "Gateway protocol" } : {});
   } else if (!sub && !keyless && !unnamed) {
     html += `<p class="lan-note">Not checked on the local network yet. Use <b>Scan network</b>, ` +
       `or check it at an IP address below.</p>`;

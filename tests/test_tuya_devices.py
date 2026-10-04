@@ -769,6 +769,30 @@ def test_scan_gives_a_keyless_gateway_the_key_it_answered_to(monkeypatch, capsys
     assert "local_key_from" not in listed[1]
 
 
+def test_scan_names_the_gateway_a_sub_device_is_reached_through(tmp_path, monkeypatch, capsys):
+    csv_path = tmp_path / "devices.csv"
+    gateway = demo_device(id="gw-1", name="Gateway", local_key=None, category="wg2", sub=True)
+    valve = demo_device(id="valve-1", name="Valve", local_key="valve-key-012345", sub=True)
+    monkeypatch.setattr(core, "get_devices", lambda args: [gateway, valve])
+    _fake_lan_scan(monkeypatch, {
+        "gw-1": {"status": "ok", "ip": "192.168.2.8", "version": "3.4", "device22": False,
+                 "checked_at": 1.0, "key_from": "valve-1"},
+        "valve-1": {"status": "via_gateway", "ip": "192.168.2.8", "version": "3.4", "device22": False,
+                    "checked_at": 1.0, "gateway_id": "gw-1"},
+    })
+
+    core.main(["--json", "--csv", str(csv_path), "--scan", "192.168.2.8"])
+
+    out = capsys.readouterr().out
+    listed = json.loads(out[:out.rindex("]") + 1])
+    assert listed[1]["lan_gateway_id"] == "gw-1"
+    assert listed[1]["protocol_version"] == "3.4", "the gateway's, which tools need to reach it"
+    assert "lan_gateway_id" not in listed[0]
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        rows = {r["id"]: r for r in csv.DictReader(f)}
+    assert rows["valve-1"]["lan_gateway_id"] == "gw-1" and rows["gw-1"]["lan_gateway_id"] == ""
+
+
 def test_scan_lists_gateways_it_couldnt_tell_apart(monkeypatch, capsys):
     import lan_scan
 
