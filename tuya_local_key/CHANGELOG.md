@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1
+- **Scan network** now finds Tuya Zigbee and Bluetooth gateways that Tuya lists without a local key ([#7](https://github.com/vineetchoudhary/tuya-local-key/issues/7)). Tuya puts such a gateway's key on its sub-devices instead and doesn't say which sub-devices belong to which gateway, so the scan recognises gateways by their category and tries the keys on your sub-devices at each address that answers.
+- A gateway found this way shows its local key, marked with an asterisk because Tuya lists it on a sub-device, along with its IP and protocol version.
+- When several gateways have no key, the scan can't tell which one is at which address, so they show **check needed**. The scan summary lists each address with the sub-devices whose key answered there, and a gateway's details panel has a one-click **Check** for each address. When a Check leaves one gateway, that one is checked too, so two gateways take one click. Later scans remember them, even when their IPs change. The CLI keeps no state, so it lists those addresses instead, to match against your router's client list.
+- Sub-devices now get their gateway's IP and version even before the gateways are told apart. The table no longer shows a protocol version for them, since it's their gateway's. Their details panel shows it as **Gateway IP** and **Gateway protocol**, which tuya-local needs to set up a sub-device.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v3.0...v3.1
+
 ## 3.0
 - Added **Scan network**, which finds each device's local IP and protocol version (3.1, 3.3, 3.4, 3.5, and the device22 variant that tuya-local calls 3.22/3.42). Tuya's device-sharing API doesn't return a protocol version, so the app connects to each device on TCP port 6668 with its local key and tries each version in turn. It never uses broadcasts, so devices on another VLAN are found too, as long as the firewall lets the app reach port 6668 there.
 - Added a Protocol column. The Status column now shows what the scan found (reachable, busy, key mismatch, unreachable, not found, or via gateway), tagged `LAN`, and falls back to the cloud's online flag for devices that haven't been scanned.

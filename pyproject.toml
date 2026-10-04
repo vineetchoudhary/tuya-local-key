@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tuya-local-key"
-version = "3.0.0"
+version = "3.1.0"
 description = "List your Smart Life / Tuya devices via QR-code login (no developer account needed)."
 readme = "README.md"
 requires-python = ">=3.8"
