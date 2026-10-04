@@ -1338,6 +1338,63 @@ def test_a_check_that_names_a_gateway_takes_its_key_from_the_one_that_had_it(web
     assert results["sensor"] == via("10.0.0.1", "plug")
 
 
+def _via(ip, gateway_id=None):
+    return dict(_ok(ip, "3.4"), status="via_gateway", gateway_id=gateway_id)
+
+
+def test_a_check_that_names_a_gateway_also_checks_the_one_left(webapp, monkeypatch):
+    fake = FakeScan(
+        {"valve": _via("10.0.0.8"), "timer": _via("10.0.0.9")},   # the scan: two unnamed gateways
+        {"gw": dict(_ok("10.0.0.8", "3.4"), key_from="valve"), "valve": _via("10.0.0.8", "gw")},
+        {"gw-2": dict(_ok("10.0.0.9", "3.4"), key_from="timer"), "timer": _via("10.0.0.9", "gw-2")},
+    )
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch, devices=TWO_GATEWAY_DEVICES)
+    _scan(client)
+
+    job = _scan(client, device_id="gw", ip="10.0.0.8")
+
+    follow_up = fake.calls[2]
+    assert (follow_up["targets"], follow_up["only"]) == (["10.0.0.9"], ["gw-2"]), \
+        "where the only key left answered"
+    assert follow_up["known"]["gw"]["key_from"] == "valve", "it knows the first gateway's key now"
+    assert job["result"]["key_from"] == "valve"
+    assert [(a["device_id"], a["result"]["ip"]) for a in job["also"]] == [("gw-2", "10.0.0.9")]
+    results = client.get("/api/lan").json["results"]
+    assert results["gw-2"]["key_from"] == "timer" and results["timer"]["gateway_id"] == "gw-2"
+
+
+def test_a_failed_check_of_the_gateway_left_is_reported_but_not_saved(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"valve": _via("10.0.0.8"), "timer": _via("10.0.0.9")},
+        {"gw": dict(_ok("10.0.0.8", "3.4"), key_from="valve"), "valve": _via("10.0.0.8", "gw")},
+        {"gw-2": dict(_ok("10.0.0.9", "3.4"), status="busy", key_from="timer")},
+    ))
+    client = _lan_logged_in(webapp, monkeypatch, devices=TWO_GATEWAY_DEVICES)
+    _scan(client)
+
+    job = _scan(client, device_id="gw", ip="10.0.0.8")
+
+    assert job["also"][0]["result"]["status"] == "busy"
+    assert "gw-2" not in client.get("/api/lan").json["results"]
+
+
+def test_no_gateway_is_checked_unasked_while_more_than_one_could_have_the_key(webapp, monkeypatch):
+    fake = FakeScan(
+        {"valve": _via("10.0.0.8"), "timer": _via("10.0.0.9")},
+        {"gw": dict(_ok("10.0.0.8", "3.4"), key_from="valve"), "valve": _via("10.0.0.8", "gw")},
+    )
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    devices = TWO_GATEWAY_DEVICES + [
+        {"id": "gw-3", "name": "Third Gateway", "category": "wg2", "sub": True}]
+    client = _lan_logged_in(webapp, monkeypatch, devices=devices)
+    _scan(client)
+
+    job = _scan(client, device_id="gw", ip="10.0.0.8")
+
+    assert len(fake.calls) == 2 and job["also"] == []
+
+
 def test_a_gateway_result_is_dropped_when_its_sub_devices_key_changes_mid_scan(webapp, monkeypatch):
     gate = threading.Event()
     monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(

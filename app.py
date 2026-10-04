@@ -430,7 +430,7 @@ def _job_view(job):
         return None
     view = {k: job.get(k) for k in (
         "id", "kind", "state", "device_id", "targets", "started_at",
-        "finished_at", "summary", "result", "error",
+        "finished_at", "summary", "result", "error", "also",
     )}
     view["progress"] = dict(job.get("progress") or {})
     # Cancelled, but the checks already under way still finishing.
@@ -479,6 +479,38 @@ def _hand_over_gateway_keys(merged, results, current):
               and not device.get("gateway_id")
               and device.get("local_key") != keys[result["gateway_id"]]):
             merged[dev_id] = dict(result, gateway_id=None)
+
+
+def _remembered(stored):
+    """What a scan starts from: each device's last address and version, and
+    for a keyless gateway, the sub-device key it answered to."""
+    remembered = {}
+    for dev_id, r in stored.items():
+        if r.get("status") == lan_scan.VIA_GATEWAY:
+            continue
+        entry = {"ip": r["ip"], "version": r.get("version"),
+                 "device22": r.get("device22", False)} if r.get("ip") else {}
+        if r.get("key_from"):
+            # Kept even when its last result has no address.
+            entry["key_from"] = r["key_from"]
+        if entry:
+            remembered[dev_id] = entry
+    return remembered
+
+
+def _gateways_left(devices, stored):
+    """(gateway id, ip) for each keyless gateway a check just left with only
+    one key it can have, and the address where that key answered last. Its
+    own check could only confirm that, so it runs without being asked."""
+    lent, _ = lan_scan.lend_keys(devices, _remembered(stored))
+    left = []
+    for gateway_id, source in lent.items():
+        if (stored.get(gateway_id) or {}).get("key_from"):
+            continue   # found before, whatever it answered since
+        ip = (stored.get(source) or {}).get("ip")
+        if ip:
+            left.append((gateway_id, ip))
+    return left
 
 
 def _merge_lan(job, outcome, current):
@@ -574,26 +606,66 @@ def _run_lan_job(job, targets, devices, known, only, routers):
         return
 
     try:
-        session, session_key = _lan_session()
-        current = {d.get("id"): d for d in (_session_devices(session) or [])} if session else {}
+        result = outcome["results"].get(job["device_id"]) if job["device_id"] else None
+        if not _save_lan_outcome(job, outcome):
+            return
+        also = []
+        if job["kind"] == "device" and (result or {}).get("key_from") and result["status"] == lan_scan.OK:
+            also = _check_gateways_left(job, devices)
         with _lan_lock:
-            if _lan_job is not job or session_key != job["session_key"]:
-                # Logged out, or logged in again, while it ran: the results belong
-                # to a device list that is gone.
-                job.update(state="discarded", finished_at=time.time())
-                return
-            _merge_lan(job, outcome, current)
-            job.update(
-                state="cancelled" if outcome["summary"]["cancelled"] else "done",
-                finished_at=time.time(),
-                summary=outcome["summary"],
-                result=outcome["results"].get(job["device_id"]) if job["device_id"] else None,
-            )
+            if _lan_job is job and job["state"] == "running":
+                job.update(
+                    state="cancelled" if outcome["summary"]["cancelled"] else "done",
+                    finished_at=time.time(),
+                    summary=outcome["summary"],
+                    result=result,
+                    also=also,
+                )
     except Exception as e:
         # A job left "running" would refuse every later scan until a logout.
         app.logger.warning("LAN scan results not saved: %s", type(e).__name__)
         with _lan_lock:
             job.update(state="failed", error="scan_failed", finished_at=time.time())
+
+
+def _save_lan_outcome(job, outcome, device_id=None):
+    """Merge an outcome into the stored results, unless the session it belongs
+    to is gone. Returns False, and marks the job discarded, if it is. With
+    device_id, it is merged as a check of that device."""
+    session, session_key = _lan_session()
+    current = {d.get("id"): d for d in (_session_devices(session) or [])} if session else {}
+    with _lan_lock:
+        if _lan_job is not job or session_key != job["session_key"]:
+            # Logged out, or logged in again, while it ran: the results belong
+            # to a device list that is gone.
+            job.update(state="discarded", finished_at=time.time())
+            return False
+        _merge_lan(dict(job, device_id=device_id) if device_id else job, outcome, current)
+    return True
+
+
+def _check_gateways_left(job, devices):
+    """A check that named a keyless gateway can leave one key for another
+    gateway: check that one too, where its key answered last. Returns
+    [{"device_id", "result"}] for the job's view."""
+    with _lan_lock:
+        stored = (_lan_body_for(job["session_key"]) or _empty_lan_body()).get("results") or {}
+    also = []
+    for gateway_id, ip in _gateways_left(devices, stored):
+        if job["cancel"].is_set():
+            break
+        known = _remembered(stored)
+        known[gateway_id] = dict(known.get(gateway_id, {}), ip=ip)
+        try:
+            outcome = lan_scan.scan([ip], devices, known, cancel=job["cancel"], only=[gateway_id])
+        except Exception as e:
+            app.logger.warning("Gateway check after a check failed: %s", type(e).__name__)
+            break
+        # Merged like a check of that gateway: a failure isn't saved.
+        if not _save_lan_outcome(job, outcome, device_id=gateway_id):
+            break
+        also.append({"device_id": gateway_id, "result": outcome["results"].get(gateway_id)})
+    return also
 
 
 @app.get("/api/lan")
@@ -634,18 +706,7 @@ def lan_scan_start():
         return jsonify({"error": "no_devices"}), 409
     with _lan_lock:
         stored = (_lan_body_for(session_key) or _empty_lan_body()).get("results") or {}
-    remembered = {}
-    for dev_id, r in stored.items():
-        if r.get("status") == lan_scan.VIA_GATEWAY:
-            continue
-        entry = {"ip": r["ip"], "version": r.get("version"),
-                 "device22": r.get("device22", False)} if r.get("ip") else {}
-        if r.get("key_from"):
-            # A keyless gateway keeps the sub-device key it answered to, even
-            # when its last result has no address.
-            entry["key_from"] = r["key_from"]
-        if entry:
-            remembered[dev_id] = entry
+    remembered = _remembered(stored)
 
     device_id = str(data.get("device_id") or "").strip()
     if device_id:

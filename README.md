@@ -198,6 +198,7 @@ After a scan, the Status column shows what the device did when asked, tagged `LA
 |---|---|
 | reachable | Answered on port 6668 to its local key. |
 | via gateway | A Zigbee or Bluetooth sub-device. It shares its gateway's key and is reached at the gateway's IP and version. It is greyed out when the scan didn't find the gateway. See [Gateways](#gateways). |
+| check needed | A gateway Tuya lists without a key, which the last scan found but couldn't tell apart from your other gateways. Check it at its IP. See [Gateways](#gateways). |
 | busy | Refused the connection at its last known IP. Tuya devices accept only one local connection, so a device already connected to Home Assistant or another local client refuses new ones. A manual Check will be refused too until that client lets go. |
 | key mismatch | Answered at its last known IP, but not to its key, at the version it used before, twice in a row. The key has probably changed, so click Refresh. Another device may also have taken that IP. |
 | unreachable | Didn't answer at its last known IP. |
@@ -212,7 +213,7 @@ The scan summary lists the addresses that refused connections, the ones that ans
 Tuya's device-sharing API can list a Zigbee or Bluetooth gateway with no local key, and put the gateway's key on each of its sub-devices instead. It doesn't say which sub-devices belong to which gateway, and it can mark the gateway itself as a sub-device. The scan tells gateways apart by their category, and tries the keys on your sub-devices at each address that answers.
 
 - **One gateway without a key:** it gets the key its sub-devices carry. Its row shows that key, marked **from sub-device**, along with its IP and version.
-- **Several gateways without a key:** the scan still finds where each key answers, so every sub-device gets its gateway's IP and version. Tuya's data doesn't say which gateway is at which address, so the scan summary lists each address with the sub-devices whose key answered there. Open each gateway and **Check** it at its IP, which you can find in your router's client list. The key it answers to becomes its key, and later scans remember it. A gateway checked at the wrong IP takes the other gateway's key, so check it again at the right one.
+- **Several gateways without a key:** the scan still finds where each key answers, so every sub-device gets its gateway's IP and version. Tuya's data doesn't say which gateway is at which address, so the gateways show **check needed**, and the scan summary lists each address with the sub-devices whose key answered there. Open a gateway and **Check** it at its IP, with one click on the address its sub-devices point to, or one from your router's client list. The key it answers to becomes its key, and later scans remember it. When that leaves only one gateway, it's checked too, so two gateways take one click. A gateway checked at the wrong IP takes the other gateway's key, so check it again at the right one.
 
 ### device22
 

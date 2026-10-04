@@ -882,15 +882,17 @@ def test_a_sub_device_links_to_the_gateway_the_scan_found_it_through(page, runni
     page.wait_for_function(f"document.querySelector('#panelTitle').innerText === {ZIGBEE_GATEWAY.name!r}")
 
 
-def test_gateways_the_scan_couldnt_tell_apart_are_listed_with_their_sub_devices(
-        page, running_app, monkeypatch):
+def test_one_click_checks_a_gateway_and_the_one_left_is_checked_too(page, running_app, monkeypatch):
     _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, VALVE, WATER_TIMER)
     calls = _scans(running_app, monkeypatch, {
         VALVE.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=None),
         WATER_TIMER.id: _lan("via_gateway", "192.168.2.9", "3.4", gateway_id=None),
-    }, {
+    }, {   # the check of the Mesh Gateway
         BLE_GATEWAY.id: _lan("ok", "192.168.2.9", "3.4", key_from=WATER_TIMER.id),
         WATER_TIMER.id: _lan("via_gateway", "192.168.2.9", "3.4", gateway_id=BLE_GATEWAY.id),
+    }, {   # the gateway left, checked without a click
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=VALVE.id),
+        VALVE.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
     }, unnamed_gateways=[
         {"ip": "192.168.2.8", "version": "3.4", "sub_devices": [VALVE.id]},
         {"ip": "192.168.2.9", "version": "3.4", "sub_devices": [WATER_TIMER.id]},
@@ -900,24 +902,27 @@ def test_gateways_the_scan_couldnt_tell_apart_are_listed_with_their_sub_devices(
     found = "192.168.2.8 (Garden Valve), 192.168.2.9 (Water Timer)"
     notice = page.locator("#lanSummaryNotice").inner_text()
     assert f"2 gateways answered to local keys Tuya lists on sub-devices: {found}." in notice
+    for gateway in (ZIGBEE_GATEWAY, BLE_GATEWAY):
+        assert row(page, gateway).locator("td:nth-child(2)").inner_text().split() == ["LAN", "check", "needed"]
     open_panel(page, VALVE.name)
     assert "which answered at 192.168.2.8 to this device's key" in page.locator("#panelBody").inner_text()
     open_panel(page, BLE_GATEWAY.name)
     body = page.locator("#panelBody").inner_text()
     assert "Tuya lists this gateway's local key on its sub-devices" in body
-    assert f"The last scan found gateways at {found}." in body
+    assert "When that leaves one gateway, it's checked too." in body
 
-    page.fill("#panelBody [data-lan-check] input", "192.168.2.9")
-    page.click("#panelBody [data-lan-check] button")
+    page.click("#panelBody [data-check-ip='192.168.2.9']")
     page.wait_for_selector("#panelBody :text('Found at 192.168.2.9')")
 
-    assert calls[1]["only"] == [BLE_GATEWAY.id]
-    assert "It answered to the local key Tuya lists on Water Timer." in page.locator("#panelBody").inner_text()
+    assert (calls[1]["targets"], calls[1]["only"]) == (["192.168.2.9"], [BLE_GATEWAY.id])
+    assert (calls[2]["targets"], calls[2]["only"]) == (["192.168.2.8"], [ZIGBEE_GATEWAY.id])
+    message = page.locator("#panelBody .lan-note").last.inner_text()
+    assert "It answered to the local key Tuya lists on Water Timer." in message
+    assert "That left one gateway, so Zigbee Gateway was checked too: found at 192.168.2.8." in message
     page.click("#thead [data-key-toggle]")
     assert WATER_TIMER.local_key in row(page, BLE_GATEWAY).inner_text()
-    # The one left is the other gateway's.
-    left = "1 gateway answered to local keys Tuya lists on sub-devices: 192.168.2.8 (Garden Valve)."
-    assert left in page.locator("#lanSummaryNotice").inner_text()
+    assert VALVE.local_key in row(page, ZIGBEE_GATEWAY).inner_text()
+    assert "gateway answered to local keys" not in page.locator("#lanSummaryNotice").inner_text()
 
 
 def test_bad_targets_are_explained_in_the_scan_box(page, running_app):
