@@ -197,7 +197,7 @@ After a scan, the Status column shows what the device did when asked, tagged `LA
 | Status | Meaning |
 |---|---|
 | reachable | Answered on port 6668 to its local key. |
-| via gateway | A Zigbee or Bluetooth sub-device. It shares its gateway's key and is reached at the gateway's IP and version. It is greyed out when the scan didn't find the gateway. |
+| via gateway | A Zigbee or Bluetooth sub-device. It shares its gateway's key and is reached at the gateway's IP and version. It is greyed out when the scan didn't find the gateway. See [Gateways](#gateways). |
 | busy | Refused the connection at its last known IP. Tuya devices accept only one local connection, so a device already connected to Home Assistant or another local client refuses new ones. A manual Check will be refused too until that client lets go. |
 | key mismatch | Answered at its last known IP, but not to its key, at the version it used before, twice in a row. The key has probably changed, so click Refresh. Another device may also have taken that IP. |
 | unreachable | Didn't answer at its last known IP. |
@@ -206,6 +206,13 @@ After a scan, the Status column shows what the device did when asked, tagged `LA
 The scan never holds a connection itself. Each check opens a connection, asks once and closes it, usually within a fraction of a second, or after a few seconds for an address that doesn't answer. It never has more than one connection open to an address, so a local integration that reconnects at that exact moment only has to retry, as it does after any dropped connection.
 
 The scan summary lists the addresses that refused connections, the ones that answered but not to any key in your account, and any that ran out of time before every key was tried, so you can match them against your router's client list. An address that refuses isn't necessarily a Tuya device: any device that doesn't use port 6668 refuses it. The .1 that starts each subnet you enter, where a router usually sits, is still scanned but left out of these lists unless one of your devices answers there.
+
+### Gateways
+
+Tuya's device-sharing API can list a Zigbee or Bluetooth gateway with no local key, and put the gateway's key on each of its sub-devices instead. It doesn't say which sub-devices belong to which gateway, and it can mark the gateway itself as a sub-device. The scan tells gateways apart by their category, and tries the keys on your sub-devices at each address that answers.
+
+- **One gateway without a key:** it gets the key its sub-devices carry. Its row shows that key, marked **from sub-device**, along with its IP and version.
+- **Several gateways without a key:** the scan still finds where each key answers, so every sub-device gets its gateway's IP and version. Tuya's data doesn't say which gateway is at which address, so the scan summary lists each address with the sub-devices whose key answered there. Open each gateway and **Check** it at its IP, which you can find in your router's client list. The key it answers to becomes its key, and later scans remember it. A gateway checked at the wrong IP takes the other gateway's key, so check it again at the right one.
 
 ### device22
 

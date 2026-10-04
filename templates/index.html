@@ -456,7 +456,7 @@ const COLUMNS = [
     render: d => esc(d.name) + changeBadge(d.id) },
   { key: "online",       label: "Status",       sortable: true, render: statusBadge, sortValue: statusRank },
   { key: "id",           label: "ID",           cls: "mono" },
-  { key: "local_key",    label: "Local Key",    header: renderLocalKeyHeader, render: d => renderLocalKey(d.local_key) },
+  { key: "local_key",    label: "Local Key",    header: renderLocalKeyHeader, render: localKeyCell },
   { key: "protocol_version", label: "Protocol", sortable: true, cls: "mono", render: protocolCell },
   { key: "product_id",   label: "Product ID",   cls: "mono" },
   { key: "product_name", label: "Product Name" },
@@ -558,8 +558,35 @@ function protocolCell(d) {
   return esc(d.protocol_version) +
     (d.device22 ? '<span class="protocol-note muted">device22</span>' : "");
 }
+// lan_scan.GATEWAY_CATEGORIES. Tuya can mark a gateway `sub` too, so its
+// category (or a sub-device naming it) is what tells.
+const GATEWAY_CATEGORIES = new Set({{ gateway_categories | tojson }});
+function isGateway(d) {
+  return GATEWAY_CATEGORIES.has(d.category) ||
+    deviceData.some(s => s.id !== d.id && s.gateway_id === d.id);
+}
 function isSubDevice(d) {
-  return !!d.sub || !!(d.gateway_id && d.gateway_id !== d.id);
+  return !isGateway(d) && (!!d.sub || !!(d.gateway_id && d.gateway_id !== d.id));
+}
+function lanResult(d) {
+  return (lanData.results || {})[d.id] || {};
+}
+// A gateway Tuya lists without a key answers to the one on its sub-devices.
+// The scan names that sub-device (key_from) once the gateway answered to it.
+function keySource(d) {
+  if (d.local_key) return null;
+  const from = lanResult(d).key_from;
+  const sub = from && deviceData.find(s => s.id === from);
+  return sub && sub.local_key ? sub : null;
+}
+function localKeyOf(d) {
+  const source = keySource(d);
+  return d.local_key || (source ? source.local_key : "");
+}
+function localKeyCell(d) {
+  const source = keySource(d);
+  return renderLocalKey(localKeyOf(d)) +
+    (source ? `<span class="protocol-note muted" title="${esc(`Tuya lists this key on ${source.name || source.id}`)}">from sub-device</span>` : "");
 }
 function utcStamp(epoch) {
   const ms = epochMs(epoch);
@@ -895,6 +922,21 @@ function snapshotNotice() {
     `<span class="notice-title">Could not reach Tuya</span>` +
     `Showing the device list saved${when}. Try Refresh again in a moment.</div></div>`;
 }
+// The gateways the last scan couldn't tell apart, less any a check has named
+// since: their sub-devices now know their gateway.
+function unnamedLeft() {
+  const list = (lanData.summary && lanData.summary.unnamed_gateways) || [];
+  return list.filter(g => !(g.sub_devices || []).some(id => (lanData.results || {})[id] &&
+    lanData.results[id].gateway_id));
+}
+// "192.168.2.8 (Valve), 192.168.2.9 (Water Timer)": where each gateway answered,
+// and the sub-devices whose key it answered to.
+function unnamedGateways(list) {
+  return list.map(g => `<span class="mono">${esc(g.ip)}</span> (` + (g.sub_devices || []).map(id => {
+    const sub = deviceData.find(s => s.id === id);
+    return sub ? deviceLink(sub) : esc(id);
+  }).join(", ") + ")").join(", ");
+}
 function lanSummaryNotice() {
   const s = lanData.summary;
   const reached = s.sub_devices_reached || 0;   // only sub-devices whose gateway answered
@@ -919,6 +961,11 @@ function lanSummaryNotice() {
       `this account.${ips(unmatched)}`);
   if (late.length)
     lines.push(`${plural(late.length, "address", "addresses")} ran out of time before every key was tried.${ips(late)}`);
+  const unnamed = unnamedLeft();
+  if (unnamed.length)
+    lines.push(`${plural(unnamed.length, "gateway")} answered to local keys Tuya lists on sub-devices: ` +
+      `${unnamedGateways(unnamed)}. Tuya doesn't say which gateway has which key. ` +
+      `To tell them apart, open each gateway and check it at its IP.`);
   // The likely router (s.routers) is left out of these lists without a word.
   return `<div class="notice" id="lanSummaryNotice"><div class="grow">` +
     `<span class="notice-title">Network scan</span>${lines.map(l => `<div>${l}</div>`).join("")}</div>` +
@@ -1059,7 +1106,8 @@ function indexDevices() {
     // "key changed" or "busy" works.
     const change = CHANGE_BADGES[changeById.get(d.id)] || "";
     const lan = lanStatus(d) ? LAN_BADGES[d.lan_status].text : "";
-    searchIndex.set(d, `${JSON.stringify(d)} ${times} ${change} ${lan}`.toLowerCase());
+    const lent = keySource(d) ? `${localKeyOf(d)} from sub-device` : "";
+    searchIndex.set(d, `${JSON.stringify(d)} ${times} ${change} ${lan} ${lent}`.toLowerCase());
   }
 }
 
@@ -1139,6 +1187,11 @@ function copyOnClick(container) {
 }
 copyOnClick($("rows"));
 copyOnClick($("panelBody"));
+// A link to another device (a sub-device's gateway, say) opens its details.
+$("panelBody").addEventListener("click", (e) => {
+  const link = e.target.closest("[data-open-device]");
+  if (link) openPanel(link.dataset.openDevice);
+});
 
 // open the details panel for the clicked row
 $("rows").addEventListener("click", (e) => {
@@ -1225,7 +1278,12 @@ function timeValue(d, key) {
 
 function fieldValue(d, key) {
   const value = d[key];
-  if (key === "local_key") return `<span class="key-heading">${renderLocalKey(value)}${renderLocalKeyToggle()}</span>`;
+  if (key === "local_key") {
+    const source = keySource(d);
+    return `<span class="key-heading">${renderLocalKey(localKeyOf(d))}${renderLocalKeyToggle()}</span>` +
+      (source ? `<div class="field-sub">Tuya lists this key on its sub-device ${deviceLink(source)}, not on ` +
+        `the gateway. The gateway answered to it on the local network.</div>` : "");
+  }
   if (key === "online") return badge(value);
   if (key === "lan_status") {
     const status = lanStatus(d);
@@ -1250,7 +1308,7 @@ function fieldSections(d) {
   let html = "";
   for (const { title, keys, render: custom } of DETAIL_SECTIONS) {
     if (custom) { html += section(title, custom(d)); continue; }
-    const present = keys.filter(key => key in d);
+    const present = keys.filter(key => key in d || (key === "local_key" && keySource(d)));
     present.forEach(key => shown.add(key));
     if (present.length) html += section(title, fieldList(d, present));
   }
@@ -1261,20 +1319,40 @@ function fieldSections(d) {
 
 // Local IP and protocol version from the LAN scan, and a check for this device.
 function lanSection(d) {
-  const sub = isSubDevice(d), keyless = !sub && !d.local_key;
+  const sub = isSubDevice(d), gateway = isGateway(d);
+  // A gateway Tuya lists without a key is checked with its sub-devices' keys.
+  const keyless = !sub && !d.local_key && !gateway;
+  // Unless sub-devices name it in gateway_id, nothing says which keys are its.
+  const unnamed = gateway && !d.local_key && !keySource(d) &&
+    !deviceData.some(s => s.id !== d.id && s.gateway_id === d.id);
   let html = "";
   if (lanStatus(d)) {
     const keys = ["lan_status", "local_ip", "protocol_version", "lan_checked_at"]
       .filter(key => key === "lan_status" || d[key]);
     html += fieldList(d, keys);
-  } else if (!sub && !keyless) {
+  } else if (!sub && !keyless && !unnamed) {
     html += `<p class="lan-note">Not checked on the local network yet. Use <b>Scan network</b>, ` +
       `or check it at an IP address below.</p>`;
   }
   if (sub) {
-    const gateway = deviceData.find(g => g.id === d.gateway_id);
+    const id = d.gateway_id || lanResult(d).gateway_id;
+    const via = id && deviceData.find(g => g.id === id);
+    if (!via && d.local_ip) {
+      return html + `<p class="lan-note">A sub-device is reached through its gateway, which answered ` +
+        `at ${esc(d.local_ip)} to this device's key. Tuya doesn't say which gateway that is. ` +
+        `Check your gateway at that IP to find out.</p>`;
+    }
     return html + `<p class="lan-note">A sub-device is reached through its gateway` +
-      (gateway ? `: ${deviceLink(gateway)}` : "") + `. Check the gateway instead.</p>`;
+      (via ? `: ${deviceLink(via)}` : "") + `. Check the gateway instead.</p>`;
+  }
+  if (unnamed) {
+    const found = unnamedLeft();
+    html += `<p class="lan-note">Tuya lists this gateway's local key on its sub-devices, not on the ` +
+      `gateway, and doesn't say which sub-devices are its own. ` + (found.length
+        ? `The last scan found gateways at ${unnamedGateways(found)}. Check this one at its IP ` +
+          `to find out which key it answers to.`
+        : `Use <b>Scan network</b>, or check it at its IP to find out which key it answers to.`) +
+      `</p>`;
   }
   if (keyless) {
     return html + `<p class="lan-note">Tuya doesn't return a local key for this device, so it ` +
@@ -1577,8 +1655,25 @@ function checkMessage(job) {
   if (job.error === "scanner_unavailable") return { id: job.device_id, kind: "error", text: SCANNER_UNAVAILABLE };
   if (job.state !== "done") return { id: job.device_id, kind: "error", text: "The check didn't finish. Try again." };
   if (!r) return { id: job.device_id, kind: "error", text: "The check didn't return a result." };
-  if (r.status === "ok")
-    return { id: job.device_id, text: `Found at ${r.ip}, protocol ${r.version}${r.device22 ? " (device22)" : ""}.` };
+  const device = deviceData.find(d => d.id === job.device_id) || {};
+  if (r.status === "ok") {
+    let text = `Found at ${r.ip}, protocol ${r.version}${r.device22 ? " (device22)" : ""}.`;
+    const source = r.key_from && deviceData.find(s => s.id === r.key_from);
+    if (source) {
+      text += ` It answered to the local key Tuya lists on ${source.name || source.id}.`;
+      // lanData still holds what was known before this check.
+      const before = keySource(device);
+      if (before && before.local_key !== source.local_key)
+        text += ` Before, it had the one on ${before.name || before.id}.`;
+      const other = deviceData.find(g => g.id !== device.id && !g.local_key &&
+        (keySource(g) || {}).local_key === source.local_key);
+      if (other) text += ` ${other.name || other.id} had that key, so check it again at its own IP.`;
+    }
+    return { id: job.device_id, text };
+  }
+  if (r.status === "not_found" && isGateway(device) && !device.local_key)
+    return { id: job.device_id, kind: "error",
+             text: `Checked ${job.targets}: none of the keys Tuya lists on sub-devices answered there.` };
   const badgeText = (LAN_BADGES[r.status] || {}).text || r.status;
   return { id: job.device_id, kind: "error", text: `Checked ${job.targets}: ${badgeText}.` };
 }
@@ -1653,7 +1748,7 @@ function csvColumns() {
 $("csvBtn").onclick = () => {
   const cols = csvColumns();
   const rows = [cols.join(",")].concat(computeList().map(d =>
-    cols.map(c => `"${String(d[c] ?? "").replace(/"/g,'""')}"`).join(",")));
+    cols.map(c => `"${String((c === "local_key" ? localKeyOf(d) : d[c]) ?? "").replace(/"/g,'""')}"`).join(",")));
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = "tuya-local-key.csv"; a.click();

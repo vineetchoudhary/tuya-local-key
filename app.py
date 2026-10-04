@@ -215,7 +215,7 @@ def _is_session_invalid_error(error):
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", gateway_categories=sorted(lan_scan.GATEWAY_CATEGORIES))
 
 
 @app.get("/icon.png")
@@ -451,6 +451,36 @@ def _session_devices(session):
     return [d for d in cache["body"].get("devices", []) if isinstance(d, dict)]
 
 
+def _lent_key(result, current):
+    """The sub-device key a keyless gateway's result says it answered to."""
+    source = (result or {}).get("key_from")
+    return (current.get(source) or {}).get("local_key") if source else None
+
+
+def _hand_over_gateway_keys(merged, results, current):
+    """A sub-device key is one gateway's. A gateway that just answered to one
+    takes it from any other gateway stored with it, and sub-devices stored as
+    reached through it under another key lose that link. Both come from a
+    check that took one gateway for another, which the next check undoes."""
+    fresh = {}   # key -> the gateway that just answered to it
+    for dev_id, result in results.items():
+        key = _lent_key(result, current)
+        if key and result.get("status") == lan_scan.OK:
+            fresh[key] = dev_id
+    keys = {gateway_id: key for key, gateway_id in fresh.items()}
+    for dev_id, result in list(merged.items()):
+        if dev_id in results:
+            continue
+        device = current.get(dev_id) or {}
+        key = _lent_key(result, current)
+        if key and fresh.get(key, dev_id) != dev_id:
+            del merged[dev_id]
+        elif (result.get("status") == lan_scan.VIA_GATEWAY and result.get("gateway_id") in keys
+              and not device.get("gateway_id")
+              and device.get("local_key") != keys[result["gateway_id"]]):
+            merged[dev_id] = dict(result, gateway_id=None)
+
+
 def _merge_lan(job, outcome, current):
     """Fold a finished scan into the stored results. Hold _lan_lock."""
     key = job["session_key"]
@@ -475,12 +505,17 @@ def _merge_lan(job, outcome, current):
             continue   # gone from the device list while the scan ran
         if job["key_digests"].get(dev_id) != _key_digest(device.get("local_key")):
             continue   # a Refresh changed its key mid-scan; this result proves nothing
+        source = result.get("key_from")
+        if source and job["key_digests"].get(source) != _key_digest(
+                (current.get(source) or {}).get("local_key")):
+            continue   # the same, for the sub-device key a keyless gateway answered to
         results[dev_id] = result
 
     names = {dev_id: d.get("name") or "" for dev_id, d in current.items()}
     changes = lan_scan.diff_results(previous, results, names)
     merged = {dev_id: r for dev_id, r in previous.items() if dev_id in current}
     merged.update(results)
+    _hand_over_gateway_keys(merged, results, current)
     body["results"] = merged
 
     now = time.time()
@@ -599,22 +634,30 @@ def lan_scan_start():
         return jsonify({"error": "no_devices"}), 409
     with _lan_lock:
         stored = (_lan_body_for(session_key) or _empty_lan_body()).get("results") or {}
-    remembered = {
-        dev_id: {"ip": r["ip"], "version": r.get("version"), "device22": r.get("device22", False)}
-        for dev_id, r in stored.items()
-        if r.get("ip") and r.get("status") != lan_scan.VIA_GATEWAY
-    }
+    remembered = {}
+    for dev_id, r in stored.items():
+        if r.get("status") == lan_scan.VIA_GATEWAY:
+            continue
+        entry = {"ip": r["ip"], "version": r.get("version"),
+                 "device22": r.get("device22", False)} if r.get("ip") else {}
+        if r.get("key_from"):
+            # A keyless gateway keeps the sub-device key it answered to, even
+            # when its last result has no address.
+            entry["key_from"] = r["key_from"]
+        if entry:
+            remembered[dev_id] = entry
 
     device_id = str(data.get("device_id") or "").strip()
     if device_id:
         device = next((d for d in devices if d.get("id") == device_id), None)
         if device is None:
             return jsonify({"error": "unknown_device"}), 404
-        if lan_scan.is_sub_device(device):
-            return jsonify({"error": "sub_device"}), 400
-        if not device.get("local_key"):
-            # Bluetooth-only devices: Tuya returns no local key to ask with.
-            return jsonify({"error": "no_local_key"}), 400
+        # A sub-device is checked through its gateway. A device with no key of
+        # its own can't be checked, unless it is a gateway whose key Tuya lists
+        # on its sub-devices. Bluetooth-only devices have none at all.
+        refusal = lan_scan.check_refusal(devices, device_id, remembered)
+        if refusal:
+            return jsonify({"error": refusal}), 400
         text = str(data.get("ip") or "").strip() or remembered.get(device_id, {}).get("ip", "")
         try:
             targets = lan_scan.parse_targets(text)
@@ -622,7 +665,10 @@ def lan_scan_start():
             return _bad_targets(str(e))
         if len(targets) != 1:
             return _bad_targets("Enter one IP address.")
-        known = {device_id: dict(remembered.get(device_id, {}), ip=targets[0])}
+        # What the other devices answered to before goes along too: it tells
+        # which sub-device keys other gateways already took.
+        known = dict(remembered)
+        known[device_id] = dict(remembered.get(device_id, {}), ip=targets[0])
         # The whole list goes along, so a gateway is known as one, but only this
         # device (and its sub-devices) is looked for. An IP typed for one device
         # is wanted, so it is never taken for the router.

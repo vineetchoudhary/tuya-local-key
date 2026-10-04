@@ -567,8 +567,9 @@ FIRST_SCAN = {
 }
 
 
-def _scans(app, monkeypatch, *rounds):
-    """Each scan answers with the next of `rounds`: {device id: result}."""
+def _scans(app, monkeypatch, *rounds, **summary):
+    """Each scan answers with the next of `rounds`: {device id: result}.
+    `summary` adds to the summary every scan reports."""
     remaining = list(rounds)
     calls = []
 
@@ -586,6 +587,7 @@ def _scans(app, monkeypatch, *rounds):
             "refused": ["192.168.1.42"], "unmatched": ["192.168.1.77"], "out_of_budget": [],
             "routers": sorted(routers or ()),   # as if each likely router refused
             "cancelled": False, "duration": 1.2, "finished_at": 1_752_000_000 + len(calls),
+            **summary,
         }}
 
     monkeypatch.setattr(app.lan_scan, "scan", scan)
@@ -780,6 +782,142 @@ def test_one_device_can_be_checked_from_the_panel(page, running_app, monkeypatch
     assert calls[0]["only"] == [LAMP.id], "the whole list goes along, but only the lamp is looked for"
     assert row(page, LAMP).locator("td:nth-child(5)").inner_text() == "3.5"
     assert page.locator("#lanSummaryNotice").count() == 0, "a single check is not a scan"
+
+
+# Gateways as Tuya's sharing API lists them (issue #7): marked `sub`, with no
+# local key, which sits on their sub-devices instead.
+ZIGBEE_GATEWAY = demo_devices.CustomerDevice(
+    id="gwzigbee0000000001", name="Zigbee Gateway", category="wg2", sub=True, node_id="0010",
+    online=True)
+BLE_GATEWAY = demo_devices.CustomerDevice(
+    id="gwble000000000001", name="Mesh Gateway", category="wg2", sub=True, node_id="00d8",
+    online=True)
+VALVE = demo_devices.CustomerDevice(
+    id="valve0000000000001", name="Garden Valve", local_key="Vv11Ww22Xx33Yy44", category="ggq",
+    sub=True, node_id="a4c138ec2d57044b", ip="", online=True)
+WATER_TIMER = demo_devices.CustomerDevice(
+    id="timer0000000000001", name="Water Timer", local_key="Tt55Uu66Ss77Rr88", category="sfkzq",
+    sub=True, node_id="74bb38f08dd9d7f5", ip="", online=True)
+
+
+def _with_gateways(page, app, monkeypatch, *gateways_and_subs):
+    _serves(app, monkeypatch, list(DEVICES) + list(gateways_and_subs))
+    refreshed(page, "#changesNotice")
+
+
+def test_a_keyless_gateway_shows_the_key_it_answered_to(page, running_app, monkeypatch, tmp_path):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, VALVE)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=VALVE.id),
+        VALVE.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+
+    page.click("#thead [data-key-toggle]")
+    gateway_row = row(page, ZIGBEE_GATEWAY).inner_text()
+    assert VALVE.local_key in gateway_row and "from sub-device" in gateway_row
+    open_panel(page, ZIGBEE_GATEWAY.name)
+    assert VALVE.local_key in field_value(page, "local_key")
+    assert "Tuya lists this key on its sub-device Garden Valve" in field_value(page, "local_key")
+    with page.expect_download() as download:
+        page.click("#csvBtn")
+    path = tmp_path / "devices.csv"
+    download.value.save_as(path)
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = {r["id"]: r for r in csv.DictReader(f)}
+    assert rows[ZIGBEE_GATEWAY.id]["local_key"] == VALVE.local_key
+    page.fill("#filter", VALVE.local_key)
+    assert page.locator("#rows tr").count() == 2, "the gateway is found by the key it shows"
+
+
+def test_a_check_that_moves_a_gateways_key_says_so(page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, VALVE, WATER_TIMER)
+    _scans(running_app, monkeypatch, {   # as left by a check typed with the wrong IP
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.9", "3.4", key_from=WATER_TIMER.id),
+        BLE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=VALVE.id),
+    }, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=VALVE.id),
+    })
+    scanned(page)
+
+    open_panel(page, ZIGBEE_GATEWAY.name)
+    page.fill("#panelBody [data-lan-check] input", "192.168.2.8")
+    page.click("#panelBody [data-lan-check] button")
+    page.wait_for_selector("#panelBody :text('Found at 192.168.2.8')")
+
+    note = page.locator("#panelBody .lan-note").last.inner_text()
+    assert "It answered to the local key Tuya lists on Garden Valve." in note
+    assert "Before, it had the one on Water Timer." in note
+    assert "Mesh Gateway had that key, so check it again at its own IP." in note
+
+
+def test_a_keyless_gateway_says_how_to_find_its_key(page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, VALVE, WATER_TIMER)
+    _scans(running_app, monkeypatch, {
+        BLE_GATEWAY.id: _lan("not_found", "192.168.2.7"),
+    })
+
+    open_panel(page, BLE_GATEWAY.name)
+    body = page.locator("#panelBody").inner_text()
+    assert "Tuya lists this gateway's local key on its sub-devices" in body
+    assert "Use Scan network, or check it at its IP" in body
+    page.fill("#panelBody [data-lan-check] input", "192.168.2.7")
+    page.click("#panelBody [data-lan-check] button")
+
+    page.wait_for_selector("#panelBody :text('none of the keys Tuya lists on sub-devices answered there')")
+
+
+def test_a_sub_device_links_to_the_gateway_the_scan_found_it_through(page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, VALVE)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=VALVE.id),
+        VALVE.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+
+    open_panel(page, VALVE.name)
+    assert "reached through its gateway: Zigbee Gateway" in page.locator("#panelBody").inner_text()
+    page.click(f"#panelBody [data-open-device='{ZIGBEE_GATEWAY.id}']")
+
+    page.wait_for_function(f"document.querySelector('#panelTitle').innerText === {ZIGBEE_GATEWAY.name!r}")
+
+
+def test_gateways_the_scan_couldnt_tell_apart_are_listed_with_their_sub_devices(
+        page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, VALVE, WATER_TIMER)
+    calls = _scans(running_app, monkeypatch, {
+        VALVE.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=None),
+        WATER_TIMER.id: _lan("via_gateway", "192.168.2.9", "3.4", gateway_id=None),
+    }, {
+        BLE_GATEWAY.id: _lan("ok", "192.168.2.9", "3.4", key_from=WATER_TIMER.id),
+        WATER_TIMER.id: _lan("via_gateway", "192.168.2.9", "3.4", gateway_id=BLE_GATEWAY.id),
+    }, unnamed_gateways=[
+        {"ip": "192.168.2.8", "version": "3.4", "sub_devices": [VALVE.id]},
+        {"ip": "192.168.2.9", "version": "3.4", "sub_devices": [WATER_TIMER.id]},
+    ])
+    scanned(page)
+
+    found = "192.168.2.8 (Garden Valve), 192.168.2.9 (Water Timer)"
+    notice = page.locator("#lanSummaryNotice").inner_text()
+    assert f"2 gateways answered to local keys Tuya lists on sub-devices: {found}." in notice
+    open_panel(page, VALVE.name)
+    assert "which answered at 192.168.2.8 to this device's key" in page.locator("#panelBody").inner_text()
+    open_panel(page, BLE_GATEWAY.name)
+    body = page.locator("#panelBody").inner_text()
+    assert "Tuya lists this gateway's local key on its sub-devices" in body
+    assert f"The last scan found gateways at {found}." in body
+
+    page.fill("#panelBody [data-lan-check] input", "192.168.2.9")
+    page.click("#panelBody [data-lan-check] button")
+    page.wait_for_selector("#panelBody :text('Found at 192.168.2.9')")
+
+    assert calls[1]["only"] == [BLE_GATEWAY.id]
+    assert "It answered to the local key Tuya lists on Water Timer." in page.locator("#panelBody").inner_text()
+    page.click("#thead [data-key-toggle]")
+    assert WATER_TIMER.local_key in row(page, BLE_GATEWAY).inner_text()
+    # The one left is the other gateway's.
+    left = "1 gateway answered to local keys Tuya lists on sub-devices: 192.168.2.8 (Garden Valve)."
+    assert left in page.locator("#lanSummaryNotice").inner_text()
 
 
 def test_bad_targets_are_explained_in_the_scan_box(page, running_app):

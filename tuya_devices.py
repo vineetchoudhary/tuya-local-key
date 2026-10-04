@@ -464,8 +464,10 @@ def scan_lan(devices, targets, routers=None):
     import lan_scan
 
     print(f"Scanning {len(targets)} address(es) on TCP port {lan_scan.PORT}…", file=sys.stderr)
-    outcome = lan_scan.scan(targets, [device_dict(d) for d in devices], routers=routers)
+    listed = [device_dict(d) for d in devices]
+    outcome = lan_scan.scan(targets, listed, routers=routers)
     summary = outcome["summary"]
+    by_id = {d.get("id"): d for d in listed}
     line = (f"Found {summary['matched']} of {summary['devices']} device(s) on the local "
             f"network in {summary['duration']} s.")
     if summary["refused"]:
@@ -473,16 +475,30 @@ def scan_lan(devices, targets, routers=None):
                  f"{lan_scan.PORT}: {', '.join(summary['refused'])}. They may not be Tuya "
                  "devices at all, since any device that doesn't use that port refuses. A Tuya "
                  "device also refuses while another local client holds its only connection.")
+    unnamed = summary.get("unnamed_gateways") or []
+    if unnamed:
+        found = ", ".join(
+            f"{g['ip']} ({', '.join((by_id.get(i) or {}).get('name') or i for i in g['sub_devices'])})"
+            for g in unnamed)
+        line += (f" {len(unnamed)} gateway(s) answered to local keys Tuya lists on sub-devices: "
+                 f"{found}. Tuya doesn't say which gateway has which key. Match each IP to a "
+                 "gateway in your router's client list: its key is the one on the sub-devices "
+                 "listed with that IP.")
     print(line + "\n", file=sys.stderr)
-    return {
-        dev_id: {
+    lan = {}
+    for dev_id, result in outcome["results"].items():
+        lan[dev_id] = {
             "local_ip": result.get("ip") or "",
             "protocol_version": result.get("version") or "",
             "device22": bool(result.get("device22")),
             "lan_status": result.get("status") or "",
         }
-        for dev_id, result in outcome["results"].items()
-    }
+        source = result.get("key_from")
+        if source:
+            # A gateway Tuya lists without a key answered to its sub-device's.
+            lan[dev_id]["local_key"] = (by_id.get(source) or {}).get("local_key") or ""
+            lan[dev_id]["local_key_from"] = source
+    return lan
 
 
 # --------------------------------------------------------------------------- #

@@ -469,6 +469,197 @@ def test_sub_devices_share_the_gateways_key_but_never_claim_its_address(lan):
     assert out["summary"]["sub_devices_reached"] == 1, "the orphan's gateway was never found"
 
 
+# Gateways as Tuya's sharing API lists them (issue #7): marked `sub` like their
+# sub-devices, with no local key, and no gateway_id anywhere. Each gateway's key
+# is on its sub-devices instead.
+def zigbee_gateway():
+    return dev("gw-zigbee", None, category="wg2", sub=True, node_id="0010", ip="203.0.113.5")
+
+
+def ble_gateway():
+    return dev("gw-ble", None, category="wg2", sub=True, node_id="00d8", ip="203.0.113.5")
+
+
+def valve():   # behind the Zigbee gateway
+    return dev("valve", KEYS["a"], category="ggq", sub=True, node_id="a4c138ec2d57044b", ip="")
+
+
+def timer():   # behind the Bluetooth gateway
+    return dev("timer", KEYS["b"], category="sfkzq", sub=True, node_id="74bb38f08dd9d7f5", ip="")
+
+
+TWO_GATEWAYS = {
+    "10.0.0.8": FakeTuya("gw-zigbee", KEYS["a"], "3.4", gateway=True),
+    "10.0.0.9": FakeTuya("gw-ble", KEYS["b"], "3.4", gateway=True),
+    "10.0.0.20": FakeTuya("plug", KEYS["c"], "3.3"),
+}
+
+
+def test_a_gateway_tuya_marks_as_a_sub_device_is_still_a_gateway():
+    assert lan_scan.is_gateway(zigbee_gateway())
+    assert not lan_scan.is_sub_device(zigbee_gateway())
+    assert lan_scan.is_sub_device(valve())
+
+
+def test_a_lone_keyless_gateway_answers_to_its_sub_devices_key(lan):
+    lan({"10.0.0.8": FakeTuya("gw-zigbee", KEYS["a"], "3.4", gateway=True),
+         "10.0.0.20": FakeTuya("plug", KEYS["c"], "3.3")})
+    devices = [zigbee_gateway(), valve(), dev("plug", KEYS["c"])]
+
+    out = lan_scan.scan(["10.0.0.8", "10.0.0.20"], devices)
+
+    gateway = out["results"]["gw-zigbee"]
+    assert (gateway["status"], gateway["ip"], gateway["version"]) == ("ok", "10.0.0.8", "3.4")
+    assert gateway["key_from"] == "valve"
+    assert out["results"]["valve"] == dict(out["results"]["valve"], status="via_gateway",
+                                           ip="10.0.0.8", version="3.4", gateway_id="gw-zigbee")
+    summary = out["summary"]
+    assert (summary["matched"], summary["devices"]) == (2, 2)
+    assert summary["unmatched"] == [] and summary["unnamed_gateways"] == []
+    assert KEYS["a"] not in json.dumps(out)
+
+
+def test_two_keyless_gateways_are_found_but_not_told_apart(lan):
+    lan(TWO_GATEWAYS)
+    devices = [zigbee_gateway(), ble_gateway(), valve(), timer(), dev("plug", KEYS["c"])]
+
+    out = lan_scan.scan(list(TWO_GATEWAYS), devices)
+
+    results = out["results"]
+    # Each key proves which gateway its sub-devices sit behind...
+    assert (results["valve"]["ip"], results["valve"]["version"]) == ("10.0.0.8", "3.4")
+    assert (results["timer"]["ip"], results["timer"]["version"]) == ("10.0.0.9", "3.4")
+    # ...but not which keyless gateway entry is which.
+    assert results["valve"]["gateway_id"] is None and results["timer"]["gateway_id"] is None
+    assert "gw-zigbee" not in results and "gw-ble" not in results
+    summary = out["summary"]
+    assert summary["unmatched"] == [], "the gateways answered to keys in this account"
+    assert summary["unnamed_gateways"] == [
+        {"ip": "10.0.0.8", "version": "3.4", "sub_devices": ["valve"]},
+        {"ip": "10.0.0.9", "version": "3.4", "sub_devices": ["timer"]},
+    ]
+    assert (summary["matched"], summary["devices"]) == (1, 3)
+    assert summary["sub_devices_reached"] == 2
+    text = json.dumps(out)
+    assert KEYS["a"] not in text and KEYS["b"] not in text
+
+
+def test_checking_a_keyless_gateway_at_its_ip_tells_which_key_is_its(lan):
+    net = lan(TWO_GATEWAYS)
+    devices = [zigbee_gateway(), ble_gateway(), valve(), timer(), dev("plug", KEYS["c"])]
+
+    out = lan_scan.scan(["10.0.0.9"], devices, {"gw-ble": {"ip": "10.0.0.9"}}, only=["gw-ble"])
+
+    gateway = out["results"]["gw-ble"]
+    assert (gateway["status"], gateway["ip"], gateway["version"]) == ("ok", "10.0.0.9", "3.4")
+    assert gateway["key_from"] == "timer"
+    assert out["results"]["timer"]["gateway_id"] == "gw-ble"
+    assert set(out["results"]) == {"gw-ble", "timer"}, "the valve's gateway wasn't asked about"
+    assert {ip for ip, _, _ in net.probes} == {"10.0.0.9"}
+
+
+@pytest.mark.parametrize("host,status", [
+    (lan_scan.REFUSED, "busy"),
+    (FakeTuya("lamp", KEYS["d"], "3.3"), "not_found"),   # some other device answers there
+])
+def test_a_keyless_gateway_checked_where_no_key_answers_is_judged_there(lan, host, status):
+    lan({"10.0.0.7": host})
+    devices = [zigbee_gateway(), ble_gateway(), valve(), timer()]
+
+    out = lan_scan.scan(["10.0.0.7"], devices, {"gw-ble": {"ip": "10.0.0.7"}}, only=["gw-ble"])
+
+    # The address stays on it, so a check at a mistyped IP isn't saved.
+    assert out["results"] == {"gw-ble": dict(out["results"]["gw-ble"], status=status, ip="10.0.0.7")}
+
+
+def test_a_gateway_keeps_the_key_it_answered_to_and_the_other_gets_the_one_left(lan):
+    # The gateways swapped addresses since the check that named the Zigbee one.
+    lan({"10.0.0.9": FakeTuya("gw-zigbee", KEYS["a"], "3.4", gateway=True),
+         "10.0.0.8": FakeTuya("gw-ble", KEYS["b"], "3.4", gateway=True)})
+    devices = [zigbee_gateway(), ble_gateway(), valve(), timer()]
+    known = {"gw-zigbee": {"ip": "10.0.0.8", "version": "3.4", "key_from": "valve"}}
+
+    out = lan_scan.scan(["10.0.0.8", "10.0.0.9"], devices, known)
+
+    results = out["results"]
+    assert (results["gw-zigbee"]["ip"], results["gw-zigbee"]["key_from"]) == ("10.0.0.9", "valve")
+    assert (results["gw-ble"]["ip"], results["gw-ble"]["key_from"]) == ("10.0.0.8", "timer")
+    assert results["valve"]["gateway_id"] == "gw-zigbee" and results["valve"]["ip"] == "10.0.0.9"
+    assert out["summary"]["unnamed_gateways"] == []
+
+
+def test_a_check_undoes_a_check_that_took_one_gateway_for_another(lan):
+    lan(TWO_GATEWAYS)
+    devices = [zigbee_gateway(), ble_gateway(), valve(), timer()]
+    # An earlier check of the Zigbee gateway was typed with the Bluetooth one's
+    # IP, so it took the timer's key, and the next scan gave the Bluetooth
+    # gateway the valve's. Now the Zigbee one is checked at its real IP.
+    known = {"gw-zigbee": {"ip": "10.0.0.8", "version": "3.4", "key_from": "timer"},
+             "gw-ble": {"ip": "10.0.0.8", "version": "3.4", "key_from": "valve"}}
+
+    out = lan_scan.scan(["10.0.0.8"], devices, known, only=["gw-zigbee"])
+
+    gateway = out["results"]["gw-zigbee"]
+    assert (gateway["status"], gateway["ip"], gateway["key_from"]) == ("ok", "10.0.0.8", "valve")
+    assert out["results"]["valve"]["gateway_id"] == "gw-zigbee"
+    assert set(out["results"]) == {"gw-zigbee", "valve"}, "the timer's key didn't answer there"
+
+
+def test_a_checked_gateway_is_asked_with_its_own_key_first(lan):
+    net = lan(TWO_GATEWAYS)
+    devices = [zigbee_gateway(), ble_gateway(), valve(), timer()]
+    known = {"gw-zigbee": {"ip": "10.0.0.8", "version": "3.4", "key_from": "valve"}}
+
+    out = lan_scan.scan(["10.0.0.8"], devices, known, only=["gw-zigbee"])
+
+    assert out["results"]["gw-zigbee"]["key_from"] == "valve"
+    assert net.probes == [("10.0.0.8", "gw-zigbee", "3.4")], "one probe, at its remembered version"
+
+
+def test_a_key_whose_sub_devices_name_another_gateway_never_names_one_here(lan):
+    lan({"10.0.0.9": FakeTuya("gw-elsewhere", KEYS["b"], "3.4", gateway=True)})
+    devices = [zigbee_gateway(), ble_gateway(), valve(),
+               dict(timer(), gateway_id="gw-elsewhere")]   # not in this list
+
+    out = lan_scan.scan(["10.0.0.9"], devices)
+    check = lan_scan.scan(["10.0.0.9"], devices, {"gw-ble": {"ip": "10.0.0.9"}}, only=["gw-ble"])
+
+    assert out["results"]["timer"]["ip"] == "10.0.0.9", "its sub-devices still get its IP"
+    assert out["summary"]["unnamed_gateways"] == []
+    assert check["results"]["gw-ble"]["status"] == "not_found"
+
+
+def test_lend_keys_follows_gateway_id_and_never_lends_another_gateways_key():
+    named = dict(valve(), gateway_id="gw-zigbee")
+    foreign = dict(timer(), gateway_id="gw-elsewhere")   # its gateway isn't in the list
+
+    lent, unclaimed = lan_scan.lend_keys([zigbee_gateway(), ble_gateway(), named, foreign])
+
+    assert lent == {"gw-zigbee": "valve"}
+    assert unclaimed == {"timer": ["timer"]}, "still tried, for the timer's sake"
+
+
+def test_lend_keys_leaves_a_keyed_gateways_sub_devices_with_it():
+    keyed = dev("hub", KEYS["c"], category="wg2")
+    sub = dev("sensor", KEYS["c"], sub=True)
+
+    assert lan_scan.lend_keys([zigbee_gateway(), keyed, sub, valve()]) == (
+        {"gw-zigbee": "valve"}, {})
+
+
+@pytest.mark.parametrize("devices,device_id,refusal", [
+    ([zigbee_gateway(), ble_gateway(), valve(), timer()], "valve", "sub_device"),
+    ([zigbee_gateway(), ble_gateway(), valve(), timer()], "gw-ble", None),
+    ([zigbee_gateway(), valve()], "gw-zigbee", None),
+    ([zigbee_gateway()], "gw-zigbee", "no_local_key"),
+    ([zigbee_gateway(), dict(valve(), gateway_id="gw-elsewhere")], "gw-zigbee", "no_local_key"),
+    ([dev("lock", None, category="jtmspro")], "lock", "no_local_key"),
+    ([dev("plug", KEYS["c"])], "plug", None),
+])
+def test_check_refusal(devices, device_id, refusal):
+    assert lan_scan.check_refusal(devices, device_id) == refusal
+
+
 def test_devices_without_a_local_key_are_left_out(lan):
     net = lan({"10.0.0.1": FakeTuya("a", KEYS["a"], "3.3")})
 

@@ -752,6 +752,40 @@ def test_scan_fields_show_in_the_text_listing(monkeypatch, capsys):
     assert "lan_status    : busy" in out
 
 
+def test_scan_gives_a_keyless_gateway_the_key_it_answered_to(monkeypatch, capsys):
+    gateway = demo_device(id="gw-1", name="Gateway", local_key=None, category="wg2", sub=True)
+    valve = demo_device(id="valve-1", name="Valve", local_key="valve-key-012345", sub=True)
+    monkeypatch.setattr(core, "get_devices", lambda args: [gateway, valve])
+    _fake_lan_scan(monkeypatch, {"gw-1": {
+        "status": "ok", "ip": "192.168.2.8", "version": "3.4", "device22": False,
+        "checked_at": 1.0, "key_from": "valve-1",
+    }})
+
+    core.main(["--json", "--scan", "192.168.2.8"])
+
+    listed = json.loads(capsys.readouterr().out)
+    assert listed[0]["local_key"] == "valve-key-012345"
+    assert listed[0]["local_key_from"] == "valve-1"
+    assert "local_key_from" not in listed[1]
+
+
+def test_scan_lists_gateways_it_couldnt_tell_apart(monkeypatch, capsys):
+    import lan_scan
+
+    valve = demo_device(id="valve-1", name="Valve", local_key="valve-key-012345", sub=True)
+    monkeypatch.setattr(core, "get_devices", lambda args: [valve])
+    monkeypatch.setattr(lan_scan, "scan", lambda *a, **k: {"results": {}, "summary": {
+        "matched": 0, "devices": 2, "refused": [], "duration": 1.0,
+        "unnamed_gateways": [{"ip": "192.168.2.8", "version": "3.4", "sub_devices": ["valve-1"]}],
+    }})
+
+    core.main(["--json", "--scan", "192.168.2.8"])
+
+    err = capsys.readouterr().err
+    assert "1 gateway(s) answered to local keys Tuya lists on sub-devices: 192.168.2.8 (Valve)" in err
+    assert "router's client list" in err
+
+
 def test_scan_rejects_bad_targets_before_logging_in(monkeypatch):
     monkeypatch.setattr(core, "get_devices", lambda args: pytest.fail("must not log in"))
 

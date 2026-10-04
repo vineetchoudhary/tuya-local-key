@@ -1250,6 +1250,107 @@ def test_a_result_is_dropped_when_a_refresh_changes_its_key_mid_scan(webapp, mon
     assert set(client.get("/api/lan").json["results"]) == {"plug"}
 
 
+# As Tuya's sharing API lists gateways (issue #7): marked `sub`, with no key of
+# their own, which sits on their sub-devices instead.
+GATEWAY_DEVICES = LAN_DEVICES + [
+    {"id": "gw", "name": "Gateway", "category": "wg2", "sub": True, "node_id": "0010"},
+    {"id": "valve", "name": "Valve", "local_key": "valve-key-012345", "sub": True,
+     "node_id": "a4c138ec2d57044b", "ip": ""},
+]
+
+
+def test_a_keyless_gateway_can_be_checked_with_its_sub_devices_keys(webapp, monkeypatch):
+    fake = FakeScan({"gw": dict(_ok("10.0.0.8", "3.4"), key_from="valve")})
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch, devices=GATEWAY_DEVICES)
+
+    job = _scan(client, device_id="gw", ip="10.0.0.8")
+
+    assert job["result"]["status"] == "ok" and job["result"]["key_from"] == "valve"
+    assert fake.calls[0]["only"] == ["gw"]
+
+
+def test_a_keyless_gateway_with_no_sub_device_keys_cant_be_checked(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan())
+    client = _lan_logged_in(webapp, monkeypatch, devices=GATEWAY_DEVICES[:-1])
+
+    response = client.post("/api/lan/scan", json={"device_id": "gw", "ip": "10.0.0.8"})
+
+    assert (response.status_code, response.json) == (400, {"error": "no_local_key"})
+
+
+def test_the_sub_device_key_a_gateway_answered_to_is_remembered(webapp, monkeypatch):
+    fake = FakeScan({"gw": dict(_ok("10.0.0.8", "3.4"), key_from="valve"),
+                     "plug": _ok("10.0.0.1")}, {})
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch, devices=GATEWAY_DEVICES)
+    _scan(client)
+
+    _scan(client, device_id="lamp", ip="10.0.0.2")
+
+    known = fake.calls[1]["known"]
+    assert known["gw"] == {"ip": "10.0.0.8", "version": "3.4", "device22": False, "key_from": "valve"}
+    assert known["plug"]["ip"] == "10.0.0.1", "a check passes along what the rest answered to"
+    assert known["lamp"] == {"ip": "10.0.0.2"}
+
+
+def test_a_gateways_key_link_is_remembered_even_without_an_ip(webapp, monkeypatch):
+    fake = FakeScan({"gw": dict(_ok(None), status="not_found", key_from="valve")}, {})
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    client = _lan_logged_in(webapp, monkeypatch, devices=GATEWAY_DEVICES)
+    _scan(client)
+
+    _scan(client)
+
+    assert fake.calls[1]["known"]["gw"] == {"key_from": "valve"}
+
+
+TWO_GATEWAY_DEVICES = GATEWAY_DEVICES + [
+    {"id": "gw-2", "name": "Mesh Gateway", "category": "wg2", "sub": True, "node_id": "00d8"},
+    {"id": "timer", "name": "Water Timer", "local_key": "timer-key-012345", "sub": True, "ip": ""},
+]
+
+
+def test_a_check_that_names_a_gateway_takes_its_key_from_the_one_that_had_it(webapp, monkeypatch):
+    via = lambda ip, gateway_id: dict(_ok(ip, "3.4"), status="via_gateway", gateway_id=gateway_id)
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        # A check typed with the wrong IP took the Mesh Gateway for "gw"...
+        {"gw": dict(_ok("10.0.0.9", "3.4"), key_from="timer"), "timer": via("10.0.0.9", "gw")},
+        # ...and the scan after it gave the Mesh Gateway the valve's key.
+        {"gw": dict(_ok("10.0.0.9", "3.4"), key_from="timer"), "timer": via("10.0.0.9", "gw"),
+         "gw-2": dict(_ok("10.0.0.8", "3.4"), key_from="valve"), "valve": via("10.0.0.8", "gw-2")},
+        # Checked at its real IP, "gw" answers to the valve's key.
+        {"gw": dict(_ok("10.0.0.8", "3.4"), key_from="valve"), "valve": via("10.0.0.8", "gw")},
+    ))
+    client = _lan_logged_in(webapp, monkeypatch, devices=TWO_GATEWAY_DEVICES)
+    _scan(client, device_id="gw", ip="10.0.0.9")
+    _scan(client)
+
+    _scan(client, device_id="gw", ip="10.0.0.8")
+
+    results = client.get("/api/lan").json["results"]
+    assert results["gw"]["key_from"] == "valve" and results["valve"]["gateway_id"] == "gw"
+    assert "gw-2" not in results, "it waits to be named again"
+    assert results["timer"]["gateway_id"] is None and results["timer"]["ip"] == "10.0.0.9"
+
+
+def test_a_gateway_result_is_dropped_when_its_sub_devices_key_changes_mid_scan(webapp, monkeypatch):
+    gate = threading.Event()
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"gw": dict(_ok("10.0.0.8", "3.4"), key_from="valve"), "plug": _ok("10.0.0.1")}, gate=gate))
+    client = _lan_logged_in(webapp, monkeypatch, devices=GATEWAY_DEVICES)
+    client.post("/api/lan/scan", json={"targets": "10.0.0.0/28"})
+
+    rotated = [dict(d, local_key="ROTATED-KEY-0000") if d["id"] == "valve" else dict(d)
+               for d in GATEWAY_DEVICES]
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda s, p: rotated)
+    client.get("/api/devices?refresh=1")
+    gate.set()
+    _wait_for_job(client)
+
+    assert set(client.get("/api/lan").json["results"]) == {"plug"}
+
+
 def test_lan_results_survive_a_restart_and_are_encrypted(webapp, monkeypatch):
     monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({"plug": _ok("10.0.0.1", "3.4")}))
     client = _lan_logged_in(webapp, monkeypatch)
