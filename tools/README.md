@@ -31,3 +31,15 @@ python tools/screenshots.py filter details
 | `scan` | `scan-{light,dark}.png` | Network Scan |
 | `details` | `details-{light,dark}.png` | Device Details |
 | `filter` | `filter-{light,dark}.png` | Filtering |
+
+## Dependency Updates
+
+`update_dependencies.py` looks for new releases of the two libraries the app is built on, tinytuya and tuya-device-sharing-sdk, and moves `requirements.txt` and `pyproject.toml` to them. Each keeps its operator: `>=` stays a minimum, and `==` stays a pin.
+
+```bash
+python tools/update_dependencies.py check
+```
+
+```bash
+python tools/update_dependencies.py apply tinytuya==1.21.0
+```

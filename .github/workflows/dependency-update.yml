@@ -1,0 +1,163 @@
+name: Update dependencies
+
+# Every day, look for new releases of tinytuya and tuya-device-sharing-sdk.
+# A new one is tested first, with the tests and a Docker build that is never
+# pushed, and only then proposed in a pull request. See
+# tools/update_dependencies.py for how a release is picked and applied.
+
+on:
+  schedule:
+    - cron: "43 4 * * *"   # daily, 04:43 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: dependency-update
+  cancel-in-progress: false
+
+env:
+  BRANCH: dependency-update
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      updates: ${{ steps.check.outputs.updates }}
+      title: ${{ steps.check.outputs.title }}
+      body: ${{ steps.check.outputs.body }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Look for new releases
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python tools/update_dependencies.py check --skip-proposed "$BRANCH"
+
+  test:
+    needs: check
+    if: needs.check.outputs.updates != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # The new releases run here, so this job can't write to the repository.
+    permissions:
+      contents: read
+    env:
+      UPDATES: ${{ needs.check.outputs.updates }}
+      IMAGE: tuya-local-key:dependency-update
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # $UPDATES is unquoted on purpose: one argument per package.
+      - name: Move to the new versions
+        run: python tools/update_dependencies.py apply $UPDATES
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Check the new versions are the ones installed
+        run: python tools/update_dependencies.py verify $UPDATES
+
+      - name: Install Playwright browser
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run tests
+        run: pytest
+
+      - name: Set up QEMU (for arm64)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image for amd64 and arm64, without pushing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          provenance: false
+          sbom: false
+
+      - name: Build the amd64 image locally
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE }}
+
+      - name: Run the image
+        run: |
+          docker run --rm -v "$PWD/tools:/tools:ro" "$IMAGE" \
+            python /tools/update_dependencies.py verify $UPDATES
+          docker run --rm "$IMAGE" python -c "import app, lan_scan; lan_scan.require_scanner()"
+          docker run -d --name smoke -p 127.0.0.1:8000:8000 "$IMAGE"
+          trap 'docker rm -f smoke > /dev/null' EXIT
+          if ! curl -fsS --retry 15 --retry-connrefused --retry-delay 1 -o /dev/null http://127.0.0.1:8000/; then
+            docker logs smoke
+            exit 1
+          fi
+          echo "The image starts and serves the page."
+
+  pull-request:
+    needs: [check, test]
+    runs-on: ubuntu-latest
+    # Pushes the branch and opens the pull request. Nothing from the new
+    # releases runs here: the version numbers are edited as text.
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      UPDATES: ${{ needs.check.outputs.updates }}
+      TITLE: ${{ needs.check.outputs.title }}
+      BODY: ${{ needs.check.outputs.body }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Move to the new versions
+        run: python3 tools/update_dependencies.py apply $UPDATES
+
+      - name: Push the branch, and open or update the pull request
+        run: |
+          git config user.name "Developer Insider Bot"
+          git config user.email "bot@developerinsider.co"
+          git switch -q -C "$BRANCH"
+          git commit -q -a -m "$TITLE" \
+            -m "Tested by the Update dependencies workflow before it was proposed."
+          git push -q --force origin "$BRANCH"
+          number=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$TITLE" --body "$BODY"
+          else
+            gh pr create --base "$GITHUB_REF_NAME" --head "$BRANCH" --title "$TITLE" --body "$BODY"
+          fi
