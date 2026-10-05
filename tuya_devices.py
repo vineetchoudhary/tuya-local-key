@@ -501,6 +501,9 @@ def scan_lan(devices, targets, routers=None):
         if result.get("gateway_id"):
             # A sub-device's IP and version are its gateway's, so name that gateway.
             lan[dev_id]["lan_gateway_id"] = result["gateway_id"]
+        if "sub_online" in result:
+            # Whether its gateway reports it online. The gateway answering doesn't say.
+            lan[dev_id]["lan_sub_online"] = bool(result["sub_online"])
     return lan
 
 

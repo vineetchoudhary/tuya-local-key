@@ -729,6 +729,25 @@ def test_a_sub_device_reached_through_its_gateway_reads_as_reachable(page, runni
     assert "plus 1 sub-device reached through its gateway" in page.locator("#lanSummaryNotice").inner_text()
 
 
+@pytest.mark.parametrize("online, text, cls", [(True, "via gateway", "on"), (False, "offline", "off")])
+def test_a_sub_device_reads_as_its_gateway_reports_it(page, running_app, monkeypatch, online, text, cls):
+    reported = dict(FIRST_SCAN, **{SENSOR.id: _lan("via_gateway", "192.168.1.61", "3.4",
+                                                   gateway_id=SENSOR.gateway_id, sub_online=online)})
+    _scans(running_app, monkeypatch, reported, sub_devices_offline=int(not online))
+    scanned(page)
+
+    badge = row(page, SENSOR).locator("td:nth-child(2) .badge")
+    assert badge.inner_text().split() == ["LAN", *text.split()]
+    assert cls in badge.get_attribute("class").split()
+    state = "online" if online else "offline"
+    assert f"Its gateway reports it {state}." in badge.get_attribute("title")
+    assert page.evaluate(f"isOnline(deviceData.find(d => d.id === {SENSOR.id!r}))") is online
+    notice = page.locator("#lanSummaryNotice").inner_text()
+    assert ("Its gateway reports it offline." in notice) is not online
+    open_panel(page, SENSOR.name)
+    assert f"which reports it {state}" in field_value(page, "lan_status")
+
+
 def test_an_ip_being_typed_survives_a_repaint(page):
     open_panel(page, LAMP.name)
     page.fill("#panelBody [data-lan-check] input", "192.168.1.5")

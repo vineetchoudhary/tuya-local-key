@@ -504,7 +504,7 @@ const DETAIL_SECTIONS = [
 // What applyLan() adds to each device, so the filter, the panel and the CSV
 // export all see them like any other field.
 const LAN_KEYS = ["local_ip", "protocol_version", "device22", "lan_status", "lan_checked_at",
-  "lan_gateway_id"];
+  "lan_gateway_id", "lan_sub_online"];
 const LAN_BADGES = {
   ok:           { cls: "on",    text: "reachable" },
   via_gateway:  { cls: "on",    text: "via gateway" },
@@ -537,10 +537,26 @@ function lanStatus(d) {
 function gatewayMissed(d) {
   return d.lan_status === "via_gateway" && !d.local_ip;
 }
+// What a gateway the scan found reports about its sub-device: true (online),
+// false (offline), or null when it didn't say.
+function subReport(d) {
+  return viaGateway(d) && d.local_ip && typeof d.lan_sub_online === "boolean" ? d.lan_sub_online : null;
+}
+// The gateway answering says nothing about the sub-device, so one it reports
+// offline reads as offline and sorts with "unreachable".
+function subOffline(d) {
+  return subReport(d) === false;
+}
 function lanExplain(d) {
-  return gatewayMissed(d)
-    ? "A sub-device: it is reached through its gateway, which the last scan didn't find."
-    : LAN_EXPLAIN[d.lan_status];
+  if (gatewayMissed(d)) return "A sub-device: it is reached through its gateway, which the last scan didn't find.";
+  const report = subReport(d);
+  if (report !== null)
+    return `A sub-device: it is reached through its gateway, which reports it ${report ? "online" : "offline"}.`;
+  return LAN_EXPLAIN[d.lan_status];
+}
+// What the Status badge says, so the filter matches it too.
+function lanBadgeText(d) {
+  return subOffline(d) ? "offline" : LAN_BADGES[d.lan_status].text;
 }
 function statusBadge(d) {
   const status = lanStatus(d);
@@ -548,15 +564,18 @@ function statusBadge(d) {
     return `<span class="badge warn" title="${esc(CHECK_NEEDED)}"><span class="badge-tag">LAN</span> check needed</span>`;
   if (!status) return badge(d.online);
   const when = localTime(d.epochs && d.epochs.lan_checked_at);
+  const report = subReport(d);
   const title = `Checked on the local network${when ? ` ${when}` : ""}. ` +
+    (report !== null ? `Its gateway reports it ${report ? "online" : "offline"}. ` : "") +
     `The cloud says ${d.online ? "online" : "offline"}.`;
-  const cls = gatewayMissed(d) ? "muted" : LAN_BADGES[status].cls;
+  const cls = gatewayMissed(d) ? "muted" : subOffline(d) ? "off" : LAN_BADGES[status].cls;
   return `<span class="badge ${cls}" title="${esc(title)}">` +
-    `<span class="badge-tag">LAN</span> ${LAN_BADGES[status].text}</span>`;
+    `<span class="badge-tag">LAN</span> ${lanBadgeText(d)}</span>`;
 }
 function statusRank(d) {
   const status = lanStatus(d);
-  if (status) return gatewayMissed(d) ? STATUS_RANK.not_found : STATUS_RANK[status];
+  if (status) return gatewayMissed(d) ? STATUS_RANK.not_found
+    : subOffline(d) ? STATUS_RANK.unreachable : STATUS_RANK[status];
   if (needsCheck(d)) return STATUS_RANK.check_needed;
   return d.online ? STATUS_RANK.cloud_online : STATUS_RANK.cloud_offline;
 }
@@ -564,7 +583,7 @@ function statusRank(d) {
 function isOnline(d) {
   const status = lanStatus(d);
   if (!status) return !!d.online;
-  if (status === "via_gateway") return !!d.local_ip;
+  if (status === "via_gateway") return !!d.local_ip && !subOffline(d);
   return ["ok", "busy", "key_mismatch"].includes(status);
 }
 // A sub-device has no protocol version of its own. The one the scan gives it
@@ -646,6 +665,7 @@ function applyLan() {
     if (r.checked_at) d.epochs = { ...(d.epochs || {}), lan_checked_at: r.checked_at };
     // For the CSV: a sub-device's IP and version are this gateway's.
     if (r.gateway_id) d.lan_gateway_id = r.gateway_id;
+    if (typeof r.sub_online === "boolean") d.lan_sub_online = r.sub_online;
   }
 }
 async function loadLan() {
@@ -977,9 +997,12 @@ function unnamedGateways(list) {
 function lanSummaryNotice() {
   const s = lanData.summary;
   const reached = s.sub_devices_reached || 0;   // only sub-devices whose gateway answered
+  const offline = s.sub_devices_offline || 0;   // of those, the ones it reports offline
   const lines = [`Found ${s.matched} of ${plural(s.devices, "device")} on the local network` +
     (reached ? `, plus ${plural(reached, "sub-device")} reached through ` +
-      `${reached === 1 ? "its gateway" : "their gateways"}` : "") + "."];
+      `${reached === 1 ? "its gateway" : "their gateways"}` : "") + "." +
+    (offline ? ` ${reached === 1 ? "Its gateway reports it" : `Their gateways report ${offline} of them`} ` +
+      `offline.` : "")];
   const ips = (list) => `<span class="ips mono">${list.map(esc).join(", ")}</span>`;
   const refused = s.refused || [], unmatched = s.unmatched || [], late = s.out_of_budget || [];
   if (s.cancelled) lines.push("The scan was cancelled, so only the devices it matched were updated.");
@@ -1142,7 +1165,7 @@ function indexDevices() {
     // The change and LAN badges are rendered, not sent, so filtering on
     // "key changed" or "busy" works.
     const change = CHANGE_BADGES[changeById.get(d.id)] || "";
-    const lan = lanStatus(d) ? LAN_BADGES[d.lan_status].text : "";
+    const lan = lanStatus(d) ? lanBadgeText(d) : "";
     const lent = keySource(d) ? `${localKeyOf(d)} key from a sub-device` : "";
     const check = needsCheck(d) ? "check needed" : "";
     searchIndex.set(d, `${JSON.stringify(d)} ${times} ${change} ${lan} ${lent} ${check}`.toLowerCase());

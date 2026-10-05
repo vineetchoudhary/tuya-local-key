@@ -19,13 +19,17 @@ class FakeTuya:
     """answers_wrong_keys: a v3.4/3.5 device that replies to a handshake with
     the wrong key (tinytuya then fills in remote_nonce and fails the HMAC
     check). timeouts: probes with its own key and version that time out first.
+    subs: a gateway's {node id: online} report on its sub-devices, sent
+    report_size node ids per message (all in one by default). None: it
+    doesn't answer the query.
     """
 
     def __init__(self, dev_id, key, version, device22=False, gateway=False,
-                 answers_wrong_keys=False, timeouts=0):
+                 answers_wrong_keys=False, timeouts=0, subs=None, report_size=None):
         self.id, self.key, self.version = dev_id, key, version
         self.device22, self.gateway = device22, gateway
         self.answers_wrong_keys, self.timeouts = answers_wrong_keys, timeouts
+        self.subs, self.report_size = subs, report_size
 
 
 class FakeNetwork:
@@ -38,6 +42,7 @@ class FakeNetwork:
         self.max_active = defaultdict(int)
         self.lock = threading.Lock()
         self.sweeps = defaultdict(int)
+        self.queries = []                    # (ip, version) of each sub-device query
 
     def tcp_state(self, ip, timeout=None):
         with self.lock:
@@ -59,6 +64,7 @@ class FakeDevice:
         # As tinytuya: local_key becomes the session key only once a 3.4/3.5
         # negotiation passes its HMAC check.
         self.real_local_key = self.local_key = key.encode("latin1")
+        self.persist, self.report = False, []
 
     def status(self):
         net = self.net
@@ -104,6 +110,29 @@ class FakeDevice:
         if host.device22:
             self.dev_type = "device22"
         return {"dps": {"1": True}}
+
+    def set_socketPersistent(self, persist):
+        self.persist = persist
+
+    def subdev_query(self):
+        host = self.net.hosts.get(self.ip)
+        with self.net.lock:
+            self.net.queries.append((self.ip, self.version))
+        if (not isinstance(host, FakeTuya) or host.subs is None
+                or (host.key, host.version) != (self.key, self.version)):
+            return {"Err": "904"}
+        node_ids = list(host.subs)
+        size = host.report_size or len(node_ids) or 1
+        self.report = [{"reqType": "subdev_online_stat_report", "data": {
+            "online": [n for n in node_ids[i:i + size] if host.subs[n]],
+            "offline": [n for n in node_ids[i:i + size] if not host.subs[n]],
+        }} for i in range(0, len(node_ids), size)]
+        return self.report.pop(0) if self.report else None
+
+    def receive(self):
+        # Without a persistent socket, tinytuya closes the connection after
+        # the query, and a receive() finds nothing.
+        return self.report.pop(0) if self.persist and self.report else None
 
     def close(self):
         pass
@@ -660,6 +689,148 @@ def test_sub_devices_of_a_gateway_with_its_own_key_add_no_probes(lan):
 
         assert with_subs.probes == without.probes
     assert out["results"]["sensor-0"]["ip"] == "10.0.0.8", "they share the hub's key, so its IP too"
+
+
+# A gateway answering its own probe says nothing about its sub-devices, so the
+# scan asks it which of them are online (issue #7).
+def test_a_gateway_reports_which_of_its_sub_devices_are_online(lan):
+    net = lan({"10.0.0.8": FakeTuya("hub", KEYS["f"], "3.4", gateway=True,
+                                    subs={"a4c1": True, "b5d2": False})})
+    devices = [
+        dev("hub", KEYS["f"], category="wg2"),
+        dev("sensor", KEYS["f"], sub=True, gateway_id="hub", node_id="a4c1"),
+        dev("valve", KEYS["f"], sub=True, gateway_id="hub", node_id="b5d2"),
+        dev("unlisted", KEYS["f"], sub=True, gateway_id="hub", node_id="c6e3"),
+        dev("no-node", KEYS["f"], sub=True, gateway_id="hub"),
+    ]
+
+    out = lan_scan.scan(["10.0.0.8"], devices)
+
+    results = out["results"]
+    assert results["sensor"]["sub_online"] is True
+    assert results["valve"] == dict(results["valve"], status="via_gateway", ip="10.0.0.8",
+                                    sub_online=False)
+    assert "sub_online" not in results["unlisted"], "the gateway didn't mention it"
+    assert "sub_online" not in results["no-node"]
+    assert "sub_online" not in results["hub"]
+    assert net.queries == [("10.0.0.8", "3.4")], "asked once, at the version it answered"
+    assert (out["summary"]["sub_devices_reached"], out["summary"]["sub_devices_offline"]) == (4, 1)
+
+
+def test_a_keyless_gateway_reports_on_its_sub_devices_too(lan):
+    lan({"10.0.0.8": FakeTuya("gw-zigbee", KEYS["a"], "3.4", gateway=True,
+                              subs={valve()["node_id"]: False})})
+
+    out = lan_scan.scan(["10.0.0.8"], [zigbee_gateway(), valve()])
+
+    assert out["results"]["gw-zigbee"]["key_from"] == "valve"
+    assert out["results"]["valve"]["sub_online"] is False
+
+
+def test_two_keyless_gateways_report_before_they_are_told_apart(lan):
+    hosts = dict(TWO_GATEWAYS)
+    hosts["10.0.0.8"] = FakeTuya("gw-zigbee", KEYS["a"], "3.4", gateway=True,
+                                 subs={valve()["node_id"]: True})
+    hosts["10.0.0.9"] = FakeTuya("gw-ble", KEYS["b"], "3.4", gateway=True,
+                                 subs={timer()["node_id"]: False})
+    lan(hosts)
+
+    out = lan_scan.scan(list(hosts), [zigbee_gateway(), ble_gateway(), valve(), timer()])
+
+    assert out["results"]["valve"]["sub_online"] is True
+    assert out["results"]["timer"]["sub_online"] is False
+
+
+def test_a_report_split_over_several_messages_is_read_to_the_end(lan):
+    subs = {f"n{i}": i % 2 == 0 for i in range(3)}
+    lan({"10.0.0.8": FakeTuya("hub", KEYS["f"], "3.4", gateway=True, subs=subs, report_size=1)})
+    devices = [dev("hub", KEYS["f"], category="wg2")] + [
+        dev(f"sensor-{n}", KEYS["f"], sub=True, gateway_id="hub", node_id=n) for n in subs]
+
+    out = lan_scan.scan(["10.0.0.8"], devices)
+
+    assert {n: out["results"][f"sensor-{n}"]["sub_online"] for n in subs} == subs
+
+
+def test_sub_devices_stay_unknown_when_their_gateway_doesnt_report(lan):
+    net = lan({"10.0.0.8": FakeTuya("hub", KEYS["f"], "3.4", gateway=True)})
+    devices = [dev("hub", KEYS["f"], category="wg2"),
+               dev("sensor", KEYS["f"], sub=True, gateway_id="hub", node_id="a4c1"),
+               dev("orphan", KEYS["b"], sub=True, gateway_id="missing", node_id="b5d2")]
+
+    out = lan_scan.scan(["10.0.0.8"], devices)
+
+    assert out["results"]["sensor"]["status"] == "via_gateway"
+    assert "sub_online" not in out["results"]["sensor"]
+    assert "sub_online" not in out["results"]["orphan"]
+    assert net.queries == [("10.0.0.8", "3.4")], "a gateway that wasn't found isn't asked"
+    assert out["summary"]["sub_devices_offline"] == 0
+
+
+def test_a_scan_without_sub_devices_asks_no_gateway(lan):
+    net = lan({"10.0.0.8": FakeTuya("hub", KEYS["f"], "3.4", gateway=True, subs={})})
+
+    lan_scan.scan(["10.0.0.8"], [dev("hub", KEYS["f"], category="wg2")])
+
+    assert net.queries == []
+
+
+def test_the_sub_device_report_skips_other_messages_and_closes_the_connection(monkeypatch):
+    class Device:
+        def __init__(self):
+            self.persist, self.closed, self.receives = False, False, 0
+            self.replies = [
+                {"dps": {"1": True}, "cid": "zz"},   # a status update, in between
+                {"data": {"offline": ["b"]}},
+                {"data": {"online": ["c"]}},          # never read: a and b are known
+            ]
+
+        def set_socketPersistent(self, persist):
+            self.persist = persist
+
+        def subdev_query(self):
+            return {"reqType": "subdev_online_stat_report", "data": {"online": ["a", "x"]}}
+
+        def receive(self):
+            self.receives += 1
+            return self.replies.pop(0)
+
+        def close(self):
+            self.closed = True
+
+    device = Device()
+    monkeypatch.setattr(lan_scan, "_new_device", lambda *a: device)
+
+    states = lan_scan.subdevice_states("hub", "10.0.0.8", KEYS["f"], "3.4", ["a", "b"])
+
+    assert states == {"a": True, "b": False}, "x isn't one of the sub-devices asked about"
+    assert device.persist and device.closed
+    assert device.receives == 2
+
+
+@pytest.mark.parametrize("reply", [{"Err": "904"}, None, RuntimeError("reset")])
+def test_a_gateway_that_cant_report_gives_no_states(monkeypatch, reply):
+    closed = []
+
+    class Device:
+        def set_socketPersistent(self, persist):
+            pass
+
+        def subdev_query(self):
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        def receive(self):
+            raise AssertionError("nothing to read after a failed query")
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(lan_scan, "_new_device", lambda *a: Device())
+
+    assert lan_scan.subdevice_states("hub", "10.0.0.8", KEYS["f"], "3.4", ["a"]) == {}
+    assert closed == [True]
 
 
 def test_lend_keys_follows_gateway_id_and_never_lends_another_gateways_key():

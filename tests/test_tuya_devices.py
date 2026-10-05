@@ -778,7 +778,7 @@ def test_scan_names_the_gateway_a_sub_device_is_reached_through(tmp_path, monkey
         "gw-1": {"status": "ok", "ip": "192.168.2.8", "version": "3.4", "device22": False,
                  "checked_at": 1.0, "key_from": "valve-1"},
         "valve-1": {"status": "via_gateway", "ip": "192.168.2.8", "version": "3.4", "device22": False,
-                    "checked_at": 1.0, "gateway_id": "gw-1"},
+                    "checked_at": 1.0, "gateway_id": "gw-1", "sub_online": False},
     })
 
     core.main(["--json", "--csv", str(csv_path), "--scan", "192.168.2.8"])
@@ -787,10 +787,12 @@ def test_scan_names_the_gateway_a_sub_device_is_reached_through(tmp_path, monkey
     listed = json.loads(out[:out.rindex("]") + 1])
     assert listed[1]["lan_gateway_id"] == "gw-1"
     assert listed[1]["protocol_version"] == "3.4", "the gateway's, which tools need to reach it"
-    assert "lan_gateway_id" not in listed[0]
+    assert listed[1]["lan_sub_online"] is False, "its gateway reports it offline"
+    assert "lan_gateway_id" not in listed[0] and "lan_sub_online" not in listed[0]
     with csv_path.open(newline="", encoding="utf-8") as f:
         rows = {r["id"]: r for r in csv.DictReader(f)}
     assert rows["valve-1"]["lan_gateway_id"] == "gw-1" and rows["gw-1"]["lan_gateway_id"] == ""
+    assert rows["valve-1"]["lan_sub_online"] == "False" and rows["gw-1"]["lan_sub_online"] == ""
 
 
 def test_scan_lists_gateways_it_couldnt_tell_apart(monkeypatch, capsys):

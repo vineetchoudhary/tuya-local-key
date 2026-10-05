@@ -198,6 +198,7 @@ After a scan, the Status column shows what the device did when asked, tagged `LA
 |---|---|
 | reachable | Answered on port 6668 to its local key. |
 | via gateway | A Zigbee or Bluetooth sub-device. It shares its gateway's key and is reached at the gateway's IP and version. It has no protocol version of its own, so its Protocol column stays empty, and its details panel shows the gateway's IP and version. It is greyed out when the scan didn't find the gateway. See [Gateways](#gateways). |
+| offline | A sub-device whose gateway answered, but reports it offline. The scan asks each gateway it finds which of its sub-devices are online, since the gateway answering says nothing about them. |
 | check needed | A gateway Tuya lists without a key, which the last scan found but couldn't tell apart from your other gateways. Check it at its IP. See [Gateways](#gateways). |
 | busy | Refused the connection at its last known IP. Tuya devices accept only one local connection, so a device already connected to Home Assistant or another local client refuses new ones. A manual Check will be refused too until that client lets go. |
 | key mismatch | Answered at its last known IP, but not to its key, at the version it used before, twice in a row. The key has probably changed, so click Refresh. Another device may also have taken that IP. |
@@ -215,7 +216,7 @@ Tuya's device-sharing API can list a Zigbee or Bluetooth gateway with no local k
 - **One gateway without a key:** it gets the key its sub-devices carry. Its row shows that key, marked with an asterisk, along with its IP and version. The asterisk's tooltip and a note below the table say the key comes from a sub-device.
 - **Several gateways without a key:** the scan still finds where each key answers, so every sub-device gets its gateway's IP and version. Tuya's data doesn't say which gateway is at which address, so the gateways show **check needed**, and the scan summary lists each address with the sub-devices whose key answered there. Open a gateway and **Check** it at its IP, with one click on the address its sub-devices point to, or one from your router's client list. The key it answers to becomes its key, and later scans remember it. When that leaves only one gateway, it's checked too, so two gateways take one click. A gateway checked at the wrong IP takes the other gateway's key, so check it again at the right one.
 
-In the CSV export and the CLI, a sub-device keeps its gateway's IP and version, which local tools need to reach it, and `lan_gateway_id` names that gateway.
+In the CSV export and the CLI, a sub-device keeps its gateway's IP and version, which local tools need to reach it, and `lan_gateway_id` names that gateway. `lan_sub_online` says whether that gateway reports it online, and is empty when the gateway didn't say.
 
 ### device22
 
@@ -276,7 +277,7 @@ First run prompts for your Smart Life user code, prints a QR code in the termina
 | `--user-code CODE` | Provide the Smart Life user code instead of being prompted. |
 | `--json` | Output raw JSON. |
 | `--csv PATH` | Also write results to a CSV file. |
-| `--scan TARGETS` | Also find each device's local IP and protocol version, using your IoT VLAN or subnet, e.g. `--scan 192.168.2.0/24`. Adds `local_ip`, `protocol_version`, `device22` and `lan_status` to every output. A sub-device also gets `lan_gateway_id`, the gateway whose IP and version it has, and a gateway Tuya lists without a key gets `local_key` and `local_key_from` from its sub-device. See [Protocol Version](#protocol-version). |
+| `--scan TARGETS` | Also find each device's local IP and protocol version, using your IoT VLAN or subnet, e.g. `--scan 192.168.2.0/24`. Adds `local_ip`, `protocol_version`, `device22` and `lan_status` to every output. A sub-device also gets `lan_gateway_id`, the gateway whose IP and version it has, and `lan_sub_online` when that gateway reports whether it is online. A gateway Tuya lists without a key gets `local_key` and `local_key_from` from its sub-device. See [Protocol Version](#protocol-version). |
 | `--relogin` | Ignore the cached session and scan a new QR code. |
 | `--logout` | Delete the cached session and exit. |
 | `--session PATH` | Use a different session-cache file. |

@@ -9,7 +9,8 @@ each one directly over TCP 6668 with its local key, through tinytuya's Device:
   1. sweep()  opens (and immediately closes) a plain TCP connection to every
               target, to learn which addresses listen on 6668.
   2. scan()   works through the open addresses, trying the keys of the devices
-              still unmatched, one protocol version at a time.
+              still unmatched, one protocol version at a time. Then it asks
+              each gateway it found which of its sub-devices are online.
 
 Nothing here relies on UDP broadcasts, so it works across routed VLANs, and
 nothing here trusts the cloud `online` flag: an address is judged only by what
@@ -46,6 +47,11 @@ ADDRESS_BUDGET_SECONDS = 60.0
 # 3.4 (about 1 s each) and at 3.5 (about 1 s each). An account with many devices
 # gets that much time per address, so its v3.5 devices aren't cut off.
 SECONDS_PER_KEY = 2.0
+
+# Messages read for one gateway's report on its sub-devices: one with many
+# sub-devices splits the report (as localtuya notes), and a status update from
+# a sub-device can arrive in between.
+SUB_REPORT_MESSAGES = 4
 
 # 3.3 first: it is the most common, and trying it on a v3.4/v3.5 device fails
 # in about 0.1 s, while 3.5 on a v3.4 device is the slow (6 s) case. 3.1 is tried
@@ -329,6 +335,48 @@ def _classify(device, result, version, gateway, outcome):
 
     outcome["device22"] = (not gateway) and getattr(device, "dev_type", "") == "device22"
     return outcome
+
+
+def subdevice_states(dev_id, ip, key, version, node_ids):
+    """{node id: True if online, False if offline}, as the gateway at `ip`
+    reports the sub-devices with those node ids (tinytuya's subdev_query).
+
+    A sub-device the gateway doesn't mention is left out, and so is every one
+    when it doesn't answer: nothing is known about those.
+    """
+    wanted, states = set(node_ids), {}
+    try:
+        device = _new_device(dev_id, ip, key, version)
+    except Exception:
+        return states
+    try:
+        # Kept open only to read the rest of the report, and closed below.
+        device.set_socketPersistent(True)
+        reply = device.subdev_query()
+        for _ in range(SUB_REPORT_MESSAGES):
+            if not isinstance(reply, dict) or "Err" in reply:
+                break
+            _read_sub_report(reply, states)
+            if wanted <= set(states):
+                break
+            reply = device.receive()
+    except Exception:
+        pass
+    finally:
+        try:
+            device.close()
+        except Exception:
+            pass
+    return {node_id: online for node_id, online in states.items() if node_id in wanted}
+
+
+def _read_sub_report(reply, states):
+    # {"data": {"online": [node ids], "offline": [node ids], "nearby": [...]}}
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else reply
+    for name, online in (("offline", False), ("online", True)):
+        node_ids = data.get(name)
+        if isinstance(node_ids, list):
+            states.update((n, online) for n in node_ids if isinstance(n, str))
 
 
 def _session_key_installed(device):
@@ -776,8 +824,28 @@ class _Scan:
             # One odd device can trip tinytuya; all of them means tinytuya is broken,
             # and "not found" for every device would be a lie.
             raise ScannerUnavailable("tinytuya failed on every probe")
+        self.sub_states = {} if self.cancel.is_set() else self._ask_gateways()
         self._emit(phase="done")
         return self._outcome(open_ips)
+
+    def _ask_gateways(self):
+        """{pool id: {node id: online}}: what each gateway that answered
+        reports about the sub-devices that take their result from it. Its
+        answer to a probe says nothing about them."""
+        node_ids = {}
+        for sub, owner in self.subs:
+            if owner in self.matched and sub.get("node_id"):
+                node_ids.setdefault(owner, []).append(sub["node_id"])
+        if not node_ids:
+            return {}
+
+        def ask(owner):
+            dev, found = self.by_id[owner], self.matched[owner]
+            return owner, subdevice_states(dev.get("_probe_id", dev["id"]), found["ip"],
+                                           dev["local_key"], found["version"], node_ids[owner])
+
+        with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as workers:
+            return dict(workers.map(ask, node_ids))
 
     def _outcome(self, open_ips):
         cancelled = self.cancel.is_set()
@@ -812,7 +880,7 @@ class _Scan:
                 results[gateway_id] = dict(self._missing(gateway_id, checked_at),
                                            ip=self.known[gateway_id]["ip"])
 
-        subs_reached = 0
+        subs_reached = subs_offline = 0
         for sub, owner in self.subs:
             if owner in renamed:
                 continue   # its key didn't answer where its gateway turned out to be
@@ -830,11 +898,15 @@ class _Scan:
             # version: that replaces an older result that had them.
             reached = gateway.get("status") == OK
             subs_reached += reached
+            # sub_online is what the gateway reports, when it reports anything.
+            online = self.sub_states.get(owner, {}).get(sub.get("node_id")) if reached else None
+            subs_offline += online is False
             results[sub["id"]] = _plain_result(
                 VIA_GATEWAY, checked_at,
                 gateway.get("ip") if reached else None,
                 gateway.get("version") if reached else None,
                 gateway_id=sub.get("gateway_id") or gateway_id,
+                **({} if online is None else {"sub_online": online}),
             )
 
         # Gateways that answered to a sub-device's key, but which keyless
@@ -866,6 +938,7 @@ class _Scan:
             "matched": sum(k not in self.unclaimed for k in self.matched) + len(named),
             "sub_devices": len(self.subs),
             "sub_devices_reached": subs_reached,
+            "sub_devices_offline": subs_offline,
             "unnamed_gateways": unnamed,
             "duration": round(self.clock() - self.started, 1),
             "cancelled": cancelled,
@@ -936,7 +1009,9 @@ def scan(targets, devices, known=None, progress=None, cancel=None,
               are left out of the summary's lists (and recorded under "routers").
 
     Returns {"results": {device id: result}, "summary": {...}}. No key appears
-    in either. The summary's unnamed_gateways lists the addresses where a
+    in either. A sub-device's result has sub_online when its gateway answered
+    and reported it online (True) or offline (False). The summary's
+    unnamed_gateways lists the addresses where a
     gateway answered to a sub-device's key while more than one keyless gateway
     could be the one there. Raises ScannerUnavailable when tinytuya can't do
     the job.
