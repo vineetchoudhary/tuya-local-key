@@ -545,7 +545,10 @@ def _merge_lan(job, outcome, current):
 
     names = {dev_id: d.get("name") or "" for dev_id, d in current.items()}
     changes = lan_scan.diff_results(previous, results, names)
-    merged = {dev_id: r for dev_id, r in previous.items() if dev_id in current}
+    gateways = lan_scan.gateway_ids(current.values())
+    merged = {dev_id: r for dev_id, r in previous.items()
+              if dev_id in current
+              and not (dev_id in gateways and r.get("status") == lan_scan.VIA_GATEWAY)}
     merged.update(results)
     _hand_over_gateway_keys(merged, results, current)
     body["results"] = merged

@@ -422,7 +422,9 @@ def is_sub_device(device):
     return bool(device.get("sub")) or bool(gateway_id and gateway_id != device.get("id"))
 
 
-def _gateway_ids(devices):
+def gateway_ids(devices):
+    """Ids of the gateways in the list: by category, or named as one by a
+    sub-device."""
     ids = {d.get("gateway_id") for d in devices if is_sub_device(d) and d.get("gateway_id")}
     ids |= {d.get("id") for d in devices if is_gateway(d)}
     return ids
@@ -431,7 +433,7 @@ def _gateway_ids(devices):
 def _roles(devices):
     """(gateway ids, sub-device ids) across the whole list. A device another
     one names as its gateway is a gateway, whatever its category."""
-    gateways = _gateway_ids(devices)
+    gateways = gateway_ids(devices)
     subs = {d["id"] for d in devices
             if d.get("id") and d["id"] not in gateways and is_sub_device(d)}
     return gateways, subs

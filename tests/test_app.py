@@ -1395,6 +1395,23 @@ def test_no_gateway_is_checked_unasked_while_more_than_one_could_have_the_key(we
     assert len(fake.calls) == 2 and job["also"] == []
 
 
+def test_a_scan_drops_what_3_0_stored_for_gateways_marked_sub(webapp, monkeypatch):
+    # 3.0 took both gateways for sub-devices whose gateway it didn't find.
+    missed = dict(_via(None), version=None)
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"gw": missed, "gw-2": missed, "valve": missed, "timer": missed, "sensor": missed},
+        {"valve": _via("10.0.0.8"), "timer": _via("10.0.0.9")},   # two unnamed gateways
+    ))
+    client = _lan_logged_in(webapp, monkeypatch, devices=TWO_GATEWAY_DEVICES)
+    _scan(client)
+
+    _scan(client)
+
+    results = client.get("/api/lan").json["results"]
+    assert "gw" not in results and "gw-2" not in results, "so they show check needed"
+    assert results["sensor"] == missed, "a real sub-device keeps its last result"
+
+
 def test_a_gateway_result_is_dropped_when_its_sub_devices_key_changes_mid_scan(webapp, monkeypatch):
     gate = threading.Event()
     monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
