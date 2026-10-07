@@ -3,6 +3,7 @@ FROM python:3.12-slim
 ARG BUILD_VERSION=dev
 
 LABEL \
+    org.opencontainers.image.licenses="Apache-2.0" \
     io.hass.version="${BUILD_VERSION}" \
     io.hass.type="app" \
     io.hass.arch="aarch64|amd64"
@@ -22,6 +23,7 @@ RUN pip install -r requirements-web.txt
 
 # App
 COPY tuya_devices.py app.py device_cache.py lan_scan.py ./
+COPY LICENSE NOTICE ./
 COPY templates ./templates
 COPY tuya_local_key/icon.png ./tuya_local_key/icon.png
 

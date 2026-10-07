@@ -364,6 +364,10 @@ The QR code expires within a minute or two. If it times out, start the login aga
 - A device stopped working with a local integration: its local key may have rotated. Click Refresh and read the change summary. See [Change Detection](#change-detection).
 - "Could not reach Tuya" with the list still shown: that is the saved snapshot. Try Refresh again.
 
+## License
+
+Tuya Local Key is licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution information.
+
 ## Support
 
 If this project has been useful to you, consider supporting its continued development.

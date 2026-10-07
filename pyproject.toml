@@ -7,6 +7,8 @@ name = "tuya-local-key"
 version = "3.1.0"
 description = "List your Smart Life / Tuya devices via QR-code login (no developer account needed)."
 readme = "README.md"
+license = {file = "LICENSE"}
+classifiers = ["License :: OSI Approved :: Apache Software License"]
 requires-python = ">=3.8"
 dependencies = [
     "tuya-device-sharing-sdk>=0.2.15",
@@ -26,3 +28,4 @@ markers = [
 
 [tool.setuptools]
 py-modules = ["tuya_devices", "lan_scan"]
+license-files = ["LICENSE", "NOTICE"]
