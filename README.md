@@ -215,6 +215,8 @@ Tuya's device-sharing API can list a Zigbee or Bluetooth gateway with no local k
 
 When Tuya or a scan identifies which gateway a sub-device belongs to, the table groups it under that gateway. Groups start expanded. Use the arrow beside the gateway's name to collapse or expand its sub-devices. Sorting keeps each group together and sorts its sub-devices within it. Searching reveals matching sub-devices and shows their gateway for context. Unlinked sub-devices stay in their own rows until the gateway is known.
 
+When the account has sub-devices, the key column is labelled **Local Key / Node ID**. Gateway and direct-device rows show local keys; sub-device rows show copyable Node IDs with setup tooltips. Node IDs stay visible when keys are hidden, and show a dash when missing. Without sub-devices, the heading remains **Local Key**. The details panel keeps **Gateway local key**, **Node ID** and **UUID** separate for sub-devices.
+
 - **One gateway without a key:** it gets the key its sub-devices carry. Its row shows that key, marked with an asterisk, along with its IP and version. The asterisk's tooltip and a note below the table say the key comes from a sub-device.
 - **Several gateways without a key:** the scan still finds where each key answers, so every sub-device gets its gateway's IP and version. Tuya's data doesn't say which gateway is at which address, so the gateways show **check needed**, and the scan summary lists each address with the sub-devices whose key answered there. Open a gateway and **Check** it at its IP, with one click on the address its sub-devices point to, or one from your router's client list. The key it answers to becomes its key, and later scans remember it. When that leaves only one gateway, it's checked too, so two gateways take one click. A gateway checked at the wrong IP takes the other gateway's key, so check it again at the right one.
 
@@ -228,13 +230,13 @@ Some devices need a quirk tinytuya calls `device22`. The Protocol column marks i
 
 ## Bluetooth Devices
 
-Bluetooth-only devices show `-` in the Local Key column. This is not a bug in this tool. Tuya's device-sharing API does not return a `local_key` for them, so there is nothing to display. The SDK builds each device record straight from Tuya's response, so a field Tuya omits is simply absent. You can confirm this in the Raw JSON section of the details panel, where the `local_key` line is missing entirely rather than empty.
+Bluetooth-only devices have no local key to display. This is not a bug in this tool. Tuya's device-sharing API does not return a `local_key` for them. The SDK builds each device record straight from Tuya's response, so a field Tuya omits is simply absent. You can confirm this in the Raw JSON section of the details panel, where the `local_key` line is missing entirely rather than empty.
 
 Tuya documents `local_key` as the ["unique encrypted key of the specified device over LAN"](https://developer.tuya.com/en/docs/cloud/9f0ad495f5?id=Kfpa9zysx687w). A Bluetooth-only device has no LAN presence, and Tuya's [Bluetooth pairing docs](https://developer.tuya.com/en/docs/app-development/activator_ble_ios?id=Kcy2u7zj5hwkf) describe the connection as point-to-point between phone and device, so the app-side API this tool logs into has no LAN key to hand out.
 
 ### Bluetooth Devices Behind a Gateway
 
-Pairing a Bluetooth device to a Tuya Bluetooth or SigMesh gateway makes a local key appear. That key belongs to the gateway, not to the device: every sub-device under the same gateway shows the same value, because sub-devices are reached over LAN through the gateway. Treat it as the gateway's key. It will not authenticate a direct Bluetooth connection to the device.
+Pairing a Bluetooth device to a Tuya Bluetooth or SigMesh gateway makes a local key appear in its returned data. That key belongs to the gateway, not to the device: Tuya returns the same value on each sub-device under the gateway, because sub-devices are reached over LAN through the gateway. The table shows that key on the gateway's row once identified, and the sub-device's Node ID on its own row. The key remains available as **Gateway local key** in the sub-device's details panel. It will not authenticate a direct Bluetooth connection to the device.
 
 ## Configuration
 

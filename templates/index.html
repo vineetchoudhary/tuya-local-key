@@ -138,11 +138,11 @@
   code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .key-heading { display: inline-flex; align-items: center; gap: 6px; }
   .key-heading .icon-btn { width: 24px; height: 24px; }
-  .key {
+  .key, .node-id {
     min-width: 132px; text-align: left; background: var(--code-bg); padding: 3px 7px;
     border-radius: 6px; cursor: pointer; border: 0; font-weight: 500;
   }
-  .key:hover, .key:focus-visible { outline: 1px solid var(--accent); }
+  .key:hover, .key:focus-visible, .node-id:hover, .node-id:focus-visible { outline: 1px solid var(--accent); }
   .icon-btn {
     display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0;
     border-radius: 7px; color: var(--muted);
@@ -653,6 +653,7 @@ function localKeyOf(d) {
   return d.local_key || (source ? source.local_key : "");
 }
 function localKeyCell(d) {
+  if (isSubDevice(d)) return renderNodeId(d.node_id);
   const source = keySource(d);
   if (!source) return renderLocalKey(localKeyOf(d));
   const tip = `Tuya lists this key on its sub-device ${source.name || source.id}, not on the gateway.`;
@@ -1129,11 +1130,19 @@ function renderLocalKeyToggle() {
   return `<button class="icon-btn" type="button" data-key-toggle aria-label="${label}" aria-pressed="${localKeysVisible}" title="${label}">${icon(localKeysVisible ? "eyeOff" : "eye")}</button>`;
 }
 function renderLocalKeyHeader() {
-  return `<span class="key-heading"><span>Local Key</span>${renderLocalKeyToggle()}</span>`;
+  // The account's full list keeps the heading stable through filtering and collapse.
+  const label = deviceData.some(isSubDevice) ? "Local Key / Node ID" : "Local Key";
+  return `<span class="key-heading"><span>${label}</span>${renderLocalKeyToggle()}</span>`;
 }
 function renderLocalKey(value) {
   const text = String(value ?? "");
   return `<button class="key mono" type="button" title="Copy local key" aria-label="Copy local key" data-copy="${esc(text)}">${keyDisplay(text, localKeysVisible)}</button>`;
+}
+function renderNodeId(value) {
+  const text = String(value ?? "");
+  if (!text) return '<span class="dash" title="Tuya did not return a Node ID for this sub-device.">-</span>';
+  const tip = "Node ID identifies this sub-device within its gateway. Use it with the gateway's IP, protocol version and local key. Click to copy.";
+  return `<button class="node-id mono" type="button" title="${esc(tip)}" aria-label="Copy sub-device Node ID" data-copy="${esc(text)}">${esc(text)}</button>`;
 }
 function esc(s) {
   return String(s ?? "-").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -1286,7 +1295,8 @@ function renderRows(list) {
       (entry.hidden ? " hidden" : "") + `>${cells}${open}</tr>`;
   }).join("");
   // The footnote for the * on a key from a sub-device, while one is listed.
-  $("keyMarkNote").classList.toggle("hidden", !entries.some(entry => !entry.hidden && keySource(entry.device)));
+  $("keyMarkNote").classList.toggle("hidden", !entries.some(entry =>
+    !entry.hidden && !isSubDevice(entry.device) && keySource(entry.device)));
 }
 
 function render() { renderNotices(); renderHead(); renderRows(computeList()); renderPanel(); }
@@ -1440,6 +1450,7 @@ function fieldValue(d, key) {
       (source ? `<div class="field-sub">Tuya lists this key on its sub-device ${deviceLink(source)}, not on ` +
         `the gateway. The gateway answered to it on the local network.</div>` : "");
   }
+  if (key === "node_id" && isSubDevice(d)) return renderNodeId(value);
   if (key === "online") return badge(value);
   if (key === "lan_status") {
     const status = lanStatus(d);
@@ -1461,12 +1472,13 @@ function fieldValue(d, key) {
 
 function fieldSections(d) {
   const shown = new Set(["epochs", ...SPEC_KEYS, ...LAN_KEYS]);
+  const labels = isSubDevice(d) ? { local_key: "Gateway local key" } : {};
   let html = "";
   for (const { title, keys, render: custom } of DETAIL_SECTIONS) {
     if (custom) { html += section(title, custom(d)); continue; }
     const present = keys.filter(key => key in d || (key === "local_key" && keySource(d)));
     present.forEach(key => shown.add(key));
-    if (present.length) html += section(title, fieldList(d, present));
+    if (present.length) html += section(title, fieldList(d, present, labels));
   }
   const rest = Object.keys(d).filter(key => !shown.has(key));
   if (rest.length) html += section("Other fields", fieldList(d, rest));

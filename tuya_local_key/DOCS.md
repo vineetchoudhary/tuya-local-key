@@ -52,11 +52,13 @@ A device that is already connected to another local client, such as Home Assista
 
 Once Tuya or a scan identifies a sub-device's gateway, its row appears under the gateway, expanded by default. Sorting keeps the group together, and searching reveals matching sub-devices with their gateway for context. A sub-device's Protocol cell shows a dash with the gateway's version in a tooltip. Its details panel shows **Gateway IP**, **Gateway protocol**, its **Node ID**, and a link to the gateway when known. Use the gateway's IP, version and local key with that Node ID for tuya-local setup.
 
+The table heading is **Local Key / Node ID** when the account has sub-devices, and **Local Key** otherwise. Gateway and direct-device rows show local keys. Sub-device rows show copyable Node IDs with setup tooltips, or a dash when Tuya doesn't return one. Node IDs stay visible when local keys are hidden. The details panel keeps **Gateway local key**, **Node ID** and **UUID** separate for sub-devices.
+
 Scan results are encrypted in `/data/lan.cache` with the same key as the device list, and are cleared when you log out or log in again. A changed protocol version or IP is listed in the change summary.
 
 ## Bluetooth Devices
 
-Bluetooth-only devices show `-` in the Local Key column. Tuya's device-sharing API does not return a local key for them, so there is nothing to display. See [Bluetooth Devices](https://github.com/vineetchoudhary/tuya-local-key#bluetooth-devices) in the README for more information.
+Bluetooth-only devices have no local key to display. Tuya's device-sharing API does not return one for them. See [Bluetooth Devices](https://github.com/vineetchoudhary/tuya-local-key#bluetooth-devices) in the README for more information.
 
 ## Security
 

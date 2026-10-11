@@ -211,7 +211,7 @@ def test_table_shows_the_scan_columns_only(page):
     headers = page.locator("#thead th").all_inner_texts()
 
     assert [h.strip() for h in headers] == [
-        "Name", "Status", "ID", "Local Key", "Protocol", "Product ID", "Product Name",
+        "Name", "Status", "ID", "Local Key / Node ID", "Protocol", "Product ID", "Product Name",
         "Update Time", "Details",
     ]
     assert page.locator("#rows tr").count() == len(DEVICES)
@@ -834,6 +834,100 @@ def listed_ids(page):
     return page.locator("#rows tr").evaluate_all("rows => rows.map(row => row.dataset.id)")
 
 
+def test_local_key_heading_tracks_the_full_account_not_the_visible_rows(page, running_app, monkeypatch):
+    heading = page.locator("#thead th").nth(3)
+    _serves(running_app, monkeypatch, [PLUG, ZIGBEE_GATEWAY, BLE_GATEWAY])
+    refreshed(page, "#changesNotice")
+    assert heading.inner_text() == "Local Key", "gateway node IDs do not change the heading"
+    assert page.locator("#rows .node-id").count() == 0
+
+    _serves(running_app, monkeypatch, [PLUG, ZIGBEE_GATEWAY, _named_sub(VALVE, ZIGBEE_GATEWAY)])
+    refreshed(page, "#changesNotice")
+    assert heading.inner_text() == "Local Key / Node ID"
+    row(page, ZIGBEE_GATEWAY).locator("[data-gateway-toggle]").click()
+    assert row(page, VALVE).is_hidden()
+    assert heading.inner_text() == "Local Key / Node ID"
+    page.fill("#filter", PLUG.name)
+    assert page.locator("#rows tr").count() == 1
+    assert heading.inner_text() == "Local Key / Node ID"
+    page.fill("#filter", "no matching device")
+    assert page.locator("#rows tr").count() == 0
+    assert heading.inner_text() == "Local Key / Node ID"
+
+    page.fill("#filter", "")
+    _serves(running_app, monkeypatch, [PLUG])
+    refreshed(page, "#changesNotice")
+    assert heading.inner_text() == "Local Key"
+
+
+def test_sub_device_node_ids_are_copyable_and_stay_visible_when_keys_are_hidden(
+        page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, VALVE, WATER_TIMER)
+    for sub in (VALVE, WATER_TIMER):
+        node = row(page, sub).locator(".node-id")
+        assert node.inner_text() == sub.node_id, "the gateway does not have to be identified first"
+        assert "gateway's IP, protocol version and local key" in node.get_attribute("title")
+        assert node.get_attribute("aria-label") == "Copy sub-device Node ID"
+        assert row(page, sub).locator(".key").count() == 0
+        node.click()
+        assert clipboard(page) == sub.node_id
+        assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+
+    for visible in (True, False):
+        page.click("#thead [data-key-toggle]")
+        assert (PLUG.local_key in row(page, PLUG).inner_text()) is visible
+        for sub in (VALVE, WATER_TIMER):
+            assert row(page, sub).locator(".node-id").inner_text() == sub.node_id
+            assert sub.local_key not in row(page, sub).inner_text()
+
+
+def test_a_missing_node_id_does_not_fall_back_to_the_uuid_or_local_key(page, running_app, monkeypatch):
+    sub = copy.deepcopy(VALVE)
+    del sub.node_id
+    sub.uuid = "sub-device-uuid"
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    page.click("#thead [data-key-toggle]")
+
+    cell = row(page, sub).locator("td:nth-child(4)")
+    assert cell.inner_text() == "-"
+    assert cell.locator(".dash").get_attribute("title") == \
+        "Tuya did not return a Node ID for this sub-device."
+    assert cell.locator("[data-copy]").count() == 0
+    assert sub.uuid not in row(page, sub).inner_text()
+    assert sub.local_key not in row(page, sub).inner_text()
+
+
+def test_sub_device_details_and_csv_keep_the_key_node_id_and_uuid_separate(
+        page, running_app, monkeypatch, tmp_path):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    sub.uuid = "sub-device-uuid"
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    open_panel(page, sub.name)
+
+    labels = page.locator("#panelBody dl.fields dt").all_inner_texts()
+    assert "Gateway local key" in labels and "Node ID" in labels and "UUID" in labels
+    assert "Local Key / Node ID" not in labels
+    assert MASK in field_value(page, "local_key")
+    assert field_value(page, "node_id") == sub.node_id
+    assert field_value(page, "uuid") == sub.uuid
+    page.locator("#panelBody dt[title='local_key'] + dd .key").click()
+    assert clipboard(page) == sub.local_key, "the returned gateway key is available before discovery"
+    page.click("#panelBody [data-key-toggle]")
+    assert sub.local_key in field_value(page, "local_key")
+    assert sub.local_key not in row(page, sub).inner_text()
+    assert sub.uuid not in row(page, sub).inner_text()
+
+    with page.expect_download() as download:
+        page.click("#csvBtn")
+    path = tmp_path / "devices.csv"
+    download.value.save_as(path)
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = {r["id"]: r for r in csv.DictReader(f)}
+    assert rows[sub.id]["local_key"] == sub.local_key
+    assert rows[sub.id]["node_id"] == sub.node_id
+    assert rows[sub.id]["uuid"] == sub.uuid
+
+
 @pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"), (390, "light")])
 def test_known_sub_devices_start_expanded_below_the_gateway(page, running_app, monkeypatch,
                                                             width, scheme):
@@ -856,6 +950,12 @@ def test_known_sub_devices_start_expanded_below_the_gateway(page, running_app, m
         assert child.get_attribute("id") in toggle.get_attribute("aria-controls").split()
         assert child.locator("td:nth-child(5)").inner_text() == "-"
     assert row(page, SENSOR).get_attribute("data-gateway-id") is None, "its gateway is not in the list"
+    if width < 600:
+        node = row(page, VALVE).locator(".node-id")
+        node.scroll_into_view_if_needed()
+        bounds = node.bounding_box()
+        assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
+        assert page.evaluate("document.documentElement.scrollWidth") <= width
 
 
 def test_collapsing_a_gateway_keeps_counts_and_survives_sort_and_refresh(page, running_app, monkeypatch):
