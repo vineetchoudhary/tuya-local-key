@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.2
+- Sub-devices now appear under their gateway when Tuya or a network scan identifies the relationship.
+- Sorting keeps gateway groups together. Searching reveals matching sub-devices with their gateway for context.
+- Sub-device rows now show copyable Node IDs instead of repeating the gateway's local key. Missing Node IDs show a dash.
+- The key column is labelled **Local Key / Node ID** when the account has sub-devices, and **Local Key** otherwise. Node IDs stay visible when local keys are hidden.
+- The details panel keeps **Gateway local key**, **Node ID** and **UUID** separate for sub-devices.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v3.1...v3.2
+
 ## 3.1
 - **Scan network** now finds Tuya Zigbee and Bluetooth gateways that Tuya lists without a local key ([#7](https://github.com/vineetchoudhary/tuya-local-key/issues/7)). Tuya puts such a gateway's key on its sub-devices instead and doesn't say which sub-devices belong to which gateway, so the scan recognises gateways by their category and tries the keys on your sub-devices at each address that answers.
 - A gateway found this way shows its local key, marked with an asterisk because Tuya lists it on a sub-device, along with its IP and protocol version.
