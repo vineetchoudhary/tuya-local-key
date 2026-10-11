@@ -824,6 +824,109 @@ def _with_gateways(page, app, monkeypatch, *gateways_and_subs):
     refreshed(page, "#changesNotice")
 
 
+def _named_sub(device, gateway):
+    sub = copy.deepcopy(device)
+    sub.gateway_id = gateway.id
+    return sub
+
+
+def listed_ids(page):
+    return page.locator("#rows tr").evaluate_all("rows => rows.map(row => row.dataset.id)")
+
+
+@pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"), (390, "light")])
+def test_known_sub_devices_start_expanded_below_the_gateway(page, running_app, monkeypatch,
+                                                            width, scheme):
+    _with_gateways(page, running_app, monkeypatch, _named_sub(VALVE, ZIGBEE_GATEWAY),
+                   ZIGBEE_GATEWAY, _named_sub(WATER_TIMER, ZIGBEE_GATEWAY))
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.emulate_media(color_scheme=scheme)
+
+    assert listed_ids(page) == [d.id for d in DEVICES] + [ZIGBEE_GATEWAY.id, VALVE.id, WATER_TIMER.id]
+    toggle = row(page, ZIGBEE_GATEWAY).locator("[data-gateway-toggle]")
+    assert toggle.get_attribute("aria-expanded") == "true"
+    count = row(page, ZIGBEE_GATEWAY).locator(".gateway-count")
+    assert count.inner_text() == "2"
+    assert count.get_attribute("title") == "2 sub-devices connected to this gateway"
+    for sub in (VALVE, WATER_TIMER):
+        child = row(page, sub)
+        assert child.is_visible()
+        assert child.get_attribute("data-gateway-id") == ZIGBEE_GATEWAY.id
+        assert "sub-device-row" in child.get_attribute("class")
+        assert child.get_attribute("id") in toggle.get_attribute("aria-controls").split()
+        assert child.locator("td:nth-child(5)").inner_text() == "-"
+    assert row(page, SENSOR).get_attribute("data-gateway-id") is None, "its gateway is not in the list"
+
+
+def test_collapsing_a_gateway_keeps_counts_and_survives_sort_and_refresh(page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, _named_sub(VALVE, ZIGBEE_GATEWAY),
+                   ZIGBEE_GATEWAY, _named_sub(WATER_TIMER, ZIGBEE_GATEWAY))
+    toggle = row(page, ZIGBEE_GATEWAY).locator("[data-gateway-toggle]")
+    toggle.focus()
+    toggle.press("Enter")
+
+    assert toggle.get_attribute("aria-expanded") == "false"
+    assert toggle.evaluate("el => el === document.activeElement"), "keyboard focus survives the repaint"
+    assert row(page, VALVE).is_hidden() and row(page, WATER_TIMER).is_hidden()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true", "the toggle does not open details"
+    assert page.locator("#count").inner_text().startswith("7 devices")
+    assert "2 sub-devices hidden" in page.locator("#count").inner_text()
+
+    page.click("#thead th[data-key='name']")
+    assert toggle.get_attribute("aria-expanded") == "false"
+    page.click("#refreshBtn")
+    page.wait_for_selector("#devices:not(.hidden)")
+    assert toggle.get_attribute("aria-expanded") == "false"
+    toggle.press("Space")
+    assert row(page, VALVE).is_visible() and row(page, WATER_TIMER).is_visible()
+    open_panel(page, VALVE.name)
+    assert page.locator("#panelTitle").inner_text() == VALVE.name
+    assert page.locator(f"#panelBody [data-open-device='{ZIGBEE_GATEWAY.id}']").is_visible()
+
+
+def test_filter_reveals_matching_children_with_gateway_context_and_exports_only_matches(
+        page, running_app, monkeypatch, tmp_path):
+    _with_gateways(page, running_app, monkeypatch, _named_sub(VALVE, ZIGBEE_GATEWAY),
+                   ZIGBEE_GATEWAY, _named_sub(WATER_TIMER, ZIGBEE_GATEWAY))
+    toggle = row(page, ZIGBEE_GATEWAY).locator("[data-gateway-toggle]")
+    toggle.click()
+    page.fill("#filter", VALVE.name)
+
+    assert listed_ids(page) == [ZIGBEE_GATEWAY.id, VALVE.id]
+    assert row(page, VALVE).is_visible(), "search reveals a match in a collapsed group"
+    assert page.locator("#count").inner_text().startswith("1 device ")
+    assert "1 gateway shown for context" in page.locator("#count").inner_text()
+    toggle.click()
+    assert row(page, VALVE).is_hidden()
+    with page.expect_download() as download:
+        page.click("#csvBtn")
+    path = tmp_path / "filtered-devices.csv"
+    download.value.save_as(path)
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [r["id"] for r in rows] == [VALVE.id], "a context row and collapse do not change the export"
+    assert rows[0]["local_key"] == VALVE.local_key
+
+    page.fill("#filter", "")
+    assert toggle.get_attribute("aria-expanded") == "false", "the original collapse state is restored"
+    page.fill("#filter", "no-such-device")
+    assert page.locator("#rows tr").count() == 0
+
+
+def test_sort_orders_gateways_and_children_without_splitting_groups(page, running_app, monkeypatch):
+    backyard = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    backyard.id, backyard.name = "backyard000000001", "Backyard Valve"
+    _with_gateways(page, running_app, monkeypatch, _named_sub(VALVE, ZIGBEE_GATEWAY),
+                   ZIGBEE_GATEWAY, backyard, _named_sub(WATER_TIMER, BLE_GATEWAY), BLE_GATEWAY)
+
+    page.click("#thead th[data-key='name']")
+    assert listed_ids(page) == [SENSOR.id, PLUG.id, LAMP.id, BLE_GATEWAY.id, WATER_TIMER.id,
+                                BARE.id, ZIGBEE_GATEWAY.id, backyard.id, VALVE.id]
+    page.click("#thead th[data-key='name']")
+    assert listed_ids(page) == [ZIGBEE_GATEWAY.id, VALVE.id, backyard.id, BARE.id, BLE_GATEWAY.id,
+                                WATER_TIMER.id, LAMP.id, PLUG.id, SENSOR.id]
+
+
 def test_a_keyless_gateway_shows_the_key_it_answered_to(page, running_app, monkeypatch, tmp_path):
     _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, VALVE)
     _scans(running_app, monkeypatch, {
@@ -841,6 +944,9 @@ def test_a_keyless_gateway_shows_the_key_it_answered_to(page, running_app, monke
     assert abs(gateway - plug) < 0.5, "one line, like every other row"
     footnote = page.locator("#keyMarkNote")
     assert footnote.inner_text() == "* Tuya lists this key on the gateway's sub-devices, not on the gateway."
+    page.fill("#filter", VALVE.name)
+    assert listed_ids(page) == [ZIGBEE_GATEWAY.id, VALVE.id]
+    assert footnote.is_visible(), "the gateway's borrowed key is explained when it is shown for context"
     page.fill("#filter", PLUG.name)
     assert footnote.is_hidden(), "only while a key it explains is listed"
     page.fill("#filter", "")
@@ -874,14 +980,19 @@ def test_a_sub_device_shows_its_gateways_version_only_as_the_gateways(page, runn
     assert row(page, ZIGBEE_GATEWAY).locator("td:nth-child(5)").inner_text() == "3.4"
     page.click("#thead th[data-key='protocol_version']")
     names = page.locator("#rows tr td:first-child").all_inner_texts()
-    assert names[-1].startswith(ZIGBEE_GATEWAY.name), "the valve sorts with the devices that have none"
+    assert names[-2].startswith(ZIGBEE_GATEWAY.name)
+    assert names[-1].startswith(VALVE.name), "a sub-device stays under its gateway when sorting by protocol"
 
     open_panel(page, VALVE.name)
     labels = page.locator("#panelBody dl.fields dt").all_inner_texts()
     assert "Gateway IP" in labels and "Gateway protocol" in labels
     assert "Local IP" not in labels and "Protocol version" not in labels
+    assert field_value(page, "local_ip") == "192.168.2.8"
     assert field_value(page, "protocol_version") == "3.4"
+    assert field_value(page, "node_id") == VALVE.node_id
 
+    row(page, ZIGBEE_GATEWAY).locator("[data-gateway-toggle]").click()
+    assert row(page, VALVE).is_hidden()
     with page.expect_download() as download:
         page.click("#csvBtn")
     path = tmp_path / "devices.csv"
@@ -889,6 +1000,7 @@ def test_a_sub_device_shows_its_gateways_version_only_as_the_gateways(page, runn
     with path.open(newline="", encoding="utf-8") as f:
         rows = {r["id"]: r for r in csv.DictReader(f)}
     assert rows[VALVE.id]["protocol_version"] == "3.4", "scripts still get the gateway's version"
+    assert rows[VALVE.id]["local_ip"] == "192.168.2.8"
     assert rows[VALVE.id]["lan_gateway_id"] == ZIGBEE_GATEWAY.id
     assert rows[ZIGBEE_GATEWAY.id]["lan_gateway_id"] == ""
 
@@ -962,6 +1074,9 @@ def test_one_click_checks_a_gateway_and_the_one_left_is_checked_too(page, runnin
     ])
     scanned(page)
 
+    for sub in (VALVE, WATER_TIMER):
+        assert row(page, sub).get_attribute("data-gateway-id") is None, "the gateway is still unknown"
+    assert page.locator("#rows [data-gateway-toggle]").count() == 0, "shared keys alone do not form a group"
     found = "192.168.2.8 (Garden Valve), 192.168.2.9 (Water Timer)"
     notice = page.locator("#lanSummaryNotice").inner_text()
     assert f"2 gateways answered to local keys Tuya lists on sub-devices: {found}." in notice
@@ -985,6 +1100,10 @@ def test_one_click_checks_a_gateway_and_the_one_left_is_checked_too(page, runnin
     page.click("#thead [data-key-toggle]")
     assert WATER_TIMER.local_key in row(page, BLE_GATEWAY).inner_text()
     assert VALVE.local_key in row(page, ZIGBEE_GATEWAY).inner_text()
+    for gateway, sub in ((ZIGBEE_GATEWAY, VALVE), (BLE_GATEWAY, WATER_TIMER)):
+        assert row(page, sub).get_attribute("data-gateway-id") == gateway.id
+        assert row(page, gateway).evaluate("tr => tr.nextElementSibling.dataset.id") == sub.id
+        assert row(page, gateway).locator("[data-gateway-toggle]").get_attribute("aria-expanded") == "true"
     assert "gateway answered to local keys" not in page.locator("#lanSummaryNotice").inner_text()
 
 

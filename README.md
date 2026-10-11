@@ -197,7 +197,7 @@ After a scan, the Status column shows what the device did when asked, tagged `LA
 | Status | Meaning |
 |---|---|
 | reachable | Answered on port 6668 to its local key. |
-| via gateway | A Zigbee or Bluetooth sub-device. It shares its gateway's key and is reached at the gateway's IP and version. It has no protocol version of its own, so its Protocol column stays empty, and its details panel shows the gateway's IP and version. It is greyed out when the scan didn't find the gateway. See [Gateways](#gateways). |
+| via gateway | A Zigbee or Bluetooth sub-device. It shares its gateway's key and is reached at the gateway's IP and version. It has no protocol version of its own, so its Protocol column shows a dash with the gateway's version in a tooltip. Its details panel labels the values **Gateway IP** and **Gateway protocol**, and links to the gateway when known. It is greyed out when the scan didn't find the gateway. See [Gateways](#gateways). |
 | offline | A sub-device whose gateway answered, but reports it offline. The scan asks each gateway it finds which of its sub-devices are online, since the gateway answering says nothing about them. |
 | check needed | A gateway Tuya lists without a key, which the last scan found but couldn't tell apart from your other gateways. Check it at its IP. See [Gateways](#gateways). |
 | busy | Refused the connection at its last known IP. Tuya devices accept only one local connection, so a device already connected to Home Assistant or another local client refuses new ones. A manual Check will be refused too until that client lets go. |
@@ -213,10 +213,14 @@ The scan summary lists the addresses that refused connections, the ones that ans
 
 Tuya's device-sharing API can list a Zigbee or Bluetooth gateway with no local key, and put the gateway's key on each of its sub-devices instead. It doesn't say which sub-devices belong to which gateway, and it can mark the gateway itself as a sub-device. The scan tells gateways apart by their category, and tries the keys on your sub-devices at each address that answers.
 
+When Tuya or a scan identifies which gateway a sub-device belongs to, the table groups it under that gateway. Groups start expanded. Use the arrow beside the gateway's name to collapse or expand its sub-devices. Sorting keeps each group together and sorts its sub-devices within it. Searching reveals matching sub-devices and shows their gateway for context. Unlinked sub-devices stay in their own rows until the gateway is known.
+
 - **One gateway without a key:** it gets the key its sub-devices carry. Its row shows that key, marked with an asterisk, along with its IP and version. The asterisk's tooltip and a note below the table say the key comes from a sub-device.
 - **Several gateways without a key:** the scan still finds where each key answers, so every sub-device gets its gateway's IP and version. Tuya's data doesn't say which gateway is at which address, so the gateways show **check needed**, and the scan summary lists each address with the sub-devices whose key answered there. Open a gateway and **Check** it at its IP, with one click on the address its sub-devices point to, or one from your router's client list. The key it answers to becomes its key, and later scans remember it. When that leaves only one gateway, it's checked too, so two gateways take one click. A gateway checked at the wrong IP takes the other gateway's key, so check it again at the right one.
 
-In the CSV export and the CLI, a sub-device keeps its gateway's IP and version, which local tools need to reach it, and `lan_gateway_id` names that gateway. `lan_sub_online` says whether that gateway reports it online, and is empty when the gateway didn't say.
+For tuya-local setup, use the gateway's IP, protocol version and local key, together with the sub-device's **Node ID**. These fields are available in the sub-device's details panel, with a link to its gateway when known.
+
+In the CSV export and the CLI, a sub-device keeps its gateway's IP in `local_ip` and version in `protocol_version`, which local tools need to reach it, and `lan_gateway_id` names that gateway. `lan_sub_online` says whether that gateway reports it online, and is empty when the gateway didn't say. Collapsing a group does not remove its sub-devices from the CSV. The export still follows the filter and sort order, and excludes gateways shown only for context.
 
 ### device22
 

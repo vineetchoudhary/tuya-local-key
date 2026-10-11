@@ -792,6 +792,8 @@ def test_scan_names_the_gateway_a_sub_device_is_reached_through(tmp_path, monkey
     with csv_path.open(newline="", encoding="utf-8") as f:
         rows = {r["id"]: r for r in csv.DictReader(f)}
     assert rows["valve-1"]["lan_gateway_id"] == "gw-1" and rows["gw-1"]["lan_gateway_id"] == ""
+    assert rows["valve-1"]["local_ip"] == "192.168.2.8"
+    assert rows["valve-1"]["protocol_version"] == "3.4", "CSV keeps the gateway's connection details"
     assert rows["valve-1"]["lan_sub_online"] == "False" and rows["gw-1"]["lan_sub_online"] == ""
 
 

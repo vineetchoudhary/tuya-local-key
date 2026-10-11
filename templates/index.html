@@ -244,6 +244,16 @@
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
   tbody tr.selected { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+  .device-name { display: inline-flex; align-items: center; gap: 6px; }
+  .gateway-toggle, .gateway-spacer { width: 24px; flex: 0 0 24px; }
+  .gateway-toggle { height: 24px; border: 0; background: none; }
+  .gateway-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+  .gateway-count { cursor: help; }
+  .sub-device-row td:first-child { padding-left: 36px; }
+  .sub-device-row .gateway-spacer::before {
+    content: ""; display: block; width: 12px; height: 10px; margin-left: 4px; margin-top: -5px;
+    border-left: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  }
   th.details-col, td.details-col { width: 1%; padding-left: 0; }
 
   /* Details panel: a drawer on wide screens, a full-width overlay on narrow ones */
@@ -443,6 +453,8 @@ let pollTimer = null, cacheStatusTimer = null, deviceData = [], filterText = "";
 let devicesCachedAt = null;
 let refreshStatusTimer = null;
 let sortState = { key: null, dir: 1 };   // dir: 1 = ascending, -1 = descending
+let collapsedGateways = new Set();     // new groups start expanded
+let filteredCollapsedGateways = new Set(); // a search reveals matches without losing the usual state
 let localKeysVisible = false;
 let searchIndex = new WeakMap();         // device -> lowercased haystack for the filter
 let selectedId = null;                   // device shown in the details panel
@@ -465,7 +477,7 @@ const COLUMNS = [
   { key: "id",           label: "ID",           cls: "mono" },
   { key: "local_key",    label: "Local Key",    header: renderLocalKeyHeader, render: localKeyCell },
   { key: "protocol_version", label: "Protocol", sortable: true, cls: "mono", render: protocolCell,
-    sortValue: d => viaGateway(d) ? "" : d.protocol_version },
+    sortValue: d => isSubDevice(d) ? "" : d.protocol_version },
   { key: "product_id",   label: "Product ID",   cls: "mono" },
   { key: "product_name", label: "Product Name" },
   { key: "update_time",  label: "Update Time",  sortable: true, render: d => renderTime(d, "update_time") },
@@ -592,9 +604,11 @@ function viaGateway(d) {
   return d.lan_status === "via_gateway";
 }
 function protocolCell(d) {
-  if (d.protocol_version && viaGateway(d)) {
-    const version = d.protocol_version + (d.device22 ? " with device22" : "");
-    return `<span class="dash" title="${esc(`Reached through its gateway, which uses protocol ${version}`)}">-</span>`;
+  if (isSubDevice(d)) {
+    const version = d.protocol_version && (d.protocol_version + (d.device22 ? " with device22" : ""));
+    const tip = version ? `Reached through its gateway, which uses protocol ${version}`
+      : "A sub-device has no Tuya local protocol version of its own.";
+    return `<span class="dash" title="${esc(tip)}">-</span>`;
   }
   if (!d.protocol_version) return '<span class="dash">-</span>';
   return esc(d.protocol_version) +
@@ -603,12 +617,17 @@ function protocolCell(d) {
 // lan_scan.GATEWAY_CATEGORIES. Tuya can mark a gateway `sub` too, so its
 // category (or a sub-device naming it) is what tells.
 const GATEWAY_CATEGORIES = new Set({{ gateway_categories | tojson }});
+function gatewayIdOf(d) {
+  // Tuya's explicit relationship takes precedence over a scan's association.
+  const id = d.gateway_id || lanResult(d).gateway_id;
+  return id && id !== d.id ? id : null;
+}
 function isGateway(d) {
   return GATEWAY_CATEGORIES.has(d.category) ||
-    deviceData.some(s => s.id !== d.id && s.gateway_id === d.id);
+    deviceData.some(s => s.id !== d.id && gatewayIdOf(s) === d.id);
 }
 function isSubDevice(d) {
-  return !isGateway(d) && (!!d.sub || !!(d.gateway_id && d.gateway_id !== d.id));
+  return !isGateway(d) && (!!d.sub || !!gatewayIdOf(d) || viaGateway(d));
 }
 function lanResult(d) {
   return (lanData.results || {})[d.id] || {};
@@ -691,7 +710,9 @@ function show(name) {
   layoutActions();
   // A refresh (devices -> loading -> devices) keeps the open device; losing the
   // session does not.
-  if (name === "login" || name === "qr") closePanel();
+  if (name === "login" || name === "qr") {
+    closePanel(); collapsedGateways.clear(); filteredCollapsedGateways.clear();
+  }
 }
 function banner(msg) {
   const b = $("banner");
@@ -1175,6 +1196,9 @@ function indexDevices() {
 function computeList() {
   let list = deviceData;
   if (filterText) list = list.filter(d => (searchIndex.get(d) || "").includes(filterText));
+  return sortDevices(list);
+}
+function sortDevices(list) {
   if (sortState.key) {
     const { key, dir } = sortState;
     const column = COLUMNS.find(c => c.key === key);
@@ -1182,6 +1206,48 @@ function computeList() {
     list = [...list].sort((a, b) => cmp(value(a), value(b)) * dir);
   }
   return list;
+}
+
+// Keep the export list flat. The table adds a gateway for context when only
+// its sub-devices match, then sorts gateways and each set of children separately.
+function groupedRows(list) {
+  const byId = new Map(deviceData.map(d => [d.id, d]));
+  const matched = new Set(list.map(d => d.id));
+  const roots = new Set(), children = new Map();
+  for (const d of list) {
+    const parent = isSubDevice(d) && byId.get(gatewayIdOf(d));
+    if (parent) {
+      if (!children.has(parent.id)) children.set(parent.id, []);
+      children.get(parent.id).push(d);
+      roots.add(parent.id);
+    } else {
+      roots.add(d.id);
+    }
+  }
+  const collapsed = filterText ? filteredCollapsedGateways : collapsedGateways;
+  const rows = [];
+  for (const d of sortDevices(deviceData.filter(d => roots.has(d.id)))) {
+    const subs = children.get(d.id) || [];
+    const expanded = !collapsed.has(d.id);
+    rows.push({ device: d, children: subs, expanded, context: !matched.has(d.id) });
+    for (const sub of subs) rows.push({ device: sub, parent: d.id, hidden: !expanded });
+  }
+  return rows;
+}
+
+function deviceRowId(d) { return `device-row-${encodeURIComponent(d.id)}`; }
+function nameCell(entry) {
+  const d = entry.device, subs = entry.children || [];
+  let toggle = '<span class="gateway-spacer" aria-hidden="true"></span>';
+  if (subs.length) {
+    const label = `${entry.expanded ? "Collapse" : "Expand"} sub-devices of ${d.name || d.id}`;
+    toggle = `<button class="icon-btn gateway-toggle" type="button" data-gateway-toggle="${esc(d.id)}" ` +
+      `aria-expanded="${entry.expanded}" aria-controls="${subs.map(deviceRowId).join(" ")}" ` +
+      `aria-label="${esc(label)}" title="${esc(label)}">${icon("chevron")}</button>`;
+  }
+  const countTip = `${plural(subs.length, "sub-device")} connected to this gateway`;
+  return `<span class="device-name">${toggle}<span>${esc(d.name)}${changeBadge(d.id)}</span>` +
+    (subs.length ? `<span class="badge muted gateway-count" title="${esc(countTip)}">${subs.length}</span>` : "") + `</span>`;
 }
 
 function renderHead() {
@@ -1195,22 +1261,32 @@ function renderHead() {
 }
 
 function renderRows(list) {
+  const entries = groupedRows(list);
   const online = list.filter(isOnline).length;
+  const hidden = entries.filter(entry => entry.hidden).length;
+  const context = entries.filter(entry => entry.context).length;
   $("count").innerHTML = `${list.length} device${list.length===1?"":"s"} ` +
-    `<span class="muted">· ${online} online · ${list.length-online} offline</span>`;
-  $("rows").innerHTML = list.map(d => {
+    `<span class="muted">· ${online} online · ${list.length-online} offline` +
+    (hidden ? ` · ${plural(hidden, "sub-device")} hidden` : "") +
+    (context ? ` · ${plural(context, "gateway")} shown for context` : "") + `</span>`;
+  $("rows").innerHTML = entries.map(entry => {
+    const d = entry.device;
     const cells = COLUMNS.map(c => {
       const cls = c.cls ? ` class="${c.cls}"` : "";
-      const val = c.render ? c.render(d) : esc(d[c.key]);
+      const val = c.key === "name" ? nameCell(entry) : c.render ? c.render(d) : esc(d[c.key]);
       return `<td${cls}>${val}</td>`;
     }).join("");
     const label = `Show details for ${esc(d.name || d.id)}`;
     const open = `<td class="details-col"><button class="icon-btn" type="button" data-open ` +
       `aria-label="${label}" title="Details">${icon("chevron")}</button></td>`;
-    return `<tr data-id="${esc(d.id)}"${d.id === selectedId ? ' class="selected"' : ""}>${cells}${open}</tr>`;
+    const classes = [entry.parent ? "sub-device-row" : "", d.id === selectedId ? "selected" : ""]
+      .filter(Boolean).join(" ");
+    return `<tr id="${deviceRowId(d)}" data-id="${esc(d.id)}" class="${classes}"` +
+      (entry.parent ? ` data-gateway-id="${esc(entry.parent)}"` : "") +
+      (entry.hidden ? " hidden" : "") + `>${cells}${open}</tr>`;
   }).join("");
   // The footnote for the * on a key from a sub-device, while one is listed.
-  $("keyMarkNote").classList.toggle("hidden", !list.some(d => keySource(d)));
+  $("keyMarkNote").classList.toggle("hidden", !entries.some(entry => !entry.hidden && keySource(entry.device)));
 }
 
 function render() { renderNotices(); renderHead(); renderRows(computeList()); renderPanel(); }
@@ -1264,6 +1340,17 @@ $("panelBody").addEventListener("click", (e) => {
 
 // open the details panel for the clicked row
 $("rows").addEventListener("click", (e) => {
+  const toggle = e.target.closest("[data-gateway-toggle]");
+  if (toggle) {
+    const collapsed = filterText ? filteredCollapsedGateways : collapsedGateways;
+    const id = toggle.dataset.gatewayToggle;
+    if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
+    renderRows(computeList());
+    // Repainting replaces the button. Keep keyboard focus on its replacement.
+    const row = document.getElementById(`device-row-${encodeURIComponent(id)}`);
+    if (row) row.querySelector("[data-gateway-toggle]").focus();
+    return;
+  }
   if (e.target.closest("[data-copy]")) return;   // copying a key isn't a row click
   const tr = e.target.closest("tr[data-id]");
   if (!tr) return;
@@ -1398,14 +1485,14 @@ function lanSection(d) {
   if (lanStatus(d)) {
     const keys = ["lan_status", "local_ip", "protocol_version", "lan_checked_at"]
       .filter(key => key === "lan_status" || d[key]);
-    html += fieldList(d, keys, viaGateway(d)
+    html += fieldList(d, keys, sub
       ? { local_ip: "Gateway IP", protocol_version: "Gateway protocol" } : {});
   } else if (!sub && !keyless && !unnamed) {
     html += `<p class="lan-note">Not checked on the local network yet. Use <b>Scan network</b>, ` +
       `or check it at an IP address below.</p>`;
   }
   if (sub) {
-    const id = d.gateway_id || lanResult(d).gateway_id;
+    const id = gatewayIdOf(d);
     const via = id && deviceData.find(g => g.id === id);
     if (!via && d.local_ip) {
       return html + `<p class="lan-note">A sub-device is reached through its gateway, which answered ` +
@@ -1633,7 +1720,11 @@ if (window.ResizeObserver) {
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutActions);
 
 // filter
-$("filter").oninput = (e) => { filterText = e.target.value.toLowerCase(); renderRows(computeList()); };
+$("filter").oninput = (e) => {
+  filterText = e.target.value.toLowerCase();
+  filteredCollapsedGateways.clear();
+  renderRows(computeList());
+};
 
 $("refreshBtn").onclick = () => loadDevices("Updating device list from Tuya…", false, true);
 // Logging out deletes the saved list and scan results too, so it asks first.
