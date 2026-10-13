@@ -4,7 +4,7 @@ Developer scripts. Nothing here is copied into the Docker image or needed at run
 
 ## Screenshots
 
-`screenshots.py` regenerates every image the README embeds. It runs the real app against the fake account in `demo_fleet.py` (with a stubbed network scan), drives it with Playwright, and writes a light and a dark PNG per shot into `docs/screenshots/`.
+`screenshots.py` regenerates the images in the [README preview](../README.md) and the [screenshot gallery](../docs/screenshots.md). It runs the real app against the fake account in `demo_fleet.py` (with a stubbed network scan), drives it with Playwright, and writes a light and a dark PNG per shot into `docs/screenshots/`.
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -21,16 +21,16 @@ python tools/screenshots.py
 python tools/screenshots.py filter details
 ```
 
-| Shot | Files | Where the README uses it |
+| Shot | Files | Where it appears |
 |---|---|---|
-| `login` | `login-{light,dark}.png` | Login |
-| `qr-login` | `qr-login-{light,dark}.png` | QR Login |
-| `devices` | `devices-{light,dark}.png` | Device Table |
-| `header-devices` | `header-devices-{light,dark}.png` | The preview at the top |
-| `changes` | `changes-{light,dark}.png` | Change Summary |
-| `scan` | `scan-{light,dark}.png` | Network Scan |
-| `details` | `details-{light,dark}.png` | Device Details |
-| `filter` | `filter-{light,dark}.png` | Filtering |
+| `login` | `login-{light,dark}.png` | [Login](../docs/screenshots.md#login) |
+| `qr-login` | `qr-login-{light,dark}.png` | [QR Login](../docs/screenshots.md#qr-login) |
+| `devices` | `devices-{light,dark}.png` | [Device Table](../docs/screenshots.md#device-table) |
+| `header-devices` | `header-devices-{light,dark}.png` | [README preview](../README.md) |
+| `changes` | `changes-{light,dark}.png` | [Change Summary](../docs/screenshots.md#change-summary) |
+| `scan` | `scan-{light,dark}.png` | [Network Scan](../docs/screenshots.md#network-scan) |
+| `details` | `details-{light,dark}.png` | [Device Details](../docs/screenshots.md#device-details) |
+| `filter` | `filter-{light,dark}.png` | [Filtering](../docs/screenshots.md#filtering) |
 
 ## Dependency Updates
 

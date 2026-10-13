@@ -91,22 +91,28 @@ def test_github_workflow_runs_tests_and_only_publishes_on_tags():
     assert "push: true" in text
 
 
-def test_readme_screenshot_paths_exist():
-    readme = (ROOT / "README.md").read_text()
-    paths = set(re.findall(r'(?:src|srcset)="([^"]+)"', readme))
+def _documentation_screenshot_paths():
+    documents = [ROOT / "README.md", ROOT / "docs" / "screenshots.md"]
+    return {
+        document.parent / path
+        for document in documents
+        for path in re.findall(r'(?:src|srcset)="([^"]+)"', document.read_text())
+        if not path.startswith(("http://", "https://"))
+    }
+
+
+def test_documentation_screenshot_paths_exist():
+    paths = _documentation_screenshot_paths()
 
     assert paths
     for path in paths:
-        if path.startswith("docs/screenshots/"):
-            assert (ROOT / path).is_file(), path
+        assert path.is_file(), path
 
 
-def test_every_readme_screenshot_can_be_regenerated():
-    readme = (ROOT / "README.md").read_text()
+def test_every_documentation_screenshot_can_be_regenerated():
     embedded = {
-        re.sub(r"-(light|dark)$", "", Path(path).stem)
-        for path in re.findall(r'(?:src|srcset)="([^"]+)"', readme)
-        if path.startswith("docs/screenshots/")
+        re.sub(r"-(light|dark)$", "", path.stem)
+        for path in _documentation_screenshot_paths()
     }
     script = (ROOT / "tools" / "screenshots.py").read_text()
     shots = set(re.findall(r'^    "([\w-]+)": shot_\w+,$', script, re.MULTILINE))
