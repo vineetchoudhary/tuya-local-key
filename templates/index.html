@@ -284,17 +284,38 @@
     padding: 16px 18px; border-bottom: 1px solid var(--border);
   }
   .panel-head .grow { flex: 1 1 auto; min-width: 0; }
+  .panel-head > .icon-btn { flex: 0 0 auto; }
   .panel-title { font-size: 16px; font-weight: 650; margin: 0; overflow-wrap: anywhere; }
+  .panel-title.setup-title {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    overflow: hidden; line-height: 1.4;
+  }
   .panel-sub {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
     margin: 6px 0 0; font-size: 13px; color: var(--muted);
   }
+  .panel-sub.hidden { display: none; }
+  .panel-nav { margin-bottom: 10px; }
+  .panel-back {
+    display: flex; align-items: center; gap: 5px; min-height: 28px; padding: 0; border: 0;
+    background: none; color: var(--muted); font-size: 13px;
+  }
+  .panel-back:hover { background: none; color: var(--fg); }
+  .panel-back svg { width: 16px; height: 16px; transform: rotate(180deg); }
+  .panel-setup-entry {
+    flex: 0 0 auto; padding: 14px 18px 16px; margin-bottom: 14px;
+    border-bottom: 1px solid var(--border); background: var(--card);
+  }
+  .panel-setup-open { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+  .panel-setup-open svg { width: 16px; height: 16px; }
   /* min-height:0 so the body scrolls instead of stretching the flex column */
   .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px 18px 28px; }
+  .setup-body { padding-top: 16px; }
   .section-title {
     margin: 20px 0 8px; font-size: 12px; font-weight: 700;
     letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
   }
+  #panelBody > .section-title:first-child { margin-top: 0; }
   dl.fields {
     display: grid; grid-template-columns: minmax(92px, 36%) 1fr; gap: 0 12px;
     margin: 0; font-size: 13.5px;
@@ -321,9 +342,7 @@
   .setup-content { padding: 12px; font-size: 13px; }
   .setup-note { margin: 0 0 12px; color: var(--muted); overflow-wrap: anywhere; }
   .setup-field + .setup-field { margin-top: 12px; }
-  .setup-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-  .setup-label > span { min-width: 0; overflow-wrap: anywhere; }
-  .setup-param { color: var(--muted); font-size: 11px; flex: 0 0 auto; }
+  .setup-label { color: var(--muted); overflow-wrap: anywhere; }
   .setup-value-row { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
   .setup-value { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
   .setup-copy { flex: 0 0 auto; padding: 4px 8px; font-size: 12px; }
@@ -336,6 +355,7 @@
   .setup-advanced summary { cursor: pointer; color: var(--muted); font-weight: 600; }
   .setup-advanced > div { margin-top: 12px; }
   .setup-snippet { margin-top: 16px; }
+  .setup-snippet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .setup-snippet pre {
     margin: 8px 0; padding: 10px; border-radius: 7px; background: var(--code-bg);
     font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
@@ -344,8 +364,14 @@
   .setup-children h4 { margin: 0 0 8px; font-size: 13px; }
   .setup-children ul { list-style: none; margin: 0; padding: 0; }
   .setup-children li + li { margin-top: 12px; }
-  .setup-child-ids { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; margin-top: 3px; }
-  .setup-child-ids > span { color: var(--muted); font-size: 12px; }
+  .setup-child-fields { margin-top: 8px; }
+  .setup-footnote {
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--muted); overflow-wrap: anywhere;
+  }
+  .setup-footnote a { color: var(--accent); text-decoration: none; }
+  .setup-footnote a:hover { text-decoration: underline; }
+  .setup-footnote a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   ul.dps { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 10px; }
   ul.dps li { padding: 8px 11px; border-bottom: 1px solid var(--border); }
   ul.dps li:last-child { border-bottom: none; }
@@ -477,12 +503,19 @@
 <aside id="panel" class="panel" role="dialog" aria-labelledby="panelTitle" aria-hidden="true" tabindex="-1">
   <div class="panel-head">
     <div class="grow">
+      <div id="panelNav" class="panel-nav hidden">
+        <button id="panelBack" class="panel-back" type="button" aria-controls="panelBody"></button>
+      </div>
       <h2 id="panelTitle" class="panel-title"></h2>
       <p id="panelSub" class="panel-sub"></p>
     </div>
-    <button id="panelClose" class="icon-btn" type="button" aria-label="Close details" title="Close details"></button>
+    <button id="panelClose" class="icon-btn" type="button" aria-label="Close panel" title="Close panel"></button>
+  </div>
+  <div id="panelSetupEntry" class="panel-setup-entry">
+    <button id="panelSetupOpen" class="panel-setup-open" type="button" aria-controls="setupBody"></button>
   </div>
   <div id="panelBody" class="panel-body"></div>
+  <div id="setupBody" class="panel-body setup-body hidden"></div>
 </aside>
 
 <script>
@@ -497,6 +530,7 @@ let filteredCollapsedGateways = new Set(); // a search reveals matches without l
 let localKeysVisible = false;
 let searchIndex = new WeakMap();         // device -> lowercased haystack for the filter
 let selectedId = null;                   // device shown in the details panel
+let panelView = "details", panelScroll = { details: 0, setup: 0 };
 let deviceChanges = null;                // what the last fetch found had changed
 let changeById = new Map();              // device id -> the change to badge its row with
 let snapshotReason = null;               // set when the list on screen couldn't be refreshed
@@ -548,7 +582,6 @@ const DETAIL_SECTIONS = [
   { title: "Identity", keys: ["name", "id", "uuid", "local_key", "category", "product_id", "product_name", "model", "icon"] },
   { title: "Connectivity", keys: ["online", "ip", "support_local", "sub", "node_id", "gateway_id", "set_up", "time_zone", "lat", "lon"] },
   { title: "Local network", keys: [], render: lanSection },
-  { title: "Set up in…", keys: [], render: setupSection },
   { title: "Account", keys: ["uid", "owner_id", "asset_id", "biz_type"] },
   { title: "Timeline", keys: ["create_time", "active_time", "update_time"] },
 ];
@@ -926,7 +959,7 @@ function badge(on) {
 }
 
 // ---- what changed since the previous list ----
-// A rotated key is the change that silently breaks LocalTuya/tinytuya/tuya-local
+// A rotated key is the change that silently breaks localtuya/tinytuya/tuya-local
 // setups, so it outranks a rename on the same row and leads the summary.
 // A LAN scan adds its own: a moved protocol version or IP breaks a local
 // integration as surely as a new key does, so they rank just below it.
@@ -1377,8 +1410,9 @@ function copyOnClick(container) {
 }
 copyOnClick($("rows"));
 copyOnClick($("panelBody"));
-// A link to another device (a sub-device's gateway, say) opens its details.
-$("panelBody").addEventListener("click", (e) => {
+copyOnClick($("setupBody"));
+// Device links stay in the current view, including a gateway's setup view.
+$("panel").addEventListener("click", (e) => {
   const tab = e.target.closest("[data-setup-tool]");
   if (tab) {
     setupTool = tab.dataset.setupTool;
@@ -1386,7 +1420,7 @@ $("panelBody").addEventListener("click", (e) => {
     return;
   }
   const link = e.target.closest("[data-open-device]");
-  if (link) { openPanel(link.dataset.openDevice); return; }
+  if (link) { openPanel(link.dataset.openDevice, panelView); return; }
   const quick = e.target.closest("[data-check-ip]");
   const form = quick && $("panelBody").querySelector("[data-lan-check]");
   if (form) {
@@ -1394,7 +1428,7 @@ $("panelBody").addEventListener("click", (e) => {
     form.requestSubmit();
   }
 });
-$("panelBody").addEventListener("keydown", (e) => {
+$("setupBody").addEventListener("keydown", (e) => {
   const tab = e.target.closest("[data-setup-tool]");
   if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
   e.preventDefault();
@@ -1404,7 +1438,7 @@ $("panelBody").addEventListener("keydown", (e) => {
   setupTool = SETUP_TOOLS[next].id;
   repaintSetup(`[data-setup-tool="${setupTool}"]`);
 });
-$("panelBody").addEventListener("change", (e) => {
+$("setupBody").addEventListener("change", (e) => {
   if (!e.target.matches("[data-localtuya-edition]")) return;
   localTuyaEdition = e.target.value;
   repaintSetup("[data-localtuya-edition]");
@@ -1431,17 +1465,32 @@ $("rows").addEventListener("click", (e) => {
 });
 
 // ---- details panel ----
-function openPanel(id) {
+function openPanel(id, view = "details") {
   selectedId = id;
+  panelView = view;
   if (!renderPanel()) return;
   document.body.classList.add("panel-open");
   $("panel").setAttribute("aria-hidden", "false");
   $("panel").focus();
   markSelectedRow();
 }
+function openSetup() {
+  if (!selectedId) return;
+  panelView = "setup";
+  if (!renderPanel()) return;
+  $("setupBody").querySelector('[aria-selected="true"]').focus({ preventScroll: true });
+}
+function showDetails() {
+  if (!selectedId) return;
+  panelView = "details";
+  if (!renderPanel()) return;
+  $("panelSetupOpen").focus({ preventScroll: true });
+}
 function closePanel() {
   if (!selectedId) return;
   selectedId = null;
+  panelView = "details";
+  delete $("panel").dataset.deviceId;
   document.body.classList.remove("panel-open");
   $("panel").setAttribute("aria-hidden", "true");
   markSelectedRow();
@@ -1460,24 +1509,51 @@ function renderPanel() {
   if (!selectedId) return false;
   const d = deviceData.find(dev => dev.id === selectedId);
   if (!d) { closePanel(); return false; }   // the device is gone after a refresh
+  const sameDevice = $("panel").dataset.deviceId === d.id;
+  const detailsBody = $("panelBody"), setupBody = $("setupBody");
+  if (sameDevice) {
+    // The hidden body's scrollTop is zero. Save only the visible view's position
+    // so Back restores where the user left off in the other view.
+    if (!detailsBody.classList.contains("hidden")) panelScroll.details = detailsBody.scrollTop;
+    if (!setupBody.classList.contains("hidden")) panelScroll.setup = setupBody.scrollTop;
+  } else panelScroll = { details: 0, setup: 0 };
+  const disclosures = sameDevice ? [...detailsBody.querySelectorAll("details.data-points, details.raw")]
+    .map(el => ({ selector: `details.${el.className}`, open: el.open })) : [];
   // A details toggle event is queued. Read the live state before replacing the
   // card, even when the user changes edition or tool before that event fires.
-  const advanced = $("panelBody").querySelector("[data-setup-advanced]");
+  const advanced = setupBody.querySelector("[data-setup-advanced]");
   if (advanced) setupAdvancedOpen = advanced.open;
   // An IP half-typed into this device's Check field survives the repaint, and
   // so does its focus.
-  const typing = $("panelBody").querySelector("[data-lan-check] input");
+  const typing = detailsBody.querySelector("[data-lan-check] input");
   const same = !!typing && typing.form.dataset.lanCheck === d.id;
   const draft = same && typing.value !== typing.defaultValue ? typing.value : null;
-  const caret = same && document.activeElement === typing
+  const caret = same && panelView === "details" && document.activeElement === typing
     ? [typing.selectionStart, typing.selectionEnd] : null;
-  $("panelTitle").textContent = d.name || "(unnamed)";
-  $("panelSub").innerHTML = [statusBadge(d), esc(d.product_name), esc(d.category)]
-    .filter(part => part && part !== "-").join("<span>·</span>");
-  $("panelBody").innerHTML = fieldSections(d) + dpSection(d) + rawSection(d);
-  const input = $("panelBody").querySelector("[data-lan-check] input");
+  const setup = panelView === "setup";
+  $("panel").dataset.deviceId = d.id;
+  $("panelTitle").textContent = setup ? `Set up “${d.name || d.id}” in…` : d.name || "(unnamed)";
+  $("panelTitle").classList.toggle("setup-title", setup);
+  $("panelTitle").title = setup ? $("panelTitle").textContent : "";
+  $("panelSub").classList.toggle("hidden", setup);
+  $("panelSub").innerHTML = setup ? ""
+    : [statusBadge(d), esc(d.product_name), esc(d.category)]
+      .filter(part => part && part !== "-").join("<span>·</span>");
+  $("panelNav").classList.toggle("hidden", !setup);
+  $("panelSetupEntry").classList.toggle("hidden", setup);
+  detailsBody.classList.toggle("hidden", setup);
+  setupBody.classList.toggle("hidden", !setup);
+  detailsBody.innerHTML = fieldSections(d) + dpSection(d) + rawSection(d);
+  setupBody.innerHTML = setupSection(d);
+  for (const { selector, open } of disclosures) {
+    const el = detailsBody.querySelector(selector);
+    if (el) el.open = open;
+  }
+  const input = detailsBody.querySelector("[data-lan-check] input");
   if (input && draft !== null) input.value = draft;
-  if (input && caret) { input.focus(); input.setSelectionRange(...caret); }
+  if (input && caret) { input.focus({ preventScroll: true }); input.setSelectionRange(...caret); }
+  if (setup) setupBody.scrollTop = panelScroll.setup;
+  else detailsBody.scrollTop = panelScroll.details;
   return true;
 }
 
@@ -1616,18 +1692,18 @@ function lanSection(d) {
 // Manual local setup: values are derived here, without changing device records,
 // scan results, CSV exports, or any integration's settings.
 const SETUP_TOOLS = [
-  { id: "tuya-local", name: "tuya-local" },
-  { id: "localtuya", name: "LocalTuya" },
-  { id: "tinytuya", name: "tinytuya" },
+  { id: "tuya-local", name: "tuya-local", repo: "make-all/tuya-local" },
+  { id: "localtuya", name: "localtuya", repo: "xZetsubou/hass-localtuya" },
+  { id: "tinytuya", name: "tinytuya", repo: "jasonacox/tinytuya" },
 ];
 const LOCAL_PROTOCOLS = ["3.1", "3.2", "3.3", "3.4", "3.5"];
 
 function repaintSetup(focus) {
-  const scroll = $("panelBody").scrollTop;
+  const scroll = $("setupBody").scrollTop;
   renderPanel();
-  const control = $("panelBody").querySelector(focus);
+  const control = $("setupBody").querySelector(focus);
   if (control) control.focus({ preventScroll: true });
-  $("panelBody").scrollTop = scroll;
+  $("setupBody").scrollTop = scroll;
 }
 
 function setupConnection(d) {
@@ -1654,83 +1730,59 @@ function setupField(key, label, value, options = {}) {
   const available = value !== null && value !== undefined && value !== "";
   const text = available ? String(value) : "";
   const shown = !available ? `<span class="dash">${esc(options.empty || "Not available")}</span>`
+    : options.device ? `<button class="link-btn" type="button" data-open-device="${esc(options.device.id)}" ` +
+      `aria-label="Set up ${esc(options.device.name || options.device.id)}">${esc(text)}</button>`
     : options.secret ? keyDisplay(text, localKeysVisible) : esc(text);
   return `<div class="setup-field" data-setup-field="${esc(key)}">` +
-    `<div class="setup-label"><span>${esc(label)}</span><code class="setup-param mono">${esc(key)}</code></div>` +
+    `<div class="setup-label">${esc(label)}</div>` +
     `<div class="setup-value-row"><code class="setup-value mono">${shown}</code>` +
     (options.secret && available ? renderLocalKeyToggle() : "") +
-    `<button class="setup-copy" type="button" aria-label="Copy ${esc(key)}"` +
-    (available ? ` data-copy="${esc(text)}"` : " disabled") + `>Copy</button></div>` +
-    (options.note ? `<div class="field-sub">${esc(options.note)}</div>` : "") + `</div>`;
+    `<button class="setup-copy" type="button" aria-label="Copy ${esc(label)}"` +
+    (available ? ` data-copy="${esc(text)}"` : " disabled") + `>Copy</button></div></div>`;
 }
 
 function setupTuyaLocal(d, s) {
   const protocol = s.device22 ? TUYA_LOCAL_DEVICE22[s.version] || s.version : s.version;
   const cid = s.sub ? s.nodeId || d.uuid || "" : "";
-  return setupField("host", "IP address or hostname", s.host, {
-    note: s.host ? (s.sub ? "Gateway's local IP." : "Device's local IP.") : "Scan the network or check the gateway/device to find its local IP.",
-  }) + setupField("device_id", "Device ID (or the hub's Device ID for devices connected via gateway)",
-    s.sub ? s.gatewayId : s.id, { note: s.sub ? "Use the gateway's ID here." : "" }) +
-    setupField("local_key", "Local key", s.key, { secret: true, note: s.sub ? "Gateway's local key." : "" }) +
-    setupField("protocol_version", "Protocol version (try auto if not known)", protocol || "auto", {
-      note: !s.version ? "Default: auto. A scan can identify the protocol."
-        : s.device22 ? `Detected ${s.version} with device22. tuya-local calls this ${protocol}.`
-        : s.sub ? "Gateway's protocol from the last scan." : "Protocol from the last scan.",
-    }) + setupField("poll_only", "Poll only (try this if your device does not work fully)", false, {
-      note: "Default: false (leave unchecked). This option is not detected by a scan.",
-    }) + setupField("device_cid", "Sub device node_id or uuid (for devices connected via gateway)", cid, {
-      empty: s.sub ? "Not available" : "Leave empty",
-      note: !s.sub ? "Only used for a sub-device." : s.nodeId ? "Sub-device's node ID."
-        : cid ? "UUID fallback supported by tuya-local; Tuya did not return a node ID."
-        : "Tuya did not return a node ID or UUID for this sub-device.",
-    });
+  const cidLabel = s.sub && !s.nodeId && cid ? "Sub-device UUID" : "Sub-device node ID";
+  return setupField("host", s.sub ? "Gateway IP / hostname" : "IP address / hostname", s.host) +
+    setupField("device_id", s.sub ? "Gateway device ID" : "Device ID",
+      s.sub ? s.gatewayId : s.id, { device: s.gateway }) +
+    setupField("local_key", s.sub ? "Gateway local key" : "Local key", s.key, { secret: true }) +
+    setupField("protocol_version", "Protocol version", protocol || "auto") +
+    setupField("poll_only", "Poll only", false) +
+    setupField("device_cid", cidLabel, cid, { empty: s.sub ? "Not available" : "Leave empty" });
 }
 
 function setupLocalTuya(d, s) {
   const fork = localTuyaEdition === "xzetsubou";
   const supported = fork ? LOCAL_PROTOCOLS : LOCAL_PROTOCOLS.filter(v => v !== "3.5");
   const protocol = supported.includes(s.version) ? s.version : !s.version && fork ? "auto" : "";
-  let html = `<div class="setup-edition"><label for="localTuyaEdition">LocalTuya edition</label>` +
+  let html = `<div class="setup-edition"><label for="localTuyaEdition">localtuya edition</label>` +
     `<select id="localTuyaEdition" data-localtuya-edition>` +
     `<option value="xzetsubou"${fork ? " selected" : ""}>xZetsubou (supports sub-devices)</option>` +
     `<option value="original"${!fork ? " selected" : ""}>rospogrigio (original)</option></select></div>`;
   if (s.sub && !fork) {
-    return html + `<p class="setup-note">Original LocalTuya has no node ID field for sub-devices. ` +
-      `Choose the xZetsubou edition for its manual sub-device setup fields.</p>`;
+    return html + `<p class="setup-note">Sub-devices require xZetsubou.</p>`;
   }
   html += setupField("friendly_name", fork ? "Device Name" : "Name", d.name || s.id) +
-    setupField("host", fork ? "IP Address" : "Host", s.host, {
-      note: s.sub ? "Gateway's local IP." : "Device's local IP from the last scan.",
-    }) + setupField("device_id", "Device ID", s.id, {
-      note: s.sub ? "Use the sub-device's own Device ID in LocalTuya." : "",
-    }) + setupField("local_key", fork ? "Local Key" : "Local key", s.key, {
-      secret: true, note: s.sub ? "Gateway's local key." : "",
-    }) + setupField("protocol_version", "Protocol Version", protocol, {
-      note: !s.version ? (fork ? "Default: auto. A scan can identify the protocol." : "Scan to identify the protocol; original LocalTuya has no auto option.")
-        : !protocol ? `Original LocalTuya's form does not support protocol ${s.version}.`
-        : s.device22 ? "device22 was detected. LocalTuya has no separate dev_type setting."
-        : s.sub ? "Gateway's protocol from the last scan." : "Protocol from the last scan.",
+    setupField("host", s.sub ? "Gateway IP" : fork ? "IP Address" : "Host", s.host) +
+    setupField("device_id", "Device ID", s.id) +
+    setupField("local_key", s.sub ? "Gateway local key" : fork ? "Local Key" : "Local key", s.key, { secret: true }) +
+    setupField("protocol_version", "Protocol Version", protocol, {
+      empty: s.version && !protocol ? `${s.version} (unsupported)` : "Not available",
     });
-  if (fork) html += setupField("node_id", "(Optional) Sub-devices Node Id", s.sub ? s.nodeId : "", {
+  if (fork) html += setupField("node_id", "Sub-device node ID", s.sub ? s.nodeId : "", {
     empty: s.sub ? "Not available" : "Leave empty",
-    note: s.sub ? "Needed to address this sub-device through its gateway." : "Only used for a sub-device.",
   });
-  if (s.sub) html += setupField("gateway_id", "Gateway ID (reference)", s.gatewayId, {
-    note: "For reference; the manual LocalTuya form does not ask for this field.",
-  });
+  if (s.sub) html += setupField("gateway_id", "Gateway ID (reference)", s.gatewayId, { device: s.gateway });
   html += `<details class="setup-advanced" data-setup-advanced${setupAdvancedOpen ? " open" : ""}>` +
     `<summary>Advanced options</summary><div>` +
-    setupField("enable_debug", "Enable debug", false, { note: "Default: false (leave unchecked)." }) +
-    setupField("scan_interval", "Scan interval (seconds)", "", {
-      empty: "Leave empty", note: "Optional. Only set this if automatic updates are insufficient.",
-    }) + setupField("manual_dps_strings", "Manual DPS to add", "", {
-      empty: "Leave empty", note: "Optional. Comma-separated DP IDs when detection is not working.",
-    }) + setupField("reset_dpids", "DPIDs to send in RESET command", "", {
-      empty: "Leave empty", note: "Optional. Only set this if required by the device.",
-    });
-  if (fork) html += setupField("device_sleep_time", "Device sleep time (seconds)", "", {
-    empty: "Leave empty", note: "Optional. For devices that sleep between reports.",
-  });
+    setupField("enable_debug", "Enable debug", false) +
+    setupField("scan_interval", "Scan interval (seconds)", "", { empty: "Leave empty" }) +
+    setupField("manual_dps_strings", "Manual DPS to add", "", { empty: "Leave empty" }) +
+    setupField("reset_dpids", "Reset DP IDs", "", { empty: "Leave empty" });
+  if (fork) html += setupField("device_sleep_time", "Device sleep time (seconds)", "", { empty: "Leave empty" });
   return html + `</div></details>`;
 }
 
@@ -1761,31 +1813,22 @@ function tinytuyaSnippet(d, s, masked = false) {
 }
 
 function setupTinyTuya(d, s) {
-  let html = setupField("dev_id", s.sub ? "Gateway Device ID" : "Device ID", s.sub ? s.gatewayId : s.id) +
+  let html = setupField("dev_id", s.sub ? "Gateway device ID" : "Device ID",
+      s.sub ? s.gatewayId : s.id, { device: s.gateway }) +
     setupField("address", s.sub ? "Gateway local IP" : "Local IP address", s.host) +
     setupField("local_key", s.sub ? "Gateway local key" : "Local key", s.key, { secret: true }) +
-    setupField("version", "Protocol version", s.version, {
-      note: "Use a numeric protocol version. tinytuya has no auto version argument.",
-    });
-  if (s.device22) html += setupField("dev_type", "Device type", "device22", {
-    note: `Keep version=${s.version}; dev_type selects the device22 quirk.`,
-  });
-  if (s.sub) html += setupField("sub_id", "Sub-device Device ID", s.id, {
-    note: "First argument of the child Device constructor.",
-  }) + setupField("cid", "Sub-device node ID", s.nodeId, {
-    note: "node_id is an alias for cid. The snippet uses cid.",
-  }) + setupField("parent", "Parent gateway", "gateway", {
-    note: "Pass the gateway Device object created in the snippet.",
-  });
+    setupField("version", "Protocol version", s.version);
+  if (s.device22) html += setupField("dev_type", "Device type (dev_type)", "device22");
+  if (s.sub) html += setupField("sub_id", "Sub-device ID", s.id) +
+    setupField("cid", "Sub-device node ID", s.nodeId) +
+    setupField("parent", "Parent gateway", "gateway");
   const snippet = tinytuyaSnippet(d, s);
   const preview = localKeysVisible ? snippet.code : tinytuyaSnippet(d, s, true).code;
-  html += `<div class="setup-snippet"><button class="setup-copy" type="button" data-setup-copy-snippet` +
-    (snippet.code ? ` data-copy="${esc(snippet.code)}"` : " disabled") + `>Copy snippet</button>`;
-  if (snippet.code) html += `<pre class="mono" data-setup-snippet>${esc(preview)}</pre>` +
-    `<p class="setup-note">${localKeysVisible ? "The snippet includes the actual local key."
-      : "Keys are hidden in this preview. Copy snippet includes the actual local key."}</p>`;
-  else html += `<p class="setup-note">Needed for a complete snippet: ${esc(snippet.missing.join(", "))}. ` +
-    `Scan the network or check the gateway/device to find missing local values.</p>`;
+  html += `<div class="setup-snippet"><div class="setup-snippet-head"><span class="setup-label">Python snippet</span>` +
+    `<button class="setup-copy" type="button" aria-label="Copy Python snippet" data-setup-copy-snippet` +
+    (snippet.code ? ` data-copy="${esc(snippet.code)}"` : " disabled") + `>Copy</button></div>`;
+  if (snippet.code) html += `<pre class="mono" data-setup-snippet>${esc(preview)}</pre>`;
+  else html += `<p class="setup-note">Missing: ${esc(snippet.missing.join(", "))}.</p>`;
   return html + `</div>`;
 }
 
@@ -1795,9 +1838,9 @@ function setupChildren(d) {
     .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
   return `<div class="setup-children"><h4>Sub-devices (${subs.length})</h4>` +
     (subs.length ? `<ul>` + subs.map(s => `<li>${deviceLink(s)}` +
-      `<div class="setup-child-ids"><span>Device ID</span>${copyable(s.id, true)}` +
-      `<span>Node ID</span>${s.node_id ? copyable(s.node_id, true) : dash()}</div></li>`).join("") + `</ul>`
-      : `<p class="setup-note">No identified sub-devices in this device list.</p>`) + `</div>`;
+      `<div class="setup-child-fields">${setupField("child_device_id", "Device ID", s.id)}` +
+      `${setupField("child_node_id", "Node ID", s.node_id)}</div></li>`).join("") + `</ul>`
+      : "") + `</div>`;
 }
 
 function setupSection(d) {
@@ -1805,17 +1848,17 @@ function setupSection(d) {
   const tabs = SETUP_TOOLS.map(t => `<button type="button" role="tab" id="setup-tab-${t.id}" ` +
     `data-setup-tool="${t.id}" aria-controls="setup-tool-panel" aria-selected="${t.id === setupTool}" ` +
     `tabindex="${t.id === setupTool ? 0 : -1}">${t.name}</button>`).join("");
-  let note = "Manual local setup. Copy the values into your tool's setup fields.";
-  if (s.sub) note = s.gateway ? `Connect through ${deviceLink(s.gateway)} using its local IP, key and protocol.`
-    : s.gatewayId ? "The gateway ID is known, but its gateway is not in this device list."
-    : "Gateway not identified. Check your gateway at its IP to identify it. Available values can still be copied.";
   const body = setupTool === "tuya-local" ? setupTuyaLocal(d, s)
     : setupTool === "localtuya" ? setupLocalTuya(d, s) : setupTinyTuya(d, s);
   const children = setupChildren(d);
+  const tool = SETUP_TOOLS.find(t => t.id === setupTool);
+  const repo = setupTool === "localtuya" && localTuyaEdition === "original"
+    ? "rospogrigio/localtuya" : tool.repo;
+  const footnote = `<footer class="setup-footnote">GitHub · ` +
+    `<a href="https://github.com/${repo}" target="_blank" rel="noopener noreferrer">${esc(repo)}</a></footer>`;
   return `<div class="setup-card"><div class="setup-tabs" role="tablist" aria-label="Local setup tool">${tabs}</div>` +
     `<div class="setup-content" id="setup-tool-panel" role="tabpanel" tabindex="0" ` +
-    `aria-labelledby="setup-tab-${setupTool}"><p class="setup-note">${note}</p>${body}</div>` +
-    (children ? `<div class="setup-content">${children}</div>` : "") + `</div>`;
+    `aria-labelledby="setup-tab-${setupTool}">${body}${children}${footnote}</div></div>`;
 }
 
 // One row per data point: dp id (from local_strategy), current value (status),
@@ -1912,10 +1955,17 @@ function rawSection(d) {
 
 $("panelClose").innerHTML = icon("close");
 $("panelClose").onclick = closePanel;
+$("panelSetupOpen").innerHTML = `Set up in…${icon("chevron")}`;
+$("panelSetupOpen").onclick = openSetup;
+$("panelBack").innerHTML = `${icon("chevron")}Back to device details`;
+$("panelBack").onclick = showDetails;
 $("scrim").onclick = closePanel;
 document.addEventListener("keydown", (e) => {
   // Escape in the confirmation closes only the dialog, not the panel behind it.
-  if (e.key === "Escape" && !$("logoutDialog").open) closePanel();
+  if (e.key === "Escape" && !$("logoutDialog").open) {
+    if (panelView === "setup") showDetails();
+    else closePanel();
+  }
 });
 
 // ---- header actions: whatever doesn't fit on the header's line goes in the ⋮ menu ----

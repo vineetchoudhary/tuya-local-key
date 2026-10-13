@@ -186,7 +186,10 @@ def record_shot(page, gallery, node):
     status = "fail" if report is None or report.failed else "pass"
     name = f"{len(gallery) + 1:02d}-{status}-{node.name}.png"
     try:
-        page.screenshot(path=SHOTS_DIR / name, full_page=True)
+        # A fixed drawer belongs to the viewport. A full-page capture places it
+        # partway down a scrolled mobile page instead of showing the visible UI.
+        panel_open = page.locator("#panel").get_attribute("aria-hidden") == "false"
+        page.screenshot(path=SHOTS_DIR / name, full_page=not panel_open)
     except PlaywrightError:
         return          # a dead page must not mask the test's own failure
     gallery.append({"name": node.name, "status": status, "file": name})
@@ -201,6 +204,7 @@ def open_panel(page, name):
     # "visible", not just "attached": the panel is visibility:hidden until the
     # slide-in starts, and innerText reads empty while it is.
     page.wait_for_selector("#panel[aria-hidden='false']", state="visible")
+    page.wait_for_function("document.getElementById('panel').getBoundingClientRect().right <= innerWidth + 0.5")
 
 
 def field_value(page, key):
@@ -1517,8 +1521,14 @@ def test_an_unavailable_scanner_is_explained_and_the_list_stays(page, running_ap
     assert page.locator("#rows tr").count() == len(DEVICES)
 
 
+def open_setup(page, name):
+    open_panel(page, name)
+    page.locator("#panelSetupOpen").click()
+    page.wait_for_selector("#setupBody", state="visible")
+
+
 def setup_field(page, key):
-    return page.locator(f".setup-card [data-setup-field='{key}']")
+    return page.locator(f"#setupBody [data-setup-field='{key}']")
 
 
 def setup_value(page, key):
@@ -1558,8 +1568,53 @@ def execute_setup_snippet(code, monkeypatch):
     return devices
 
 
-def test_setup_tuya_local_has_all_manual_fields_and_never_uses_the_cloud_ip(page):
+@pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"), (390, "light"), (390, "dark")])
+def test_setup_view_has_its_own_content_and_returns_to_details(page, width, scheme):
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.emulate_media(color_scheme=scheme)
     open_panel(page, PLUG.name)
+    close_box = page.locator("#panelClose").bounding_box()
+    assert page.locator("#panelSetupOpen").is_visible()
+    assert page.locator("#panelBody .setup-card").count() == 0
+    assert page.locator("#setupBody").is_hidden()
+    assert page.locator("#panelBack").is_hidden()
+    page.locator("#panelBody").evaluate("el => { el.scrollTop = 350; }")
+    entry = page.locator("#panelSetupEntry")
+    assert entry.evaluate("el => parseFloat(getComputedStyle(el).borderBottomWidth)") == 1
+    gap = page.locator("#panelBody").evaluate("""el =>
+        el.getBoundingClientRect().top - document.getElementById('panelSetupEntry').getBoundingClientRect().bottom
+    """)
+    assert gap >= 12
+
+    page.locator("#panelSetupOpen").press("Enter")
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{PLUG.name}” in…"
+    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
+    assert page.locator("#panelSub").is_hidden()
+    assert page.locator("#panelBody").is_hidden()
+    assert page.locator("#setupBody").is_visible()
+    assert page.locator("#setupBody dl.fields, #setupBody details.raw").count() == 0
+    assert page.locator("[data-setup-tool='tuya-local']").evaluate("el => el === document.activeElement")
+
+    page.keyboard.press("Escape")
+    assert page.locator("#panelTitle").inner_text() == PLUG.name
+    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
+    assert page.locator("#panelSub").is_visible()
+    assert page.locator("#panelBody").is_visible()
+    assert page.locator("#setupBody").is_hidden()
+    assert page.locator("#panelSetupOpen").evaluate("el => el === document.activeElement")
+    page.keyboard.press("Escape")
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+
+    open_setup(page, PLUG.name)
+    page.locator("#panelClose").click()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+    open_panel(page, PLUG.name)
+    assert page.locator("#panelTitle").inner_text() == PLUG.name
+    assert page.locator("#setupBody").is_hidden()
+
+
+def test_setup_tuya_local_has_all_manual_fields_and_never_uses_the_cloud_ip(page):
+    open_setup(page, PLUG.name)
     assert page.locator(".setup-card [data-setup-field]").evaluate_all(
         "fields => fields.map(field => field.dataset.setupField)") == [
         "host", "device_id", "local_key", "protocol_version", "poll_only", "device_cid",
@@ -1569,7 +1624,6 @@ def test_setup_tuya_local_has_all_manual_fields_and_never_uses_the_cloud_ip(page
     assert setup_value(page, "device_id") == PLUG.id
     assert setup_value(page, "protocol_version") == "auto"
     assert setup_value(page, "poll_only") == "false"
-    assert "Default: false" in setup_field(page, "poll_only").inner_text()
     assert setup_value(page, "device_cid") == "Leave empty"
     assert MASK in setup_value(page, "local_key")
     assert PLUG.local_key not in page.locator(".setup-card").inner_text()
@@ -1584,7 +1638,7 @@ def test_setup_device22_uses_each_tools_protocol_names(page, running_app, monkey
                                                      version, tuya_version):
     _scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", version, device22=True)})
     scanned(page)
-    open_panel(page, PLUG.name)
+    open_setup(page, PLUG.name)
     assert setup_value(page, "host") == "192.168.2.61"
     assert setup_value(page, "protocol_version") == tuya_version
     setup_field(page, "protocol_version").locator("button.setup-copy").click()
@@ -1592,11 +1646,12 @@ def test_setup_device22_uses_each_tools_protocol_names(page, running_app, monkey
 
     setup_tool(page, "localtuya")
     assert setup_value(page, "protocol_version") == version
-    assert "no separate dev_type setting" in setup_field(page, "protocol_version").inner_text()
+    assert setup_field(page, "dev_type").count() == 0
 
     setup_tool(page, "tinytuya")
     assert setup_value(page, "version") == version
     assert setup_value(page, "dev_type") == "device22"
+    assert "dev_type" in setup_field(page, "dev_type").locator(".setup-label").inner_text()
     assert PLUG.local_key not in page.locator("[data-setup-snippet]").inner_text()
     devices = execute_setup_snippet(copied_setup_snippet(page), monkeypatch)
     assert len(devices) == 1
@@ -1616,7 +1671,7 @@ def test_setup_sub_device_maps_gateway_and_child_arguments(page, running_app, mo
         sub.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=gateway.id),
     })
     scanned(page)
-    open_panel(page, sub.name)
+    open_setup(page, sub.name)
     assert setup_value(page, "host") == "192.168.2.8"
     assert setup_value(page, "device_id") == gateway.id
     assert setup_field(page, "local_key").locator("button.setup-copy").get_attribute("data-copy") == sub.local_key
@@ -1654,7 +1709,7 @@ def test_setup_sub_device_maps_gateway_and_child_arguments(page, running_app, mo
 def test_setup_gateway_children_use_the_full_list_and_open_their_panels(page, running_app, monkeypatch):
     subs = [_named_sub(VALVE, ZIGBEE_GATEWAY), _named_sub(WATER_TIMER, ZIGBEE_GATEWAY)]
     _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, *subs)
-    open_panel(page, ZIGBEE_GATEWAY.name)
+    open_setup(page, ZIGBEE_GATEWAY.name)
     page.fill("#filter", PLUG.name)
     assert page.locator("#rows tr").count() == 1
     assert page.locator(".setup-children li").count() == 2
@@ -1662,8 +1717,18 @@ def test_setup_gateway_children_use_the_full_list_and_open_their_panels(page, ru
     page.locator(f".setup-children [data-copy='{VALVE.node_id}']").click()
     assert clipboard(page) == VALVE.node_id
     page.locator(f".setup-children [data-open-device='{VALVE.id}']").click()
-    assert page.locator("#panelTitle").inner_text() == VALVE.name
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{VALVE.name}” in…"
+    assert page.locator("#panelSub").is_hidden()
     assert setup_value(page, "device_cid") == VALVE.node_id
+    page.locator("#panelBack").click()
+    assert page.locator("#panelTitle").inner_text() == VALVE.name
+    assert field_value(page, "id") == VALVE.id
+    assert page.locator("#setupBody").is_hidden()
+    page.fill("#filter", "")
+    page.locator("#panelSetupOpen").click()
+    open_panel(page, PLUG.name)
+    assert page.locator("#panelTitle").inner_text() == PLUG.name
+    assert page.locator("#panelBack").is_hidden()
 
 
 def test_setup_uuid_fallback_is_only_used_for_tuya_local(page, running_app, monkeypatch):
@@ -1676,9 +1741,9 @@ def test_setup_uuid_fallback_is_only_used_for_tuya_local(page, running_app, monk
         sub.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
     })
     scanned(page)
-    open_panel(page, sub.name)
+    open_setup(page, sub.name)
     assert setup_value(page, "device_cid") == sub.uuid
-    assert "UUID fallback" in setup_field(page, "device_cid").inner_text()
+    assert setup_field(page, "device_cid").locator(".setup-label").inner_text() == "Sub-device UUID"
     setup_tool(page, "localtuya")
     assert setup_value(page, "node_id") == "Not available"
     assert setup_field(page, "node_id").locator("button.setup-copy").is_disabled()
@@ -1695,7 +1760,7 @@ def test_setup_unknown_gateway_is_not_guessed_from_a_shared_key(page, running_ap
         WATER_TIMER.id: _lan("via_gateway", "192.168.2.9", "3.4"),
     })
     scanned(page)
-    open_panel(page, VALVE.name)
+    open_setup(page, VALVE.name)
     assert setup_value(page, "host") == "192.168.2.8"
     assert setup_value(page, "device_id") == "Not available"
     setup_tool(page, "tinytuya")
@@ -1713,7 +1778,7 @@ def test_setup_explicit_gateway_wins_and_conflicting_scan_values_are_not_borrowe
         sub.id: _lan("via_gateway", "192.168.2.9", "3.5", gateway_id=BLE_GATEWAY.id),
     })
     scanned(page)
-    open_panel(page, sub.name)
+    open_setup(page, sub.name)
     assert setup_value(page, "device_id") == gateway.id
     assert setup_value(page, "host") == "Not available"
     assert setup_value(page, "protocol_version") == "auto"
@@ -1725,23 +1790,27 @@ def test_setup_explicit_gateway_wins_and_conflicting_scan_values_are_not_borrowe
 def test_setup_localtuya_editions_have_their_actual_optional_fields(page, running_app, monkeypatch):
     _scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", "3.5")})
     scanned(page)
-    open_panel(page, PLUG.name)
+    open_setup(page, PLUG.name)
     setup_tool(page, "localtuya")
     assert setup_value(page, "node_id") == "Leave empty"
+    repo = page.locator("#setup-tool-panel .setup-footnote a")
+    assert repo.is_visible()
+    assert repo.get_attribute("href") == "https://github.com/xZetsubou/hass-localtuya"
     page.locator("[data-setup-advanced] summary").click()
     assert setup_value(page, "enable_debug") == "false"
     for field in ("scan_interval", "manual_dps_strings", "reset_dpids", "device_sleep_time"):
         assert setup_value(page, field) == "Leave empty"
     page.select_option("[data-localtuya-edition]", "original")
-    assert setup_value(page, "protocol_version") == "Not available"
-    assert "does not support protocol 3.5" in setup_field(page, "protocol_version").inner_text()
+    assert setup_value(page, "protocol_version") == "3.5 (unsupported)"
+    assert setup_field(page, "protocol_version").locator("button.setup-copy").is_disabled()
     assert setup_field(page, "node_id").count() == 0
     assert setup_field(page, "device_sleep_time").count() == 0
     assert page.locator("[data-setup-advanced]").evaluate("el => el.open")
+    assert repo.get_attribute("href") == "https://github.com/rospogrigio/localtuya"
 
 
 def test_setup_advanced_state_survives_an_immediate_edition_change(page):
-    open_panel(page, PLUG.name)
+    open_setup(page, PLUG.name)
     setup_tool(page, "localtuya")
     for edition, expected_open in [("original", True), ("xzetsubou", False)]:
         # Native details queues its toggle event. A repaint in this same browser
@@ -1758,10 +1827,10 @@ def test_setup_advanced_state_survives_an_immediate_edition_change(page):
 
 def test_setup_original_localtuya_explains_its_missing_sub_device_support(page, running_app, monkeypatch):
     _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, _named_sub(VALVE, ZIGBEE_GATEWAY))
-    open_panel(page, VALVE.name)
+    open_setup(page, VALVE.name)
     setup_tool(page, "localtuya")
     page.select_option("[data-localtuya-edition]", "original")
-    assert "Original LocalTuya has no node ID field" in page.locator(".setup-card").inner_text()
+    assert "Sub-devices require xZetsubou." in page.locator(".setup-card").inner_text()
     assert page.locator(".setup-card [data-setup-field]").count() == 0
 
 
@@ -1772,7 +1841,7 @@ def test_setup_snippet_preserves_quoted_keys_and_is_masked_until_revealed(page, 
     refreshed(page, "#changesNotice")
     _scans(running_app, monkeypatch, {device.id: _lan("ok", "192.168.2.61", "3.3")})
     scanned(page)
-    open_panel(page, device.name)
+    open_setup(page, device.name)
     setup_tool(page, "tinytuya")
     masked = page.locator("[data-setup-snippet]").inner_text()
     assert MASK in masked and json.dumps(device.local_key) not in masked
@@ -1789,7 +1858,7 @@ def test_setup_snippet_preserves_quoted_keys_and_is_masked_until_revealed(page, 
 def test_setup_updates_copied_values_after_key_and_scan_changes(page, running_app, monkeypatch):
     _scans(running_app, monkeypatch, FIRST_SCAN, {PLUG.id: _lan("ok", "192.168.2.62", "3.5")})
     scanned(page)
-    open_panel(page, PLUG.name)
+    open_setup(page, PLUG.name)
     setup_tool(page, "tinytuya")
     before = copied_setup_snippet(page)
     _serves(running_app, monkeypatch, _with_rotated_key("NEW-KEY-12345678!"))
@@ -1806,15 +1875,26 @@ def test_setup_controls_keep_their_state_and_support_keyboard_tabs(page, running
     _scans(running_app, monkeypatch, FIRST_SCAN)
     scanned(page)
     open_panel(page, PLUG.name)
+    page.fill("#panelBody [data-lan-check] input", "192.168.2.200")
+    page.locator("#panelBody details.data-points summary").click()
+    page.locator("#panelBody details.raw summary").click()
+    scroll = page.locator("#panelBody").evaluate("el => { el.scrollTop = 350; return el.scrollTop; }")
+    page.locator("#panelSetupOpen").click()
     page.locator("[data-setup-tool='tuya-local']").focus()
     page.keyboard.press("ArrowRight")
     assert page.locator("[data-setup-tool='localtuya']").evaluate("el => el === document.activeElement")
     page.locator("[data-setup-advanced] summary").click()
-    page.fill("#panelBody [data-lan-check] input", "192.168.2.200")
     page.locator("#thead [data-key-toggle]").click()
     assert page.locator("[data-setup-tool='localtuya']").get_attribute("aria-selected") == "true"
     assert page.locator("[data-setup-advanced]").evaluate("el => el.open")
+    page.locator("#panelBack").click()
     assert page.locator("#panelBody [data-lan-check] input").input_value() == "192.168.2.200"
+    assert page.locator("#panelBody details.data-points").evaluate("el => el.open")
+    assert page.locator("#panelBody details.raw").evaluate("el => el.open")
+    assert page.locator("#panelBody").evaluate("el => el.scrollTop") == scroll
+    assert page.locator("#panelSetupOpen").evaluate("el => el === document.activeElement")
+    page.locator("#panelSetupOpen").click()
+    assert page.locator("[data-setup-advanced]").evaluate("el => el.open")
     page.locator("[data-setup-tool='localtuya']").focus()
     page.keyboard.press("End")
     assert page.locator("[data-setup-tool='tinytuya']").evaluate("el => el === document.activeElement")
@@ -1826,6 +1906,7 @@ def test_setup_controls_keep_their_state_and_support_keyboard_tabs(page, running
 @pytest.mark.parametrize("tool", ["tuya-local", "localtuya", "tinytuya"])
 def test_setup_card_layouts(page, running_app, monkeypatch, width, scheme, tool):
     sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    sub.name = "Garden irrigation valve beside the greenhouse and vegetable beds"
     _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
     _scans(running_app, monkeypatch, {
         ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=sub.id),
@@ -1835,11 +1916,30 @@ def test_setup_card_layouts(page, running_app, monkeypatch, width, scheme, tool)
     page.set_viewport_size({"width": width, "height": 1000})
     page.emulate_media(color_scheme=scheme)
     open_panel(page, sub.name)
+    close_box = page.locator("#panelClose").bounding_box()
+    page.locator("#panelSetupOpen").click()
     setup_tool(page, tool)
-    page.locator(".setup-card").evaluate("""el => {
-        const body = document.getElementById('panelBody');
-        body.scrollTop += el.getBoundingClientRect().top - body.getBoundingClientRect().top - 32;
-    }""")
+    title = page.locator("#panelTitle")
+    assert title.text_content() == f"Set up “{sub.name}” in…"
+    assert title.get_attribute("title") == title.text_content()
+    assert title.evaluate("el => el.clientHeight <= 2 * parseFloat(getComputedStyle(el).lineHeight) + 1")
+    assert title.evaluate("el => el.clientHeight > parseFloat(getComputedStyle(el).lineHeight)")
+    assert page.locator("#panelClose").bounding_box()["width"] >= 28
+    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
     assert page.locator(".setup-card").evaluate("el => el.scrollWidth <= el.clientWidth")
-    assert page.locator("#panelBody").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator("#setupBody").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator("#panelBody").is_hidden()
+    assert page.locator(".setup-card .setup-param, .setup-card .field-sub").count() == 0
+    assert page.locator(".setup-card .setup-note").count() == 0
     assert MASK in setup_value(page, "local_key")
+    assert page.locator("[data-setup-tool='localtuya']").inner_text() == "localtuya"
+    repos = {
+        "tuya-local": "make-all/tuya-local",
+        "localtuya": "xZetsubou/hass-localtuya",
+        "tinytuya": "jasonacox/tinytuya",
+    }
+    footnote = page.locator("#setup-tool-panel .setup-footnote")
+    footnote.scroll_into_view_if_needed()
+    assert footnote.is_visible()
+    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
+    assert footnote.locator("a").get_attribute("href") == f"https://github.com/{repos[tool]}"
