@@ -16,7 +16,9 @@ import importlib
 import json
 import os
 import shutil
+import sys
 import threading
+import types
 from pathlib import Path
 
 import pytest
@@ -165,14 +167,17 @@ def page(browser, server, gallery, request):
     )
     context.grant_permissions(["clipboard-read", "clipboard-write"], origin=server)
     loaded = context.new_page()
-    loaded.goto(server, wait_until="networkidle")
-    loaded.wait_for_selector("#rows tr")
     try:
+        loaded.goto(server, wait_until="networkidle")
+        loaded.wait_for_selector("#rows tr")
         yield loaded
     finally:
-        if SHOTS_ENABLED:
-            record_shot(loaded, gallery, request.node)
-        context.close()
+        try:
+            if SHOTS_ENABLED:
+                record_shot(loaded, gallery, request.node)
+        finally:
+            context.close()
+            _forget_devices(APP)
 
 
 def record_shot(page, gallery, node):
@@ -287,6 +292,7 @@ def test_panel_shows_local_time_utc_and_epoch(page):
 
 def data_points(page):
     """{code: (dp id, value, specification line)} from the panel's data point list."""
+    page.locator("#panelBody details.data-points summary").click()
     points = {}
     for item in page.locator("#panelBody ul.dps li").all():
         meta = item.locator(".dp-meta")
@@ -300,13 +306,21 @@ def data_points(page):
 
 def test_data_points_map_dp_ids_to_codes_values_and_specs(page):
     open_panel(page, PLUG.name)
+    disclosure = page.locator("#panelBody details.data-points")
+    assert not disclosure.evaluate("el => el.open")
+    assert disclosure.locator("ul.dps").is_hidden()
 
     points = data_points(page)
 
-    assert "DATA POINTS (2)" in page.locator("#panelBody").inner_text()
+    assert disclosure.locator("summary").inner_text() == "Data points (2)"
+    assert disclosure.locator("ul.dps").is_visible()
     # dp id comes from local_strategy, the value from status, the rest from the spec.
     assert points["cur_power"] == ("19", "812", "Integer · read-only · 0–50000 W · scale 1 · minux")
     assert points["switch_1"] == ("1", "true", "Boolean · read/write")
+    disclosure.locator("summary").focus()
+    page.keyboard.press("Enter")
+    assert not disclosure.evaluate("el => el.open")
+    assert disclosure.locator("ul.dps").is_hidden()
 
 
 def test_data_points_fall_back_when_the_device_has_no_local_mapping(page):
@@ -401,18 +415,20 @@ def test_raw_json_hides_the_key_but_copies_the_real_record(page):
 # --------------------------------------------------------------------------- #
 def _forget_devices(app):
     """Drop the cached list so the next load fetches DEVICES again."""
-    with app._devices_cache_lock:
-        app._devices_cache = None
-        app._devices_cache_loaded = True
-    app._clear_lan()
-    app.device_cache.clear(app.DEVICE_CACHE_FILE, app.DEVICE_CACHE_KEY_FILE, app.LAN_CACHE_FILE)
+    # Closing the browser aborts its requests, but a server-side fetch can still
+    # be finishing. Let it finish before clearing what the next test will see.
+    with app._devices_fetch_lock:
+        with app._devices_cache_lock:
+            app._devices_cache = None
+            app._devices_cache_loaded = True
+        app._clear_lan()
+        app.device_cache.clear(app.DEVICE_CACHE_FILE, app.DEVICE_CACHE_KEY_FILE, app.LAN_CACHE_FILE)
 
 
 @pytest.fixture()
 def running_app(server):
-    """The app behind `server`, with its cached list reset when the test ends."""
-    yield APP
-    _forget_devices(APP)
+    """The app behind `server`; the page fixture resets it after closing the browser."""
+    return APP
 
 
 def _serves(app, monkeypatch, devices):
@@ -432,7 +448,10 @@ def _with_rotated_key(value="ROTATED-KEY-9999"):
 
 
 def refreshed(page, selector):
-    page.click("#refreshBtn")
+    with page.expect_response(lambda r: r.url.endswith("/api/devices?refresh=1")) as fetched:
+        page.click("#refreshBtn")
+    fetched.value.finished()
+    page.wait_for_selector("#loading", state="hidden")
     page.wait_for_selector(selector)
 
 
@@ -626,9 +645,22 @@ def scanned(page, targets="192.168.1.0/24"):
     if page.locator("#scanBox").is_hidden():
         page.click("#scanBtn")
     page.fill("#scanTargets", targets)
-    page.click("#scanStart")
+    # An earlier summary can already be visible, and the poll timer is cleared
+    # before the final results are loaded. Await this scan's response and render.
+    with page.expect_response(lambda r: r.url.endswith("/api/lan") and
+                              r.request.method == "GET") as results:
+        with page.expect_response(lambda r: r.url.endswith("/api/lan/scan") and
+                                  r.request.method == "POST") as started:
+            page.click("#scanStart")
+        assert started.value.status == 202
+    outcome = results.value.json()
+    assert outcome["job"]["id"] == started.value.json()["job"]["id"]
+    page.wait_for_function("""expected =>
+        !lanPollTimer && lanData.job && lanData.job.id === expected.job.id &&
+        lanData.job.state === 'done' &&
+        JSON.stringify(lanData.summary) === JSON.stringify(expected.summary)
+    """, arg=outcome)
     page.wait_for_selector("#lanSummaryNotice")
-    page.wait_for_function("!lanPollTimer")
 
 
 def row(page, device):
@@ -655,6 +687,30 @@ def test_a_scan_fills_the_protocol_column_and_the_status_badges(page, running_ap
     assert "It may not be a Tuya device at all" in notice
     assert "192.168.1.77" in notice
     assert "router" not in notice, "the likely router (192.168.1.1) is left out without a word"
+
+
+@pytest.mark.parametrize("delayed_path", ["/api/lan/scan", "/api/lan"])
+def test_scanned_waits_for_the_new_results_when_a_summary_already_exists(
+        page, running_app, monkeypatch, delayed_path):
+    _scans(running_app, monkeypatch, FIRST_SCAN,
+           {PLUG.id: _lan("ok", "192.168.2.62", "3.5")})
+    scanned(page)
+    page.evaluate("""path => {
+        const originalFetch = window.fetch;
+        window.fetch = async (...args) => {
+            const response = await originalFetch(...args);
+            if (new URL(args[0], document.baseURI).pathname === path) {
+                await new Promise(resolve => setTimeout(resolve, 250));
+            }
+            return response;
+        };
+    }""", delayed_path)
+
+    scanned(page)
+
+    assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "3.5"
+    open_panel(page, PLUG.name)
+    assert field_value(page, "local_ip") == "192.168.2.62"
 
 
 def test_a_devices_status_falls_back_to_the_cloud_flag_without_a_scan(page):
@@ -981,7 +1037,7 @@ def test_collapsing_a_gateway_keeps_counts_and_survives_sort_and_refresh(page, r
     assert row(page, VALVE).is_visible() and row(page, WATER_TIMER).is_visible()
     open_panel(page, VALVE.name)
     assert page.locator("#panelTitle").inner_text() == VALVE.name
-    assert page.locator(f"#panelBody [data-open-device='{ZIGBEE_GATEWAY.id}']").is_visible()
+    assert page.locator(f"#panelBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']").is_visible()
 
 
 def test_filter_reveals_matching_children_with_gateway_context_and_exports_only_matches(
@@ -1152,7 +1208,7 @@ def test_a_sub_device_links_to_the_gateway_the_scan_found_it_through(page, runni
 
     open_panel(page, VALVE.name)
     assert "reached through its gateway: Zigbee Gateway" in page.locator("#panelBody").inner_text()
-    page.click(f"#panelBody [data-open-device='{ZIGBEE_GATEWAY.id}']")
+    page.click(f"#panelBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']")
 
     page.wait_for_function(f"document.querySelector('#panelTitle').innerText === {ZIGBEE_GATEWAY.name!r}")
 
@@ -1459,3 +1515,331 @@ def test_an_unavailable_scanner_is_explained_and_the_list_stays(page, running_ap
     assert "tinytuya library couldn't be loaded" in page.locator("#scanError").inner_text()
     assert "device list and local keys still work" in page.locator("#scanError").inner_text()
     assert page.locator("#rows tr").count() == len(DEVICES)
+
+
+def setup_field(page, key):
+    return page.locator(f".setup-card [data-setup-field='{key}']")
+
+
+def setup_value(page, key):
+    return setup_field(page, key).locator(".setup-value").inner_text()
+
+
+def setup_tool(page, tool):
+    page.locator(f"[data-setup-tool='{tool}']").click()
+
+
+def copied_setup_snippet(page):
+    page.locator("[data-setup-copy-snippet]").click()
+    return clipboard(page)
+
+
+def execute_setup_snippet(code, monkeypatch):
+    """Use the real constructors, but status requests never touch the network."""
+    import tinytuya
+
+    devices = []
+
+    class OfflineDevice(tinytuya.Device):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            devices.append(self)
+
+        def status(self):
+            self.status_requested = True
+            return {"dps": {"1": True}}
+
+        def subdev_query(self):
+            self.subdevices_requested = True
+            return {"online": ["test-node"]}
+
+    monkeypatch.setitem(sys.modules, "tinytuya", types.SimpleNamespace(Device=OfflineDevice))
+    exec(compile(code, "copied-setup.py", "exec"), {})
+    return devices
+
+
+def test_setup_tuya_local_has_all_manual_fields_and_never_uses_the_cloud_ip(page):
+    open_panel(page, PLUG.name)
+    assert page.locator(".setup-card [data-setup-field]").evaluate_all(
+        "fields => fields.map(field => field.dataset.setupField)") == [
+        "host", "device_id", "local_key", "protocol_version", "poll_only", "device_cid",
+    ]
+    assert setup_value(page, "host") == "Not available"
+    assert setup_field(page, "host").locator("button.setup-copy").is_disabled()
+    assert setup_value(page, "device_id") == PLUG.id
+    assert setup_value(page, "protocol_version") == "auto"
+    assert setup_value(page, "poll_only") == "false"
+    assert "Default: false" in setup_field(page, "poll_only").inner_text()
+    assert setup_value(page, "device_cid") == "Leave empty"
+    assert MASK in setup_value(page, "local_key")
+    assert PLUG.local_key not in page.locator(".setup-card").inner_text()
+    setup_field(page, "local_key").locator("button.setup-copy").click()
+    assert clipboard(page) == PLUG.local_key
+    setup_field(page, "poll_only").locator("button.setup-copy").click()
+    assert clipboard(page) == "false"
+
+
+@pytest.mark.parametrize("version, tuya_version", [("3.3", "3.22"), ("3.4", "3.42"), ("3.5", "3.52")])
+def test_setup_device22_uses_each_tools_protocol_names(page, running_app, monkeypatch,
+                                                     version, tuya_version):
+    _scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", version, device22=True)})
+    scanned(page)
+    open_panel(page, PLUG.name)
+    assert setup_value(page, "host") == "192.168.2.61"
+    assert setup_value(page, "protocol_version") == tuya_version
+    setup_field(page, "protocol_version").locator("button.setup-copy").click()
+    assert clipboard(page) == tuya_version
+
+    setup_tool(page, "localtuya")
+    assert setup_value(page, "protocol_version") == version
+    assert "no separate dev_type setting" in setup_field(page, "protocol_version").inner_text()
+
+    setup_tool(page, "tinytuya")
+    assert setup_value(page, "version") == version
+    assert setup_value(page, "dev_type") == "device22"
+    assert PLUG.local_key not in page.locator("[data-setup-snippet]").inner_text()
+    devices = execute_setup_snippet(copied_setup_snippet(page), monkeypatch)
+    assert len(devices) == 1
+    assert devices[0].version == float(version)
+    assert devices[0].dev_type == "device22"
+    assert devices[0].address == "192.168.2.61"
+    assert devices[0].real_local_key == PLUG.local_key.encode("latin1")
+    assert devices[0].status_requested
+
+
+@pytest.mark.parametrize("gateway, child", [(ZIGBEE_GATEWAY, VALVE), (BLE_GATEWAY, WATER_TIMER)])
+def test_setup_sub_device_maps_gateway_and_child_arguments(page, running_app, monkeypatch, gateway, child):
+    sub = _named_sub(child, gateway)
+    _with_gateways(page, running_app, monkeypatch, gateway, sub)
+    _scans(running_app, monkeypatch, {
+        gateway.id: _lan("ok", "192.168.2.8", "3.4", key_from=sub.id),
+        sub.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=gateway.id),
+    })
+    scanned(page)
+    open_panel(page, sub.name)
+    assert setup_value(page, "host") == "192.168.2.8"
+    assert setup_value(page, "device_id") == gateway.id
+    assert setup_field(page, "local_key").locator("button.setup-copy").get_attribute("data-copy") == sub.local_key
+    assert setup_value(page, "device_cid") == sub.node_id
+
+    setup_tool(page, "localtuya")
+    assert setup_value(page, "device_id") == sub.id
+    assert setup_value(page, "gateway_id") == gateway.id
+    assert setup_value(page, "node_id") == sub.node_id
+
+    setup_tool(page, "tinytuya")
+    assert setup_value(page, "dev_id") == gateway.id
+    assert setup_value(page, "sub_id") == sub.id
+    assert setup_value(page, "cid") == sub.node_id
+    assert setup_value(page, "parent") == "gateway"
+    devices = execute_setup_snippet(copied_setup_snippet(page), monkeypatch)
+    assert len(devices) == 2
+    parent, child_device = devices
+    assert parent.id == gateway.id and parent.address == "192.168.2.8"
+    assert parent.real_local_key == sub.local_key.encode("latin1")
+    assert child_device.id == sub.id and child_device.cid == sub.node_id
+    assert child_device.parent is parent and child_device.version == parent.version == 3.4
+    assert child_device.status_requested
+
+    page.locator(f".setup-card [data-open-device='{gateway.id}']").click()
+    assert setup_value(page, "dev_id") == gateway.id
+    assert page.locator(".setup-children li").count() == 1
+    devices = execute_setup_snippet(copied_setup_snippet(page), monkeypatch)
+    assert devices[0].subdevices_requested
+    setup_tool(page, "tuya-local")
+    assert setup_value(page, "device_cid") == "Leave empty", "a gateway's own node ID is not a child CID"
+    page.locator(".setup-children").scroll_into_view_if_needed()
+
+
+def test_setup_gateway_children_use_the_full_list_and_open_their_panels(page, running_app, monkeypatch):
+    subs = [_named_sub(VALVE, ZIGBEE_GATEWAY), _named_sub(WATER_TIMER, ZIGBEE_GATEWAY)]
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, *subs)
+    open_panel(page, ZIGBEE_GATEWAY.name)
+    page.fill("#filter", PLUG.name)
+    assert page.locator("#rows tr").count() == 1
+    assert page.locator(".setup-children li").count() == 2
+    assert "Sub-devices (2)" in page.locator(".setup-children").inner_text()
+    page.locator(f".setup-children [data-copy='{VALVE.node_id}']").click()
+    assert clipboard(page) == VALVE.node_id
+    page.locator(f".setup-children [data-open-device='{VALVE.id}']").click()
+    assert page.locator("#panelTitle").inner_text() == VALVE.name
+    assert setup_value(page, "device_cid") == VALVE.node_id
+
+
+def test_setup_uuid_fallback_is_only_used_for_tuya_local(page, running_app, monkeypatch):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    del sub.node_id
+    sub.uuid = "actual-sub-device-uuid"
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=sub.id),
+        sub.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+    open_panel(page, sub.name)
+    assert setup_value(page, "device_cid") == sub.uuid
+    assert "UUID fallback" in setup_field(page, "device_cid").inner_text()
+    setup_tool(page, "localtuya")
+    assert setup_value(page, "node_id") == "Not available"
+    assert setup_field(page, "node_id").locator("button.setup-copy").is_disabled()
+    setup_tool(page, "tinytuya")
+    assert page.locator("[data-setup-copy-snippet]").is_disabled()
+    assert "sub-device node ID" in page.locator(".setup-snippet").inner_text()
+    assert sub.uuid not in page.locator(".setup-card").inner_text()
+
+
+def test_setup_unknown_gateway_is_not_guessed_from_a_shared_key(page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, VALVE, WATER_TIMER)
+    _scans(running_app, monkeypatch, {
+        VALVE.id: _lan("via_gateway", "192.168.2.8", "3.4"),
+        WATER_TIMER.id: _lan("via_gateway", "192.168.2.9", "3.4"),
+    })
+    scanned(page)
+    open_panel(page, VALVE.name)
+    assert setup_value(page, "host") == "192.168.2.8"
+    assert setup_value(page, "device_id") == "Not available"
+    setup_tool(page, "tinytuya")
+    assert page.locator("[data-setup-copy-snippet]").is_disabled()
+    assert "gateway ID" in page.locator(".setup-snippet").inner_text()
+
+
+def test_setup_explicit_gateway_wins_and_conflicting_scan_values_are_not_borrowed(
+        page, running_app, monkeypatch):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    gateway = copy.deepcopy(ZIGBEE_GATEWAY)
+    gateway.local_key = "actual-gateway-key"
+    _with_gateways(page, running_app, monkeypatch, gateway, BLE_GATEWAY, sub)
+    _scans(running_app, monkeypatch, {
+        sub.id: _lan("via_gateway", "192.168.2.9", "3.5", gateway_id=BLE_GATEWAY.id),
+    })
+    scanned(page)
+    open_panel(page, sub.name)
+    assert setup_value(page, "device_id") == gateway.id
+    assert setup_value(page, "host") == "Not available"
+    assert setup_value(page, "protocol_version") == "auto"
+    assert setup_field(page, "local_key").locator("button.setup-copy").get_attribute("data-copy") == gateway.local_key
+    setup_tool(page, "tinytuya")
+    assert page.locator("[data-setup-copy-snippet]").is_disabled()
+
+
+def test_setup_localtuya_editions_have_their_actual_optional_fields(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", "3.5")})
+    scanned(page)
+    open_panel(page, PLUG.name)
+    setup_tool(page, "localtuya")
+    assert setup_value(page, "node_id") == "Leave empty"
+    page.locator("[data-setup-advanced] summary").click()
+    assert setup_value(page, "enable_debug") == "false"
+    for field in ("scan_interval", "manual_dps_strings", "reset_dpids", "device_sleep_time"):
+        assert setup_value(page, field) == "Leave empty"
+    page.select_option("[data-localtuya-edition]", "original")
+    assert setup_value(page, "protocol_version") == "Not available"
+    assert "does not support protocol 3.5" in setup_field(page, "protocol_version").inner_text()
+    assert setup_field(page, "node_id").count() == 0
+    assert setup_field(page, "device_sleep_time").count() == 0
+    assert page.locator("[data-setup-advanced]").evaluate("el => el.open")
+
+
+def test_setup_advanced_state_survives_an_immediate_edition_change(page):
+    open_panel(page, PLUG.name)
+    setup_tool(page, "localtuya")
+    for edition, expected_open in [("original", True), ("xzetsubou", False)]:
+        # Native details queues its toggle event. A repaint in this same browser
+        # turn must still preserve the user's just-changed open/closed state.
+        actual_open = page.evaluate("""edition => {
+            document.querySelector('[data-setup-advanced] summary').click();
+            const select = document.querySelector('[data-localtuya-edition]');
+            select.value = edition;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return document.querySelector('[data-setup-advanced]').open;
+        }""", edition)
+        assert actual_open is expected_open
+
+
+def test_setup_original_localtuya_explains_its_missing_sub_device_support(page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, _named_sub(VALVE, ZIGBEE_GATEWAY))
+    open_panel(page, VALVE.name)
+    setup_tool(page, "localtuya")
+    page.select_option("[data-localtuya-edition]", "original")
+    assert "Original LocalTuya has no node ID field" in page.locator(".setup-card").inner_text()
+    assert page.locator(".setup-card [data-setup-field]").count() == 0
+
+
+def test_setup_snippet_preserves_quoted_keys_and_is_masked_until_revealed(page, running_app, monkeypatch):
+    device = copy.deepcopy(PLUG)
+    device.local_key = "q'\"\\\n\t<&>x;!@#%z"
+    _serves(running_app, monkeypatch, [device])
+    refreshed(page, "#changesNotice")
+    _scans(running_app, monkeypatch, {device.id: _lan("ok", "192.168.2.61", "3.3")})
+    scanned(page)
+    open_panel(page, device.name)
+    setup_tool(page, "tinytuya")
+    masked = page.locator("[data-setup-snippet]").inner_text()
+    assert MASK in masked and json.dumps(device.local_key) not in masked
+    code = copied_setup_snippet(page)
+    assert json.dumps(device.local_key) in code
+    devices = execute_setup_snippet(code, monkeypatch)
+    assert devices[0].real_local_key == device.local_key.encode("latin1")
+    setup_field(page, "local_key").locator("[data-key-toggle]").click()
+    assert page.locator("[data-setup-snippet]").inner_text() == code
+    setup_field(page, "local_key").locator("[data-key-toggle]").click()
+    assert page.locator("[data-setup-snippet]").inner_text() == masked
+
+
+def test_setup_updates_copied_values_after_key_and_scan_changes(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, FIRST_SCAN, {PLUG.id: _lan("ok", "192.168.2.62", "3.5")})
+    scanned(page)
+    open_panel(page, PLUG.name)
+    setup_tool(page, "tinytuya")
+    before = copied_setup_snippet(page)
+    _serves(running_app, monkeypatch, _with_rotated_key("NEW-KEY-12345678!"))
+    refreshed(page, "#changesNotice")
+    assert page.locator("[data-setup-tool='tinytuya']").get_attribute("aria-selected") == "true"
+    scanned(page)
+    after = copied_setup_snippet(page)
+    assert "192.168.2.62" in after and "version=3.5" in after
+    assert "NEW-KEY-12345678!" in after and PLUG.local_key not in after
+    assert before != after
+
+
+def test_setup_controls_keep_their_state_and_support_keyboard_tabs(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, FIRST_SCAN)
+    scanned(page)
+    open_panel(page, PLUG.name)
+    page.locator("[data-setup-tool='tuya-local']").focus()
+    page.keyboard.press("ArrowRight")
+    assert page.locator("[data-setup-tool='localtuya']").evaluate("el => el === document.activeElement")
+    page.locator("[data-setup-advanced] summary").click()
+    page.fill("#panelBody [data-lan-check] input", "192.168.2.200")
+    page.locator("#thead [data-key-toggle]").click()
+    assert page.locator("[data-setup-tool='localtuya']").get_attribute("aria-selected") == "true"
+    assert page.locator("[data-setup-advanced]").evaluate("el => el.open")
+    assert page.locator("#panelBody [data-lan-check] input").input_value() == "192.168.2.200"
+    page.locator("[data-setup-tool='localtuya']").focus()
+    page.keyboard.press("End")
+    assert page.locator("[data-setup-tool='tinytuya']").evaluate("el => el === document.activeElement")
+    page.keyboard.press("Home")
+    assert page.locator("[data-setup-tool='tuya-local']").evaluate("el => el === document.activeElement")
+
+
+@pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"), (390, "light"), (390, "dark")])
+@pytest.mark.parametrize("tool", ["tuya-local", "localtuya", "tinytuya"])
+def test_setup_card_layouts(page, running_app, monkeypatch, width, scheme, tool):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=sub.id),
+        sub.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.emulate_media(color_scheme=scheme)
+    open_panel(page, sub.name)
+    setup_tool(page, tool)
+    page.locator(".setup-card").evaluate("""el => {
+        const body = document.getElementById('panelBody');
+        body.scrollTop += el.getBoundingClientRect().top - body.getBoundingClientRect().top - 32;
+    }""")
+    assert page.locator(".setup-card").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator("#panelBody").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert MASK in setup_value(page, "local_key")
