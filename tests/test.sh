@@ -15,19 +15,45 @@ APP_URL="http://localhost:${HOST_PORT}"
 AUTH_USERNAME="${AUTH_USERNAME:-admin}"
 AUTH_PASSWORD="${AUTH_PASSWORD:-tuya-local-key}"
 
-# Enable Auth
+usage() {
+  cat <<'EOF'
+Usage: ./tests/test.sh [--skip-tests] [--auth]
+
+Run tests, then build and start the local Docker image.
+
+Options:
+  --skip-tests  Skip local dependency installation and tests; build and run Docker directly.
+  --auth        Enable Basic Auth using AUTH_USERNAME and AUTH_PASSWORD.
+  -h, --help    Show this help message.
+
+Examples:
+  ./tests/test.sh
+  ./tests/test.sh --skip-tests
+  ./tests/test.sh --skip-tests --auth
+EOF
+}
+
+SKIP_TESTS=0
 AUTH_ENABLED=0
 DOCKER_AUTH_ARGS=()
 CURL_AUTH_ARGS=()
 for arg in "$@"; do
   case "$arg" in
+    --skip-tests)
+      SKIP_TESTS=1
+      ;;
     --auth)
       AUTH_ENABLED=1
       DOCKER_AUTH_ARGS=(-e "AUTH_USERNAME=${AUTH_USERNAME}" -e "AUTH_PASSWORD=${AUTH_PASSWORD}")
       CURL_AUTH_ARGS=(-u "${AUTH_USERNAME}:${AUTH_PASSWORD}")
       ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     *)
       printf 'Unknown argument: %s\n' "$arg" >&2
+      usage >&2
       exit 1
       ;;
   esac
@@ -77,18 +103,24 @@ wait_for_app() {
 
 cd "$ROOT_DIR"
 
-require_command "$PYTHON_BIN"
+if [[ "$SKIP_TESTS" == 0 ]]; then
+  require_command "$PYTHON_BIN"
+fi
 require_command docker
 
-run "$PYTHON_BIN" -m pip install -r requirements-dev.txt -r requirements-web.txt
-run "$PYTHON_BIN" -m pytest \
-  --cov=app \
-  --cov=tuya_devices \
-  --cov=lan_scan \
-  --cov=device_cache \
-  --cov-report=term-missing \
-  --cov-report=html:htmlcov
-log "Coverage HTML report: ${ROOT_DIR}/htmlcov/index.html"
+if [[ "$SKIP_TESTS" == 1 ]]; then
+  log "Skipping local dependency installation and tests"
+else
+  run "$PYTHON_BIN" -m pip install -r requirements-dev.txt -r requirements-web.txt
+  run "$PYTHON_BIN" -m pytest \
+    --cov=app \
+    --cov=tuya_devices \
+    --cov=lan_scan \
+    --cov=device_cache \
+    --cov-report=term-missing \
+    --cov-report=html:htmlcov
+  log "Coverage HTML report: ${ROOT_DIR}/htmlcov/index.html"
+fi
 
 if docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
   run docker rm -f "$CONTAINER_NAME"
