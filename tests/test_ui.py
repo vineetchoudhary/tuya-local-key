@@ -1028,6 +1028,40 @@ def test_sub_device_details_and_csv_keep_the_key_node_id_and_uuid_separate(
     assert rows[sub.id]["uuid"] == sub.uuid
 
 
+@pytest.mark.parametrize("grouped", [False, True])
+@pytest.mark.parametrize("width, scheme", [
+    (1440, "light"), (1440, "dark"), (390, "light"), (390, "dark"),
+])
+def test_regular_device_names_align_with_the_header_and_only_children_are_indented(
+        page, running_app, monkeypatch, grouped, width, scheme):
+    if grouped:
+        _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY,
+                       _named_sub(VALVE, ZIGBEE_GATEWAY))
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.emulate_media(color_scheme=scheme)
+    positions = page.evaluate("""() => {
+        const heading = document.querySelector('#thead th[data-key="name"]');
+        const text = document.createRange();
+        text.selectNodeContents(heading.firstChild);
+        const regular = [...document.querySelectorAll('#rows tr:not(.sub-device-row)')]
+            .filter(row => !row.querySelector('[data-gateway-toggle]'));
+        return {
+            heading: text.getBoundingClientRect().left,
+            names: regular.map(row => row.querySelector('.device-name').getBoundingClientRect().left),
+            placeholders: regular.filter(row => row.querySelector('.gateway-spacer')).length,
+        };
+    }""")
+    assert positions["names"]
+    assert positions["names"] == pytest.approx([positions["heading"]] * len(positions["names"]), abs=0.5)
+    assert positions["placeholders"] == 0
+    if grouped:
+        gateway = row(page, ZIGBEE_GATEWAY)
+        child = row(page, VALVE)
+        assert gateway.locator("[data-gateway-toggle]").is_visible()
+        assert child.locator(".gateway-spacer").is_visible()
+        assert child.locator(".device-name").bounding_box()["x"] > gateway.locator(".device-name").bounding_box()["x"]
+
+
 @pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"), (390, "light")])
 def test_known_sub_devices_start_expanded_below_the_gateway(page, running_app, monkeypatch,
                                                             width, scheme):

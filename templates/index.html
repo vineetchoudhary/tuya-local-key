@@ -1367,7 +1367,7 @@ function groupedRows(list) {
 function deviceRowId(d) { return `device-row-${encodeURIComponent(d.id)}`; }
 function nameCell(entry) {
   const d = entry.device, subs = entry.children || [];
-  let toggle = '<span class="gateway-spacer" aria-hidden="true"></span>';
+  let toggle = entry.parent ? '<span class="gateway-spacer" aria-hidden="true"></span>' : "";
   if (subs.length) {
     const label = `${entry.expanded ? "Collapse" : "Expand"} sub-devices of ${d.name || d.id}`;
     toggle = `<button class="icon-btn gateway-toggle" type="button" data-gateway-toggle="${esc(d.id)}" ` +
