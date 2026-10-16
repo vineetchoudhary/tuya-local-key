@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate docs/screenshots/*.png — every image the README embeds.
+"""Regenerate the README and documentation screenshots in docs/screenshots/.
 
     python -m pip install -r requirements-dev.txt
     python -m playwright install chromium        # or have Edge/Chrome installed
@@ -109,9 +109,10 @@ class Fixture:
 
     def forget_devices(self):
         """Drop both caches, so the next list is a first list with no summary."""
-        with self.app._lock:
-            self.app._devices_cache = None
-            self.app._devices_cache_loaded = True
+        with self.app._devices_fetch_lock:
+            with self.app._devices_cache_lock:
+                self.app._devices_cache = None
+                self.app._devices_cache_loaded = True
         self.app._clear_lan()
         self.app.device_cache.clear(self.app.DEVICE_CACHE_FILE,
                                     self.app.DEVICE_CACHE_KEY_FILE,
@@ -149,7 +150,7 @@ def open_list(page, fx, scanned=True):
         fx.remember_scan()
     page.goto(fx.url, wait_until="networkidle")
     page.wait_for_selector("#rows tr")
-    page.click("[data-key-toggle]")
+    page.click("#thead [data-key-toggle]")
 
 
 def shot_login(page, fx):
@@ -188,17 +189,78 @@ def shot_filter(page, fx):
     return {}
 
 
-def shot_details(page, fx):
-    open_list(page, fx)
+def open_device_panel(page):
     # The name cell, not the row: a click on the key column is a copy, not a row click.
     page.locator("#rows tr", has_text="Bedroom Plug 02").locator("td").first.click()
-    page.wait_for_function("document.body.classList.contains('panel-open')")
+    page.wait_for_function("""() => {
+        const panel = document.getElementById('panel');
+        return panel.getAttribute('aria-hidden') === 'false' &&
+            panel.getBoundingClientRect().right <= innerWidth + 0.5;
+    }""")
+
+
+def fit_panel(page, body_id):
     # The panel is a fixed, scrolling column: grow the window to fit it whole.
-    page.set_viewport_size({"width": WIDTH, "height": PANEL_TAIL + page.evaluate(
-        "Math.ceil(document.querySelector('.panel-head').offsetHeight"
-        " + document.getElementById('panelBody').scrollHeight)")})
-    page.wait_for_timeout(300)      # the panel slides in
+    height = page.evaluate("""id => {
+        const body = document.getElementById(id);
+        return Math.ceil(body.lastElementChild.getBoundingClientRect().bottom +
+            body.scrollTop + parseFloat(getComputedStyle(body).paddingBottom));
+    }
+    """, body_id) + PANEL_TAIL
+    page.set_viewport_size({"width": WIDTH, "height": height})
+    page.wait_for_timeout(300)      # panel and body width transitions settle
+    body = page.locator(f"#{body_id}")
+    assert body.evaluate("el => el.scrollHeight <= el.clientHeight"), "panel content must fit in the shot"
+    assert body.evaluate("el => el.scrollWidth <= el.clientWidth"), "panel content must not overflow"
+
+
+def panel_clip(page):
+    box = page.locator("#panel").bounding_box()
+    return {"clip": {key: round(value) for key, value in box.items()}}
+
+
+def shot_details(page, fx):
+    open_list(page, fx)
+    open_device_panel(page)
+    fit_panel(page, "panelBody")
     return {}
+
+
+def setup_panel(page, fx, tool):
+    shot_scan(page, fx)
+    open_device_panel(page)
+    page.click("#panelSetupOpen")
+    page.click(f"#setupBody [data-setup-tool='{tool}']")
+    # Show the demo key explicitly; the panel's eye is separate from the table's.
+    page.click("#setupBody [data-key-toggle]")
+    if tool == "tinytuya":
+        page.wait_for_selector("#setupBody [data-setup-snippet]")
+    assert not page.locator("#setupBody [data-setup-readiness]").count()
+    fit_panel(page, "setupBody")
+    return panel_clip(page)
+
+
+def shot_setup_tuya_local(page, fx):
+    return setup_panel(page, fx, "tuya-local")
+
+
+def shot_setup_localtuya(page, fx):
+    return setup_panel(page, fx, "localtuya")
+
+
+def shot_setup_tinytuya(page, fx):
+    return setup_panel(page, fx, "tinytuya")
+
+
+def shot_local_network(page, fx):
+    # Exercise the scan flow so current-key verification comes from a check,
+    # rather than presenting an older saved result as newly verified.
+    shot_scan(page, fx)
+    open_device_panel(page)
+    page.click("#panelNetworkOpen")
+    page.wait_for_selector("#networkBody [data-network-summary] h3:text-is('Connection checked')")
+    fit_panel(page, "networkBody")
+    return panel_clip(page)
 
 
 def shot_scan(page, fx):
@@ -234,6 +296,10 @@ SHOTS = {
     "changes": shot_changes,
     "scan": shot_scan,
     "details": shot_details,
+    "setup-tuya-local": shot_setup_tuya_local,
+    "setup-localtuya": shot_setup_localtuya,
+    "setup-tinytuya": shot_setup_tinytuya,
+    "local-network": shot_local_network,
     "filter": shot_filter,
 }
 
@@ -244,6 +310,8 @@ def capture(browser, fx, name, scheme):
     try:
         page = context.new_page()
         options = SHOTS[name](page, fx)
+        page.mouse.move(0, 0)
+        page.evaluate("document.activeElement.blur()")
         path = os.path.join(OUT_DIR, f"{name}-{scheme}.png")
         page.screenshot(path=path, **options)
         return path

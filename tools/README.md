@@ -18,7 +18,7 @@ python tools/screenshots.py
 ```
 
 ```bash
-python tools/screenshots.py filter details
+python tools/screenshots.py setup-tuya-local setup-localtuya setup-tinytuya local-network
 ```
 
 | Shot | Files | Where it appears |
@@ -30,7 +30,13 @@ python tools/screenshots.py filter details
 | `changes` | `changes-{light,dark}.png` | [Change Summary](../docs/screenshots.md#change-summary) |
 | `scan` | `scan-{light,dark}.png` | [Network Scan](../docs/screenshots.md#network-scan) |
 | `details` | `details-{light,dark}.png` | [Device Details](../docs/screenshots.md#device-details) |
+| `setup-tuya-local` | `setup-tuya-local-{light,dark}.png` | [tuya-local setup](../docs/screenshots.md#tuya-local) |
+| `setup-localtuya` | `setup-localtuya-{light,dark}.png` | [README setup preview](../README.md#set-up-in) and [localtuya setup](../docs/screenshots.md#localtuya) |
+| `setup-tinytuya` | `setup-tinytuya-{light,dark}.png` | [tinytuya setup](../docs/screenshots.md#tinytuya) |
+| `local-network` | `local-network-{light,dark}.png` | [Local Network](../docs/screenshots.md#local-network) |
 | `filter` | `filter-{light,dark}.png` | [Filtering](../docs/screenshots.md#filtering) |
+
+Setup and Local network previews are cropped to the side panel so their values remain readable. Their height adapts to the content; the Local network preview runs the demo scan before capturing its checked connection.
 
 ## Dependency Updates
 

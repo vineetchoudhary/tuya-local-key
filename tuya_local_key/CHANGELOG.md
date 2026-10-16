@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.3
+- Added **Set up in…** with copyable values for `tuya-local`, `localtuya` and `tinytuya`.
+- Setup now highlights missing values and unsupported protocols, with actions to scan the network, enter an IP manually, or refresh devices.
+- Added a dedicated **Local network** page to review local connection problems and check a device or gateway at a local IP address.
+- Local network results now show when another check is needed after a key change. Gateway connections and sub-device status are shown separately.
+- The side panel's local key show/hide button now shows/hides its own local key independently of the device table.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v3.2...v3.3
+
 ## 3.2
 - Sub-devices now appear under their gateway when Tuya or a network scan identifies the relationship.
 - Sorting keeps gateway groups together. Searching reveals matching sub-devices with their gateway for context.
