@@ -48,6 +48,8 @@ Timestamps in the web UI use your browser's timezone, so the same list reads dif
 
 Choose **Set up in…** at the top of a device's details panel to open a separate setup view for tuya-local, localtuya and tinytuya.
 
+The separate **Local network** view shows connection problems, the last local result, and an IP address you can edit and check. **Connection checked** means the device answered with the current local key; **Gateway checked** applies only to a sub-device's gateway. The gateway's report of the sub-device is shown separately. Protocol 3.1 status replies do not verify the key, so they show **Device found**. Older saved scans and results from before a key change need another check.
+
 ## Bluetooth Devices
 
 Bluetooth-only devices have no local key to display. This is not a bug in this tool. Tuya's device-sharing API does not return a `local_key` for them. The SDK builds each device record straight from Tuya's response, so a field Tuya omits is simply absent. You can confirm this in the Raw JSON section of the details panel, where the `local_key` line is missing entirely rather than empty.

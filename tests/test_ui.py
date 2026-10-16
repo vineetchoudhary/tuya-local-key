@@ -26,6 +26,7 @@ import pytest
 pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 
 from playwright.sync_api import Error as PlaywrightError  # noqa: E402
+from playwright.sync_api import expect  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 from werkzeug.serving import make_server  # noqa: E402
 
@@ -207,9 +208,15 @@ def open_panel(page, name):
     page.wait_for_function("document.getElementById('panel').getBoundingClientRect().right <= innerWidth + 0.5")
 
 
+def open_network(page, name):
+    open_panel(page, name)
+    page.locator("#panelNetworkOpen").click()
+    page.wait_for_selector("#networkBody", state="visible")
+
+
 def field_value(page, key):
     """The panel's rendered value for a device field, addressed by its raw name."""
-    return page.locator(f"#panelBody dt[title='{key}'] + dd").inner_text()
+    return page.locator(f"#panelBody dt[title='{key}'] + dd:visible, #networkBody dt[title='{key}'] + dd:visible").inner_text()
 
 
 def clipboard(page):
@@ -577,9 +584,9 @@ SENSOR = DEVICES[demo_devices.SENSOR]
 BARE = DEVICES[demo_devices.BARE]
 
 
-def _lan(status, ip=None, version=None, device22=False, **extra):
+def _lan(status, ip=None, version=None, device22=False, checked_at=1_752_000_000, **extra):
     return dict(status=status, ip=ip, version=version, device22=device22,
-                checked_at=1_752_000_000, **extra)
+                checked_at=checked_at, **extra)
 
 
 FIRST_SCAN = {
@@ -713,7 +720,7 @@ def test_scanned_waits_for_the_new_results_when_a_summary_already_exists(
     scanned(page)
 
     assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "3.5"
-    open_panel(page, PLUG.name)
+    open_network(page, PLUG.name)
     assert field_value(page, "local_ip") == "192.168.2.62"
 
 
@@ -739,32 +746,32 @@ def test_the_panel_shows_the_local_network_section(page, running_app, monkeypatc
     _scans(running_app, monkeypatch, FIRST_SCAN)
     scanned(page)
 
-    open_panel(page, LAMP.name)
+    open_network(page, LAMP.name)
 
     assert field_value(page, "local_ip") == "192.168.1.42"
     assert "3.3" in field_value(page, "protocol_version")
     assert "3.22" in field_value(page, "protocol_version"), "tuya-local's name for the quirk"
     assert "busy" in field_value(page, "lan_status")
     assert "another local client" in field_value(page, "lan_status")
-    assert page.locator("#panelBody [data-lan-check] input").input_value() == "192.168.1.42"
+    assert page.locator("#networkBody [data-lan-check] input").input_value() == "192.168.1.42"
 
 
 def test_a_sub_device_points_to_its_gateway_instead_of_a_check(page):
-    open_panel(page, SENSOR.name)
+    open_network(page, SENSOR.name)
 
-    body = page.locator("#panelBody").inner_text()
+    body = page.locator("#networkBody").inner_text()
     assert "reached through its gateway" in body
     assert "check it at an IP address below" not in body, "there is no check below to point to"
-    assert page.locator("#panelBody [data-lan-check]").count() == 0
+    assert page.locator("#networkBody [data-lan-check]").count() == 0
 
 
 def test_a_device_without_a_local_key_offers_no_check(page):
-    open_panel(page, BARE.name)   # Tuya returned no local_key for it
+    open_network(page, BARE.name)   # Tuya returned no local_key for it
 
-    body = page.locator("#panelBody").inner_text()
+    body = page.locator("#networkBody").inner_text()
     assert "doesn't return a local key" in body
     assert "check it at an IP address below" not in body
-    assert page.locator("#panelBody [data-lan-check]").count() == 0
+    assert page.locator("#networkBody [data-lan-check]").count() == 0
 
 
 def test_a_sub_device_whose_gateway_wasnt_found_is_greyed_out(page, running_app, monkeypatch):
@@ -774,7 +781,7 @@ def test_a_sub_device_whose_gateway_wasnt_found_is_greyed_out(page, running_app,
     badge = row(page, SENSOR).locator("td:nth-child(2) .badge")
     assert "muted" in badge.get_attribute("class")
     assert "reached through" not in page.locator("#lanSummaryNotice").inner_text()
-    open_panel(page, SENSOR.name)
+    open_network(page, SENSOR.name)
     assert "which the last scan didn't find" in field_value(page, "lan_status")
 
 
@@ -804,17 +811,17 @@ def test_a_sub_device_reads_as_its_gateway_reports_it(page, running_app, monkeyp
     assert page.evaluate(f"isOnline(deviceData.find(d => d.id === {SENSOR.id!r}))") is online
     notice = page.locator("#lanSummaryNotice").inner_text()
     assert ("Its gateway reports it offline." in notice) is not online
-    open_panel(page, SENSOR.name)
+    open_network(page, SENSOR.name)
     assert f"which reports it {state}" in field_value(page, "lan_status")
 
 
 def test_an_ip_being_typed_survives_a_repaint(page):
-    open_panel(page, LAMP.name)
-    page.fill("#panelBody [data-lan-check] input", "192.168.1.5")
+    open_network(page, LAMP.name)
+    page.fill("#networkBody [data-lan-check] input", "192.168.1.5")
 
     page.evaluate("render()")   # what a finished scan or the key toggle does
 
-    assert page.locator("#panelBody [data-lan-check] input").input_value() == "192.168.1.5"
+    assert page.locator("#networkBody [data-lan-check] input").input_value() == "192.168.1.5"
     assert page.evaluate("document.activeElement.name") == "ip", "and it keeps the focus"
 
 
@@ -851,11 +858,11 @@ def test_a_refresh_during_a_scan_keeps_a_closed_scan_box_closed(page, running_ap
 
 def test_one_device_can_be_checked_from_the_panel(page, running_app, monkeypatch):
     calls = _scans(running_app, monkeypatch, {LAMP.id: _lan("ok", "192.168.1.50", "3.5")})
-    open_panel(page, LAMP.name)
+    open_network(page, LAMP.name)
 
-    page.fill("#panelBody [data-lan-check] input", "192.168.1.50")
-    page.click("#panelBody [data-lan-check] button")
-    page.wait_for_selector("#panelBody :text('Found at 192.168.1.50')")
+    page.fill("#networkBody [data-lan-check] input", "192.168.1.50")
+    page.click("#networkBody [data-lan-check] button")
+    page.wait_for_selector("#networkBody :text('Found at 192.168.1.50')")
 
     assert calls[0]["targets"] == ["192.168.1.50"]
     assert calls[0]["only"] == [LAMP.id], "the whole list goes along, but only the lamp is looked for"
@@ -1041,7 +1048,8 @@ def test_collapsing_a_gateway_keeps_counts_and_survives_sort_and_refresh(page, r
     assert row(page, VALVE).is_visible() and row(page, WATER_TIMER).is_visible()
     open_panel(page, VALVE.name)
     assert page.locator("#panelTitle").inner_text() == VALVE.name
-    assert page.locator(f"#panelBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']").is_visible()
+    page.locator("#panelNetworkOpen").click()
+    assert page.locator(f"#networkBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']").is_visible()
 
 
 def test_filter_reveals_matching_children_with_gateway_context_and_exports_only_matches(
@@ -1144,12 +1152,13 @@ def test_a_sub_device_shows_its_gateways_version_only_as_the_gateways(page, runn
     assert names[-1].startswith(VALVE.name), "a sub-device stays under its gateway when sorting by protocol"
 
     open_panel(page, VALVE.name)
-    labels = page.locator("#panelBody dl.fields dt").all_inner_texts()
+    assert field_value(page, "node_id") == VALVE.node_id
+    page.locator("#panelNetworkOpen").click()
+    labels = page.locator("#networkBody dl.fields dt").all_inner_texts()
     assert "Gateway IP" in labels and "Gateway protocol" in labels
     assert "Local IP" not in labels and "Protocol version" not in labels
     assert field_value(page, "local_ip") == "192.168.2.8"
     assert field_value(page, "protocol_version") == "3.4"
-    assert field_value(page, "node_id") == VALVE.node_id
 
     row(page, ZIGBEE_GATEWAY).locator("[data-gateway-toggle]").click()
     assert row(page, VALVE).is_hidden()
@@ -1175,12 +1184,12 @@ def test_a_check_that_moves_a_gateways_key_says_so(page, running_app, monkeypatc
     })
     scanned(page)
 
-    open_panel(page, ZIGBEE_GATEWAY.name)
-    page.fill("#panelBody [data-lan-check] input", "192.168.2.8")
-    page.click("#panelBody [data-lan-check] button")
-    page.wait_for_selector("#panelBody :text('Found at 192.168.2.8')")
+    open_network(page, ZIGBEE_GATEWAY.name)
+    page.fill("#networkBody [data-lan-check] input", "192.168.2.8")
+    page.click("#networkBody [data-lan-check] button")
+    page.wait_for_selector("#networkBody :text('Found at 192.168.2.8')")
 
-    note = page.locator("#panelBody .lan-note").last.inner_text()
+    note = page.locator("#networkBody .lan-note").last.inner_text()
     assert "It answered to the local key Tuya lists on Garden Valve." in note
     assert "Before, it had the one on Water Timer." in note
     assert "Mesh Gateway had that key, so check it again at its own IP." in note
@@ -1192,14 +1201,14 @@ def test_a_keyless_gateway_says_how_to_find_its_key(page, running_app, monkeypat
         BLE_GATEWAY.id: _lan("not_found", "192.168.2.7"),
     })
 
-    open_panel(page, BLE_GATEWAY.name)
-    body = page.locator("#panelBody").inner_text()
+    open_network(page, BLE_GATEWAY.name)
+    body = page.locator("#networkBody").inner_text()
     assert "Tuya lists this gateway's local key on its sub-devices" in body
     assert "Use Scan network, or check it at its IP" in body
-    page.fill("#panelBody [data-lan-check] input", "192.168.2.7")
-    page.click("#panelBody [data-lan-check] button")
+    page.fill("#networkBody [data-lan-check] input", "192.168.2.7")
+    page.click("#networkBody [data-lan-check] button")
 
-    page.wait_for_selector("#panelBody :text('none of the keys Tuya lists on sub-devices answered there')")
+    page.wait_for_selector("#networkBody :text('none of the keys Tuya lists on sub-devices answered there')")
 
 
 def test_a_sub_device_links_to_the_gateway_the_scan_found_it_through(page, running_app, monkeypatch):
@@ -1210,11 +1219,13 @@ def test_a_sub_device_links_to_the_gateway_the_scan_found_it_through(page, runni
     })
     scanned(page)
 
-    open_panel(page, VALVE.name)
-    assert "reached through its gateway: Zigbee Gateway" in page.locator("#panelBody").inner_text()
-    page.click(f"#panelBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']")
+    open_network(page, VALVE.name)
+    gateway_link = page.locator(f"#networkBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']")
+    assert gateway_link.inner_text() == ZIGBEE_GATEWAY.name
+    page.click(f"#networkBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']")
 
-    page.wait_for_function(f"document.querySelector('#panelTitle').innerText === {ZIGBEE_GATEWAY.name!r}")
+    expected_title = f"Local network for “{ZIGBEE_GATEWAY.name}”"
+    page.wait_for_function("expected => document.querySelector('#panelTitle').innerText === expected", arg=expected_title)
 
 
 def test_one_click_checks_a_gateway_and_the_one_left_is_checked_too(page, running_app, monkeypatch):
@@ -1242,19 +1253,19 @@ def test_one_click_checks_a_gateway_and_the_one_left_is_checked_too(page, runnin
     assert f"2 gateways answered to local keys Tuya lists on sub-devices: {found}." in notice
     for gateway in (ZIGBEE_GATEWAY, BLE_GATEWAY):
         assert row(page, gateway).locator("td:nth-child(2)").inner_text().split() == ["LAN", "check", "needed"]
-    open_panel(page, VALVE.name)
-    assert "which answered at 192.168.2.8 to this device's key" in page.locator("#panelBody").inner_text()
-    open_panel(page, BLE_GATEWAY.name)
-    body = page.locator("#panelBody").inner_text()
+    open_network(page, VALVE.name)
+    assert "which answered at 192.168.2.8 to this device's key" in page.locator("#networkBody").inner_text()
+    open_network(page, BLE_GATEWAY.name)
+    body = page.locator("#networkBody").inner_text()
     assert "Tuya lists this gateway's local key on its sub-devices" in body
     assert "When that leaves one gateway, it's checked too." in body
 
-    page.click("#panelBody [data-check-ip='192.168.2.9']")
-    page.wait_for_selector("#panelBody :text('Found at 192.168.2.9')")
+    page.click("#networkBody [data-check-ip='192.168.2.9']")
+    page.wait_for_selector("#networkBody :text('Found at 192.168.2.9')")
 
     assert (calls[1]["targets"], calls[1]["only"]) == (["192.168.2.9"], [BLE_GATEWAY.id])
     assert (calls[2]["targets"], calls[2]["only"]) == (["192.168.2.8"], [ZIGBEE_GATEWAY.id])
-    message = page.locator("#panelBody .lan-note").last.inner_text()
+    message = page.locator("#networkBody .lan-note").last.inner_text()
     assert "It answered to the local key Tuya lists on Water Timer." in message
     assert "That left one gateway, so Zigbee Gateway was checked too: found at 192.168.2.8." in message
     page.click("#thead [data-key-toggle]")
@@ -1721,8 +1732,11 @@ def test_setup_gateway_children_use_the_full_list_and_open_their_panels(page, ru
     assert page.locator("#panelSub").is_hidden()
     assert setup_value(page, "device_cid") == VALVE.node_id
     page.locator("#panelBack").click()
-    assert page.locator("#panelTitle").inner_text() == VALVE.name
-    assert field_value(page, "id") == VALVE.id
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{ZIGBEE_GATEWAY.name}” in…"
+    expect(page.locator(f".setup-children [data-open-device='{VALVE.id}']")).to_be_focused()
+    page.locator("#panelBack").click()
+    assert page.locator("#panelTitle").inner_text() == ZIGBEE_GATEWAY.name
+    assert field_value(page, "id") == ZIGBEE_GATEWAY.id
     assert page.locator("#setupBody").is_hidden()
     page.fill("#filter", "")
     page.locator("#panelSetupOpen").click()
@@ -1749,7 +1763,7 @@ def test_setup_uuid_fallback_is_only_used_for_tuya_local(page, running_app, monk
     assert setup_field(page, "node_id").locator("button.setup-copy").is_disabled()
     setup_tool(page, "tinytuya")
     assert page.locator("[data-setup-copy-snippet]").is_disabled()
-    assert "sub-device node ID" in page.locator(".setup-snippet").inner_text()
+    assert "sub-device node ID" in setup_notice(page).inner_text()
     assert sub.uuid not in page.locator(".setup-card").inner_text()
 
 
@@ -1765,7 +1779,7 @@ def test_setup_unknown_gateway_is_not_guessed_from_a_shared_key(page, running_ap
     assert setup_value(page, "device_id") == "Not available"
     setup_tool(page, "tinytuya")
     assert page.locator("[data-setup-copy-snippet]").is_disabled()
-    assert "gateway ID" in page.locator(".setup-snippet").inner_text()
+    assert "gateway ID" in setup_notice(page).inner_text()
 
 
 def test_setup_explicit_gateway_wins_and_conflicting_scan_values_are_not_borrowed(
@@ -1830,7 +1844,8 @@ def test_setup_original_localtuya_explains_its_missing_sub_device_support(page, 
     open_setup(page, VALVE.name)
     setup_tool(page, "localtuya")
     page.select_option("[data-localtuya-edition]", "original")
-    assert "Sub-devices require xZetsubou." in page.locator(".setup-card").inner_text()
+    assert "Sub-devices require" in setup_notice(page).inner_text()
+    assert "xZetsubou" in setup_notice(page).inner_text()
     assert page.locator(".setup-card [data-setup-field]").count() == 0
 
 
@@ -1875,7 +1890,6 @@ def test_setup_controls_keep_their_state_and_support_keyboard_tabs(page, running
     _scans(running_app, monkeypatch, FIRST_SCAN)
     scanned(page)
     open_panel(page, PLUG.name)
-    page.fill("#panelBody [data-lan-check] input", "192.168.2.200")
     page.locator("#panelBody details.data-points summary").click()
     page.locator("#panelBody details.raw summary").click()
     scroll = page.locator("#panelBody").evaluate("el => { el.scrollTop = 350; return el.scrollTop; }")
@@ -1888,7 +1902,6 @@ def test_setup_controls_keep_their_state_and_support_keyboard_tabs(page, running
     assert page.locator("[data-setup-tool='localtuya']").get_attribute("aria-selected") == "true"
     assert page.locator("[data-setup-advanced]").evaluate("el => el.open")
     page.locator("#panelBack").click()
-    assert page.locator("#panelBody [data-lan-check] input").input_value() == "192.168.2.200"
     assert page.locator("#panelBody details.data-points").evaluate("el => el.open")
     assert page.locator("#panelBody details.raw").evaluate("el => el.open")
     assert page.locator("#panelBody").evaluate("el => el.scrollTop") == scroll
@@ -1943,3 +1956,636 @@ def test_setup_card_layouts(page, running_app, monkeypatch, width, scheme, tool)
     assert footnote.is_visible()
     assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
     assert footnote.locator("a").get_attribute("href") == f"https://github.com/{repos[tool]}"
+
+
+# --------------------------------------------------------------------------- #
+# Setup guidance stays inline; local network diagnostics have their own view.
+# --------------------------------------------------------------------------- #
+def setup_notice(page):
+    return page.locator("#setupBody [data-setup-readiness]")
+
+
+def setup_action(page, action):
+    return page.locator(f"#setupBody [data-setup-action='{action}']")
+
+
+def network_summary(page):
+    return page.locator("#networkBody [data-network-summary] h3, #networkBody h3[data-network-summary]").inner_text()
+
+
+def network_child_report(page):
+    return page.locator("#networkBody [data-network-check='sub_device']")
+
+
+def test_setup_missing_details_are_inline_and_link_to_the_network_view(page):
+    open_setup(page, PLUG.name)
+    notice = setup_notice(page)
+    assert notice.is_visible()
+    assert "ip" in notice.inner_text().lower()
+    assert PLUG.ip not in notice.inner_text()
+    assert PLUG.id not in notice.inner_text() and PLUG.local_key not in notice.inner_text()
+    assert "protocol" not in notice.inner_text().lower(), "auto-detection needs no warning"
+    assert page.locator("#panelReadinessOpen, #readinessBody").count() == 0
+
+    setup_action(page, "network").click()
+
+    assert page.locator("#networkBody").is_visible()
+    assert page.locator("#setupBody").is_hidden()
+    assert page.locator("#panelTitle").inner_text() == f"Local network for “{PLUG.name}”"
+    assert page.locator("#networkBody [data-lan-check] input").is_editable()
+    assert page.locator("#networkBody [data-setup-tool], #networkBody [role='tablist']").count() == 0
+
+
+def test_setup_warning_protocol_rules_follow_the_selected_tool_and_edition(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, {PLUG.id: _lan("busy", "192.168.2.61")})
+    scanned(page)
+    open_setup(page, PLUG.name)
+    assert "protocol" not in setup_notice(page).inner_text().lower()
+    setup_tool(page, "localtuya")
+    assert "protocol" not in setup_notice(page).inner_text().lower()
+    page.select_option("#setupBody [data-localtuya-edition]", "original")
+    assert "protocol" in setup_notice(page).inner_text().lower()
+    assert setup_action(page, "network").is_visible()
+    setup_tool(page, "tinytuya")
+    assert "protocol" in setup_notice(page).inner_text().lower()
+
+
+def test_setup_complete_checked_details_have_no_readiness_warning(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", "3.4")})
+    scanned(page)
+    open_setup(page, PLUG.name)
+    assert not setup_notice(page).is_visible()
+    assert page.locator("#setupBody [data-readiness-check]").count() == 0
+
+
+def test_setup_child_uuid_only_satisfies_tuya_local_and_the_edition_action_is_useful(
+        page, running_app, monkeypatch):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    del sub.node_id
+    sub.uuid = "network-sub-device-uuid"
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=sub.id),
+        sub.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+    open_setup(page, sub.name)
+    assert not setup_notice(page).is_visible()
+    setup_tool(page, "tinytuya")
+    assert "node" in setup_notice(page).inner_text().lower()
+    setup_tool(page, "localtuya")
+    assert "node" in setup_notice(page).inner_text().lower()
+    page.select_option("#setupBody [data-localtuya-edition]", "original")
+
+    setup_action(page, "edition").click()
+
+    assert page.locator("#setupBody [data-localtuya-edition]").input_value() == "xzetsubou"
+    assert "node" in setup_notice(page).inner_text().lower()
+
+
+def test_setup_does_not_guess_a_gateway_and_localtuya_can_use_the_child_id(page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, VALVE, WATER_TIMER)
+    _scans(running_app, monkeypatch, {
+        VALVE.id: _lan("via_gateway", "192.168.2.8", "3.4"),
+        WATER_TIMER.id: _lan("via_gateway", "192.168.2.9", "3.4"),
+    })
+    scanned(page)
+    open_setup(page, VALVE.name)
+    assert "gateway" in setup_notice(page).inner_text().lower()
+    setup_tool(page, "localtuya")
+    assert setup_value(page, "device_id") == VALVE.id
+    notice = setup_notice(page).inner_text().lower() if setup_notice(page).is_visible() else ""
+    assert "gateway id" not in notice, "this edition uses the child ID"
+    setup_tool(page, "tinytuya")
+    assert "gateway" in setup_notice(page).inner_text().lower()
+
+
+def test_setup_missing_local_key_offers_a_real_device_refresh(page, running_app, monkeypatch):
+    device = copy.deepcopy(BARE)
+    _serves(running_app, monkeypatch, [device])
+    refreshed(page, "#changesNotice")
+    open_setup(page, device.name)
+    assert "key" in setup_notice(page).inner_text().lower()
+    device.local_key = "NETWORK-NEW-KEY"
+    _serves(running_app, monkeypatch, [device])
+
+    with page.expect_response(lambda r: r.url.endswith("/api/devices?refresh=1")) as fetched:
+        setup_action(page, "refresh").click()
+    fetched.value.finished()
+    page.wait_for_function("""() => document.querySelector(
+        '#setupBody [data-setup-field="local_key"] button.setup-copy').dataset.copy === 'NETWORK-NEW-KEY'
+    """)
+    assert "local key" not in setup_notice(page).inner_text().lower()
+    assert setup_field(page, "local_key").locator("button.setup-copy").get_attribute("data-copy") == device.local_key
+
+
+@pytest.mark.parametrize("version, summary", [
+    ("3.4", "Connection checked"), ("3.1", "Device found"),
+])
+def test_network_only_encrypted_current_key_results_count_as_checked(page, running_app, monkeypatch,
+                                                                   version, summary):
+    _scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", version)})
+    scanned(page)
+    open_network(page, PLUG.name)
+    assert network_summary(page) == summary
+    if version == "3.1":
+        assert "do not verify the local key" in page.locator("#networkBody [data-network-summary]").inner_text()
+    assert PLUG.local_key not in page.locator("#networkBody").inner_text()
+
+
+def test_network_copies_its_ip_and_protocol_without_claiming_a_31_key_check(page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, VALVE)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("busy", "192.168.2.8", "3.1"),
+    }, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.1", key_from=VALVE.id),
+    })
+    scanned(page)
+    open_network(page, ZIGBEE_GATEWAY.name)
+
+    page.locator("#networkBody [data-lan-check] button").click()
+    page.wait_for_selector("#networkBody .lan-note:text('Found at 192.168.2.8')")
+
+    assert network_summary(page) == "Device found"
+    body = page.locator("#networkBody").inner_text()
+    assert "do not verify the local key" in body
+    assert "Answered on port 6668 to its local key" not in body
+    assert "It answered to the local key Tuya lists on" not in body
+    for key, expected in (("local_ip", "192.168.2.8"), ("protocol_version", "3.1")):
+        button = page.locator(f"#networkBody dt[title='{key}'] + dd [data-copy]")
+        button.click()
+        expect(button).to_have_text("copied!")
+        assert clipboard(page) == expected
+
+
+def test_network_does_not_offer_other_gateways_when_the_named_gateway_is_not_listed(
+        page, running_app, monkeypatch):
+    sub = copy.deepcopy(VALVE)
+    sub.gateway_id = "gateway-not-in-the-device-list"
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, sub)
+    open_network(page, sub.name)
+
+    assert network_summary(page) == "Gateway not listed"
+    assert page.locator("#networkBody [data-lan-check], #networkBody .network-gateways").count() == 0
+    assert page.locator("#networkBody [data-network-action='refresh']").is_visible()
+
+
+@pytest.mark.parametrize("failure", [None, "503", "aborted"])
+def test_network_key_rotation_loses_proof_and_keeps_the_saved_address(page, running_app, monkeypatch, failure):
+    _scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", "3.4")})
+    scanned(page)
+    open_network(page, PLUG.name)
+    assert network_summary(page) == "Connection checked"
+    _serves(running_app, monkeypatch, _with_rotated_key("ROTATED-NETWORK-KEY"))
+
+    def fail_lan_reload(route):
+        if failure == "503":
+            route.fulfill(status=503, content_type="application/json", body="{}")
+        else:
+            route.abort()
+
+    if failure:
+        page.route("**/api/lan", fail_lan_reload)
+    refreshed(page, "#changesNotice")
+
+    assert page.locator("#networkBody").is_visible()
+    assert network_summary(page) == "Check again"
+    assert field_value(page, "local_ip") == "192.168.2.61"
+    assert field_value(page, "protocol_version") == "3.4"
+    assert "ROTATED-NETWORK-KEY" not in page.locator("#networkBody").inner_text()
+
+
+def test_network_offline_child_is_separate_from_its_checked_gateway(page, running_app, monkeypatch):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=sub.id),
+        sub.id: _lan("via_gateway", "192.168.2.8", "3.4",
+                     gateway_id=ZIGBEE_GATEWAY.id, sub_online=False),
+    })
+    scanned(page)
+    open_network(page, sub.name)
+    assert network_summary(page) == "Gateway checked"
+    assert network_child_report(page).get_attribute("data-state") == "attention"
+    assert "offline" in network_child_report(page).inner_text().lower()
+
+
+@pytest.mark.parametrize("changed_field", ["gateway_id", "node_id"])
+def test_network_discards_an_offline_child_report_when_its_relationship_changes(page, running_app, monkeypatch,
+                                                                              changed_field):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, sub)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=sub.id),
+        sub.id: _lan("via_gateway", "192.168.2.8", "3.4",
+                     gateway_id=ZIGBEE_GATEWAY.id, sub_online=False),
+    })
+    scanned(page)
+    open_network(page, sub.name)
+    assert network_child_report(page).get_attribute("data-state") == "attention"
+    changed = copy.deepcopy(sub)
+    setattr(changed, changed_field, BLE_GATEWAY.id if changed_field == "gateway_id" else "new-node-id")
+    _serves(running_app, monkeypatch, list(DEVICES) + [ZIGBEE_GATEWAY, BLE_GATEWAY, changed])
+
+    refreshed(page, "#networkBody")
+
+    assert network_child_report(page).get_attribute("data-state") == "pending"
+    assert "offline" not in network_child_report(page).inner_text().lower()
+    assert network_summary(page) != "Gateway checked"
+
+
+def test_network_a_new_successful_scan_supersedes_a_failed_manual_check(page, running_app, monkeypatch):
+    later_success = {}
+    _scans(running_app, monkeypatch, {
+        PLUG.id: _lan("key_mismatch", "192.168.2.61", "3.4", checked_at=page.evaluate("Date.now() / 1000")),
+    }, later_success)
+    open_network(page, PLUG.name)
+    page.fill("#networkBody [data-lan-check] input", "192.168.2.61")
+    page.click("#networkBody [data-lan-check] button")
+    page.wait_for_function("panelCheck && panelCheck.kind === 'error' && !lanPollTimer")
+    assert page.locator("#networkBody .lan-note.scan-error").is_visible()
+    later_success[PLUG.id] = _lan("ok", "192.168.2.61", "3.4", checked_at=page.evaluate("Date.now() / 1000"))
+
+    scanned(page)
+
+    assert network_summary(page) == "Connection checked"
+
+
+@pytest.mark.parametrize("child", [False, True])
+def test_network_form_checks_the_device_or_gateway_and_keeps_the_view_open(page, running_app, monkeypatch, child):
+    device = PLUG
+    gateway = copy.deepcopy(ZIGBEE_GATEWAY)
+    gateway.local_key = VALVE.local_key
+    if child:
+        device = _named_sub(VALVE, gateway)
+        _with_gateways(page, running_app, monkeypatch, gateway, device)
+    target = gateway if child else PLUG
+    calls = _scans(running_app, monkeypatch, {
+        target.id: _lan("busy", "192.168.2.61", "3.4"),
+    }, {
+        target.id: _lan("ok", "192.168.2.61", "3.4"),
+    })
+    scanned(page)
+    open_network(page, device.name)
+    form = page.locator("#networkBody [data-lan-check]")
+    assert form.get_attribute("data-lan-check") == target.id
+    assert form.locator("input").input_value() == "192.168.2.61"
+
+    form.locator("button").click()
+
+    assert page.locator("#networkBody").is_visible()
+    assert page.locator("#panelBody").is_hidden()
+    assert page.locator("#panelTitle").inner_text() == f"Local network for “{device.name}”"
+    expected = "Gateway checked" if child else "Connection checked"
+    page.wait_for_function("""expected => {
+        const summary = document.querySelector('#networkBody [data-network-summary]');
+        return (summary.matches('h3') ? summary : summary.querySelector('h3')).innerText === expected;
+    }""", arg=expected)
+    assert calls[1]["targets"] == ["192.168.2.61"]
+    assert calls[1]["only"] == [target.id]
+
+
+def test_network_check_preserves_a_control_focused_during_a_slow_post(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, {
+        PLUG.id: _lan("busy", "192.168.2.61", "3.4"),
+    }, {
+        PLUG.id: _lan("ok", "192.168.2.61", "3.4"),
+    })
+    scanned(page)
+    open_network(page, PLUG.name)
+    held_posts = []
+
+    def delay_post(route):
+        if route.request.method == "POST":
+            held_posts.append(route)
+        else:
+            route.continue_()
+
+    page.route("**/api/lan/scan", delay_post)
+    page.locator("#networkBody [data-lan-check] button").click()
+    chosen_control = page.locator("#panelClose")
+    chosen_control.focus()
+    expect(chosen_control).to_be_focused()
+    assert len(held_posts) == 1
+
+    with page.expect_response(lambda r: r.url.endswith("/api/lan/scan") and
+                              r.request.method == "POST") as started:
+        held_posts[0].continue_()
+    assert started.value.status == 202
+    expect(chosen_control).to_be_focused()
+    page.wait_for_function("""() => {
+        const summary = document.querySelector('#networkBody [data-network-summary]');
+        return (summary.matches('h3') ? summary : summary.querySelector('h3')).innerText === 'Connection checked';
+    }""")
+    expect(chosen_control).to_be_focused()
+
+
+def test_network_draft_ip_and_focus_survive_repaint_and_back_navigation(page):
+    open_network(page, LAMP.name)
+    ip_input = page.locator("#networkBody [data-lan-check] input")
+    ip_input.fill("192.168.2.200")
+    page.evaluate("render()")
+    assert ip_input.input_value() == "192.168.2.200"
+    expect(ip_input).to_be_focused()
+    page.locator("#panelBack").click()
+    expect(page.locator("#panelNetworkOpen")).to_be_focused()
+    page.locator("#panelNetworkOpen").click()
+    assert ip_input.input_value() == "192.168.2.200"
+    expect(ip_input).to_be_focused()
+
+
+def test_network_pristine_discovered_ip_keeps_its_selection_on_repaint_and_accepts_new_results(
+        page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, {
+        PLUG.id: _lan("ok", "192.168.2.61", "3.4"),
+    }, {
+        PLUG.id: _lan("ok", "192.168.2.62", "3.5"),
+    })
+    scanned(page)
+    open_network(page, PLUG.name)
+    ip_input = page.locator("#networkBody [data-lan-check] input")
+    assert ip_input.evaluate("el => el.value === el.defaultValue")
+    ip_input.evaluate("el => { el.focus(); el.setSelectionRange(2, 9); }")
+
+    page.evaluate("render()")
+
+    expect(ip_input).to_be_focused()
+    assert ip_input.evaluate("el => [el.selectionStart, el.selectionEnd]") == [2, 9]
+    scanned(page)
+    assert ip_input.input_value() == "192.168.2.62"
+    assert ip_input.evaluate("el => el.defaultValue") == "192.168.2.62"
+    assert field_value(page, "protocol_version") == "3.5"
+
+
+def test_network_scan_action_opens_the_actual_network_scan_form(page):
+    open_network(page, PLUG.name)
+    page.locator("#networkBody [data-network-action='scan']").click()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+    assert page.locator("#scanBox").is_visible()
+    expect(page.locator("#scanTargets")).to_be_focused()
+
+
+def test_setup_network_history_returns_to_setup_then_details_with_their_state(page):
+    page.set_viewport_size({"width": 390, "height": 640})
+    open_panel(page, PLUG.name)
+    page.locator("#panelBody details.data-points summary").click()
+    page.locator("#panelBody details.raw summary").click()
+    details_scroll = page.locator("#panelBody").evaluate("el => { el.scrollTop = 350; return el.scrollTop; }")
+    assert details_scroll > 0
+    page.locator("#panelSetupOpen").click()
+    setup_tool(page, "localtuya")
+    page.select_option("#setupBody [data-localtuya-edition]", "original")
+    page.locator("#setupBody [data-setup-advanced] summary").click()
+    manual_ip = setup_action(page, "network")
+    assert manual_ip.inner_text() == "Enter IP manually"
+
+    manual_ip.click()
+    assert page.locator("#panelBack").inner_text() == "Back to set up in…"
+    page.fill("#networkBody [data-lan-check] input", "192.168.2.245")
+    page.locator("#panelBack").click()
+
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{PLUG.name}” in…"
+    assert page.locator("#setupBody [data-setup-tool='localtuya']").get_attribute("aria-selected") == "true"
+    assert page.locator("#setupBody [data-localtuya-edition]").input_value() == "original"
+    assert page.locator("#setupBody [data-setup-advanced]").evaluate("el => el.open")
+    expect(manual_ip).to_be_focused()
+    assert page.locator("#panelBack").inner_text() == "Back to device details"
+    page.keyboard.press("Escape")
+
+    assert page.locator("#panelTitle").inner_text() == PLUG.name
+    assert page.locator("#panelBody details.data-points").evaluate("el => el.open")
+    assert page.locator("#panelBody details.raw").evaluate("el => el.open")
+    assert page.locator("#panelBody").evaluate("el => el.scrollTop") == pytest.approx(details_scroll, abs=1)
+    expect(page.locator("#panelSetupOpen")).to_be_focused()
+    assert page.locator("#panelBack").is_hidden()
+    page.keyboard.press("Escape")
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+
+
+def test_setup_device_link_history_restores_previous_device_options_scroll_and_focus(page, running_app, monkeypatch):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    page.set_viewport_size({"width": 390, "height": 640})
+    open_setup(page, ZIGBEE_GATEWAY.name)
+    setup_tool(page, "localtuya")
+    page.select_option("#setupBody [data-localtuya-edition]", "original")
+    page.locator("#setupBody [data-setup-advanced] summary").click()
+    child_link = page.locator(f"#setupBody .setup-children [data-open-device='{sub.id}']")
+    child_link.focus()
+    setup_scroll = page.locator("#setupBody").evaluate("el => el.scrollTop")
+    assert setup_scroll > 0
+
+    child_link.press("Enter")
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{sub.name}” in…"
+    setup_tool(page, "tinytuya")
+    page.locator("#panelBack").click()
+
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{ZIGBEE_GATEWAY.name}” in…"
+    assert page.locator("#setupBody [data-setup-tool='localtuya']").get_attribute("aria-selected") == "true"
+    assert page.locator("#setupBody [data-localtuya-edition]").input_value() == "original"
+    assert page.locator("#setupBody [data-setup-advanced]").evaluate("el => el.open")
+    assert page.locator("#setupBody").evaluate("el => el.scrollTop") == pytest.approx(setup_scroll, abs=1)
+    expect(child_link).to_be_focused()
+    page.keyboard.press("Escape")
+    assert page.locator("#panelTitle").inner_text() == ZIGBEE_GATEWAY.name
+    expect(page.locator("#panelSetupOpen")).to_be_focused()
+
+
+def test_network_gateway_link_history_restores_the_child_draft_and_initiating_link(page, running_app, monkeypatch):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    open_network(page, sub.name)
+    ip_input = page.locator("#networkBody [data-lan-check] input")
+    ip_input.fill("192.168.2.245")
+    gateway_link = page.locator(f"#networkBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']")
+
+    gateway_link.click()
+    assert page.locator("#panelTitle").inner_text() == f"Local network for “{ZIGBEE_GATEWAY.name}”"
+    assert page.locator("#panelBack").inner_text() == "Back to local network"
+    ip_input.fill("192.168.2.246")
+    page.keyboard.press("Escape")
+
+    assert page.locator("#panelTitle").inner_text() == f"Local network for “{sub.name}”"
+    assert ip_input.input_value() == "192.168.2.245"
+    expect(gateway_link).to_be_focused()
+    page.locator("#panelBack").click()
+    assert page.locator("#panelTitle").inner_text() == sub.name
+    expect(page.locator("#panelNetworkOpen")).to_be_focused()
+
+
+def test_network_close_and_table_reopen_start_a_fresh_navigation_history(page):
+    open_setup(page, PLUG.name)
+    setup_action(page, "network").click()
+    page.fill("#networkBody [data-lan-check] input", "192.168.2.245")
+    page.locator("#panelClose").click()
+    open_panel(page, LAMP.name)
+
+    assert page.locator("#panelTitle").inner_text() == LAMP.name
+    assert page.locator("#panelBack").is_hidden()
+    page.locator("#panelNetworkOpen").click()
+    assert page.locator("#panelBack").inner_text() == "Back to device details"
+    page.keyboard.press("Escape")
+    assert page.locator("#panelTitle").inner_text() == LAMP.name
+    assert page.locator("#panelBack").is_hidden()
+    page.keyboard.press("Escape")
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+
+
+def test_setup_history_skips_a_previous_device_removed_by_refresh(page, running_app, monkeypatch):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    open_setup(page, ZIGBEE_GATEWAY.name)
+    page.locator(f"#setupBody .setup-children [data-open-device='{sub.id}']").click()
+    setup_action(page, "network").click()
+    _serves(running_app, monkeypatch, list(DEVICES) + [sub])
+
+    refreshed(page, "#changesNotice")
+    page.locator("#panelBack").click()
+
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{sub.name}” in…"
+    assert page.locator("#setupBody").is_visible()
+    page.locator("#panelBack").click()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+
+
+def test_setup_history_returns_to_previous_view_when_the_current_device_is_removed(
+        page, running_app, monkeypatch):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    row(page, ZIGBEE_GATEWAY).locator("[data-open]").click()
+    page.locator("#panelSetupOpen").click()
+    page.locator(f"#setupBody .setup-children [data-open-device='{sub.id}']").click()
+    _serves(running_app, monkeypatch, list(DEVICES) + [ZIGBEE_GATEWAY])
+
+    refreshed(page, "#changesNotice")
+
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{ZIGBEE_GATEWAY.name}” in…"
+    assert page.locator("#setupBody").is_visible()
+    assert page.locator("#setupBody .setup-children li").count() == 0
+    expect(page.locator("#setupBody [data-setup-tool='tuya-local']")).to_be_focused()
+    page.locator("#panelBack").click()
+    assert page.locator("#panelTitle").inner_text() == ZIGBEE_GATEWAY.name
+    expect(page.locator("#panelSetupOpen")).to_be_focused()
+    page.locator("#panelClose").click()
+    expect(row(page, ZIGBEE_GATEWAY).locator("[data-open]")).to_be_focused()
+
+
+def test_setup_history_supports_a_registered_extra_page_without_another_back_handler(page):
+    page.set_viewport_size({"width": 390, "height": 640})
+    open_setup(page, PLUG.name)
+    setup_tool(page, "tinytuya")
+    page.evaluate("""() => {
+        const body = document.createElement('div');
+        body.id = 'panelExtraTestBody';
+        body.className = 'panel-body hidden';
+        body.tabIndex = -1;
+        document.getElementById('panel').append(body);
+        PANEL_PAGES.extra_test = {
+            body: body.id,
+            backLabel: 'Back to additional setup',
+            title: d => `Additional setup for “${d.name}”`,
+            render: () => '<details><summary>Additional options</summary>' +
+                '<div style="height:900px">Extra preferences</div></details>' +
+                '<button type="button" data-setup-action="network">Local network</button>',
+            focus: 'summary',
+        };
+        const opener = document.querySelector('#setupBody [data-setup-action="network"]');
+        opener.addEventListener('click', event => {
+            event.stopPropagation();
+            navigatePanel(selectedId, 'extra_test', opener);
+        }, { once: true });
+    }""")
+
+    setup_action(page, "network").click()
+    extra_body = page.locator("#panelExtraTestBody")
+    assert extra_body.is_visible()
+    extra_body.locator("details summary").click()
+    next_page = extra_body.locator("[data-setup-action='network']")
+    next_page.focus()
+    extra_scroll = extra_body.evaluate("el => el.scrollTop")
+    assert extra_scroll > 0
+    next_page.press("Enter")
+
+    assert page.locator("#networkBody").is_visible()
+    assert page.locator("#panelBack").inner_text() == "Back to additional setup"
+    page.locator("#panelBack").click()
+
+    assert page.locator("#panelTitle").inner_text() == f"Additional setup for “{PLUG.name}”"
+    assert extra_body.locator("details").evaluate("el => el.open")
+    assert extra_body.evaluate("el => el.scrollTop") == pytest.approx(extra_scroll, abs=1)
+    expect(next_page).to_be_focused()
+    page.keyboard.press("Escape")
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{PLUG.name}” in…"
+    assert page.locator("#setupBody [data-setup-tool='tinytuya']").get_attribute("aria-selected") == "true"
+    expect(setup_action(page, "network")).to_be_focused()
+
+
+@pytest.mark.parametrize("width, scheme", [
+    (1440, "light"), (1440, "dark"), (390, "light"), (390, "dark"),
+    (320, "light"), (320, "dark"),
+])
+def test_network_navigation_and_layout_at_each_screen_size(page, running_app, monkeypatch, width, scheme):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    sub.name = "Garden irrigation valve beside the greenhouse and vegetable beds"
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.emulate_media(color_scheme=scheme)
+    open_panel(page, sub.name)
+    close_box = page.locator("#panelClose").bounding_box()
+    assert page.locator("#panelBody [data-lan-check], #panelBody dt[title='local_ip']").count() == 0
+    page.locator("#panelNetworkOpen").press("Enter")
+
+    title = page.locator("#panelTitle")
+    assert title.inner_text() == f"Local network for “{sub.name}”"
+    assert title.get_attribute("title") == title.text_content()
+    assert title.evaluate("el => el.clientHeight <= 2 * parseFloat(getComputedStyle(el).lineHeight) + 1")
+    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
+    assert page.locator("#panelBody").is_hidden() and page.locator("#setupBody").is_hidden()
+    assert page.locator("#networkBody [role='tablist'], #networkBody [data-setup-tool]").count() == 0
+    assert page.locator("#networkBody").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert sub.local_key not in page.locator("#networkBody").inner_text()
+    page.keyboard.press("Escape")
+
+    assert page.locator("#panelTitle").inner_text() == sub.name
+    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
+    expect(page.locator("#panelNetworkOpen")).to_be_focused()
+    page.locator("#panelNetworkOpen").click()
+    page.locator("#panelBack").click()
+    expect(page.locator("#panelNetworkOpen")).to_be_focused()
+    page.locator("#panelNetworkOpen").click()
+    page.locator("#panelClose").click()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+    open_network(page, sub.name)
+
+
+def test_network_short_mobile_viewport_keeps_header_fixed_and_actions_reachable(page, running_app, monkeypatch):
+    sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    sub.name = "Garden irrigation valve beside the greenhouse and vegetable beds"
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=sub.id),
+        sub.id: _lan("via_gateway", "192.168.2.8", "3.4",
+                     gateway_id=ZIGBEE_GATEWAY.id, sub_online=False),
+    })
+    scanned(page)
+    page.set_viewport_size({"width": 320, "height": 640})
+    page.emulate_media(color_scheme="dark")
+    open_network(page, sub.name)
+    body = page.locator("#networkBody")
+    close_box = page.locator("#panelClose").bounding_box()
+    title_box = page.locator("#panelTitle").bounding_box()
+    scan_action = page.locator("#networkBody [data-network-action='scan']")
+    assert body.evaluate("el => el.scrollHeight > el.clientHeight"), "long network results scroll in a short viewport"
+
+    scan_action.scroll_into_view_if_needed()
+    scan_action.focus()
+
+    expect(scan_action).to_be_focused()
+    assert body.evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator("#panel").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
+    assert page.locator("#panelTitle").bounding_box() == pytest.approx(title_box, abs=0.5)
+    box = scan_action.bounding_box()
+    assert box["y"] >= title_box["y"] + title_box["height"]
+    assert box["y"] + box["height"] <= 640
+    assert box["x"] >= 0 and box["x"] + box["width"] <= 320

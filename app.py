@@ -425,6 +425,65 @@ def _key_digest(local_key):
     return hashlib.sha256(str(local_key or "").encode("utf-8")).hexdigest()
 
 
+def _device_link(device):
+    """The cloud relationship used when checking a sub-device or lending a key."""
+    return {field: device.get(field) for field in ("gateway_id", "node_id", "sub", "category")}
+
+
+def _lan_key_evidence(job, dev_id, result, results, current):
+    """Private evidence tying a successful result to its scan's keys and links.
+
+    A child's result proves only its gateway connection. It inherits the
+    gateway's key dependencies, including the sub-device lending a key to a
+    keyless gateway. Protocol 3.1 still only identifies a plaintext reply;
+    unchanged key evidence must never be presented as key authentication there.
+    """
+    if result.get("status") not in (lan_scan.OK, lan_scan.VIA_GATEWAY) or not result.get("ip"):
+        return None
+    dependencies = {dev_id}
+    connection = result
+    connection_id = dev_id
+    if result.get("status") == lan_scan.VIA_GATEWAY:
+        gateway_id = result.get("gateway_id")
+        if gateway_id in current:
+            connection = results.get(gateway_id) or {}
+            if (connection.get("status") != lan_scan.OK
+                    or connection.get("ip") != result.get("ip")
+                    or connection.get("version") != result.get("version")):
+                return None
+            dependencies.add(gateway_id)
+            connection_id = gateway_id
+    if connection.get("key_from"):
+        dependencies.add(connection["key_from"])
+    key_id = connection.get("key_from") or connection_id
+    if not (current.get(key_id) or {}).get("local_key"):
+        return None
+    keys, links = job["key_digests"], job["device_links"]
+    if any(dep not in keys or dep not in links for dep in dependencies):
+        return None
+    return {
+        "key_digests": {dep: keys[dep] for dep in dependencies},
+        "device_links": {dep: links[dep] for dep in dependencies},
+        "gateway_id": result.get("gateway_id"),
+        "key_from": result.get("key_from"),
+    }
+
+
+def _lan_key_current(result, evidence, current):
+    """Whether this saved connection used the keys and relationships listed now."""
+    if not evidence or result.get("status") not in (lan_scan.OK, lan_scan.VIA_GATEWAY):
+        return False
+    if any(result.get(field) != evidence.get(field) for field in ("gateway_id", "key_from")):
+        return False
+    keys, links = evidence.get("key_digests") or {}, evidence.get("device_links") or {}
+    return bool(keys) and all(
+        dev_id in current
+        and digest == _key_digest(current[dev_id].get("local_key"))
+        and links.get(dev_id) == _device_link(current[dev_id])
+        for dev_id, digest in keys.items()
+    )
+
+
 def _job_view(job):
     if not job:
         return None
@@ -552,6 +611,17 @@ def _merge_lan(job, outcome, current):
     merged.update(results)
     _hand_over_gateway_keys(merged, results, current)
     body["results"] = merged
+    evidence = {dev_id: proof for dev_id, proof in (stored.get("key_evidence") or {}).items()
+                if dev_id in merged}
+    for dev_id, result in results.items():
+        proof = _lan_key_evidence(job, dev_id, result, results, current)
+        if proof:
+            evidence[dev_id] = proof
+        else:
+            evidence.pop(dev_id, None)
+    # This map stays inside the encrypted cache. API consumers receive only a
+    # boolean, so key fingerprints never enter JSON responses or CSV exports.
+    body["key_evidence"] = evidence
 
     now = time.time()
     whole = job["kind"] == "scan" and not outcome["summary"]["cancelled"]
@@ -678,11 +748,15 @@ def lan_state():
         return jsonify({"error": "not_logged_in"}), 401
     with _devices_cache_lock:
         _load_persisted_cache()  # also drops a stored LAN file when DEVICE_CACHE=off
+    current = {d.get("id"): d for d in (_session_devices(session) or [])}
     with _lan_lock:
         body = _lan_body_for(session_key) or _empty_lan_body()
         job = _lan_job if _lan_job and _lan_job["session_key"] == session_key else None
+        evidence = body.get("key_evidence") or {}
+        results = {dev_id: dict(result, key_current=_lan_key_current(result, evidence.get(dev_id), current))
+                   for dev_id, result in (body.get("results") or {}).items()}
         return jsonify({
-            "results": body.get("results") or {},
+            "results": results,
             "summary": body.get("summary"),
             "changes": body.get("changes"),
             "changes_at": body.get("changes_at"),
@@ -766,6 +840,7 @@ def lan_scan_start():
         "error": None,
         "session_key": session_key,
         "key_digests": {d.get("id"): _key_digest(d.get("local_key")) for d in devices},
+        "device_links": {d.get("id"): _device_link(d) for d in devices},
         "cancel": threading.Event(),
     }
     with _lan_lock:

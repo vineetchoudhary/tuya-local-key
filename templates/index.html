@@ -307,10 +307,12 @@
     border-bottom: 1px solid var(--border); background: var(--card);
   }
   .panel-setup-open { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+  .panel-setup-open + .panel-setup-open { margin-top: 8px; }
   .panel-setup-open svg { width: 16px; height: 16px; }
   /* min-height:0 so the body scrolls instead of stretching the flex column */
   .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px 18px 28px; }
   .setup-body { padding-top: 16px; }
+  .network-body { padding-top: 16px; }
   .section-title {
     margin: 20px 0 8px; font-size: 12px; font-weight: 700;
     letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
@@ -372,6 +374,33 @@
   .setup-footnote a { color: var(--accent); text-decoration: none; }
   .setup-footnote a:hover { text-decoration: underline; }
   .setup-footnote a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .setup-readiness { margin-bottom: 14px; padding: 10px 12px; border-radius: 7px; background: color-mix(in srgb, var(--warn) 8%, transparent); }
+  .setup-readiness p { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+  .setup-note-actions { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 7px; }
+  .setup-note-actions button { padding: 2px 0; font-size: 12px; }
+  .network-card { border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .network-summary { display: flex; align-items: flex-start; gap: 10px; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+  .network-symbol {
+    display: grid; place-items: center; flex: 0 0 auto; width: 32px; height: 32px;
+    border-radius: 50%; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .network-symbol svg { width: 18px; height: 18px; }
+  .network-summary[data-tone=ready] .network-symbol { color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+  .network-summary[data-tone=attention] .network-symbol { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+  .network-summary h3 { font-size: 15px; font-weight: 650; margin: 0 0 3px; }
+  .network-summary p { color: var(--muted); font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+  .network-card h4, .network-check-label { display: block; font-size: 12px; font-weight: 600; margin: 16px 0 6px; }
+  .network-child-status { margin: 12px 0; padding: 10px 12px; border-radius: 7px; background: var(--bg); font-size: 13px; }
+  .network-child-status[data-state=attention] { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+  .network-child-status p { margin: 0; }
+  .network-child-status .muted { display: block; margin-top: 3px; font-size: 12px; }
+  .network-gateways { margin: 0; padding-left: 18px; font-size: 13px; }
+  .network-gateways li + li { margin-top: 6px; }
+  .network-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 14px; margin-top: 16px; border-top: 1px solid var(--border); }
+  .network-actions button { flex: 1 1 140px; min-width: 0; padding: 9px 10px; font-size: 13px; }
+  .network-actions button:focus-visible, #panelNetworkOpen:focus-visible, .setup-note-actions button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
   ul.dps { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 10px; }
   ul.dps li { padding: 8px 11px; border-bottom: 1px solid var(--border); }
   ul.dps li:last-child { border-bottom: none; }
@@ -513,9 +542,11 @@
   </div>
   <div id="panelSetupEntry" class="panel-setup-entry">
     <button id="panelSetupOpen" class="panel-setup-open" type="button" aria-controls="setupBody"></button>
+    <button id="panelNetworkOpen" class="panel-setup-open" type="button" aria-controls="networkBody"></button>
   </div>
-  <div id="panelBody" class="panel-body"></div>
-  <div id="setupBody" class="panel-body setup-body hidden"></div>
+  <div id="panelBody" class="panel-body" tabindex="-1"></div>
+  <div id="setupBody" class="panel-body setup-body hidden" tabindex="-1"></div>
+  <div id="networkBody" class="panel-body network-body hidden" tabindex="-1"></div>
 </aside>
 
 <script>
@@ -530,11 +561,13 @@ let filteredCollapsedGateways = new Set(); // a search reveals matches without l
 let localKeysVisible = false;
 let searchIndex = new WeakMap();         // device -> lowercased haystack for the filter
 let selectedId = null;                   // device shown in the details panel
-let panelView = "details", panelScroll = { details: 0, setup: 0 };
+let panelView = "details", panelPage = null, panelHistory = [];
+const panelPageCache = new Map();        // UI state for pages visited in this open panel
 let deviceChanges = null;                // what the last fetch found had changed
 let changeById = new Map();              // device id -> the change to badge its row with
 let snapshotReason = null;               // set when the list on screen couldn't be refreshed
 let panelOpener = null;                  // element to refocus when the panel closes
+let panelOpenerSelector = null;          // resolves its replacement after a refresh
 let setupTool = "tuya-local", localTuyaEdition = "xzetsubou", setupAdvancedOpen = false;
 // LAN scan results (/api/lan), merged into each device by applyLan().
 let lanData = { results: {}, summary: null, changes: null, changes_at: null, targets: "", job: null };
@@ -581,7 +614,6 @@ const FIELD_LABELS = {
 const DETAIL_SECTIONS = [
   { title: "Identity", keys: ["name", "id", "uuid", "local_key", "category", "product_id", "product_name", "model", "icon"] },
   { title: "Connectivity", keys: ["online", "ip", "support_local", "sub", "node_id", "gateway_id", "set_up", "time_zone", "lat", "lon"] },
-  { title: "Local network", keys: [], render: lanSection },
   { title: "Account", keys: ["uid", "owner_id", "asset_id", "biz_type"] },
   { title: "Timeline", keys: ["create_time", "active_time", "update_time"] },
 ];
@@ -635,6 +667,8 @@ function subOffline(d) {
 }
 function lanExplain(d) {
   if (gatewayMissed(d)) return "A sub-device: it is reached through its gateway, which the last scan didn't find.";
+  if (d.lan_status === "ok" && String(d.protocol_version) === "3.1")
+    return "Identified on the local network. Protocol 3.1 status replies do not verify the local key.";
   const report = subReport(d);
   if (report !== null)
     return `A sub-device: it is reached through its gateway, which reports it ${report ? "online" : "offline"}.`;
@@ -889,15 +923,13 @@ async function loadDevices(msg, inline, refresh) {
     $("refreshBtn").disabled = true;
     $("refreshBtn").textContent = "Refreshing…";
     refreshStatus("Fetching latest from Tuya…");
+    renderPanel();
   } else {
     refreshStatus("");
     $("loadingMsg").textContent = msg || "Loading your devices…";
     show("loading");
   }
   try {
-    // The LAN results are local and quick; fetch them alongside the list, and
-    // merge them in without ever waiting on the network for them.
-    const lanLoaded = loadLan();
     const { ok, status, body } = await api(refresh ? "/api/devices?refresh=1" : "/api/devices");
     if (!ok) {
       if (status === 401) {
@@ -925,7 +957,10 @@ async function loadDevices(msg, inline, refresh) {
     deviceChanges = body.changes || null;
     snapshotReason = body.stale ? (body.stale_reason || "fetch_failed") : null;
     devicesCachedAt = body.cached_at || Date.now() / 1000;
-    await lanLoaded;
+    // Revalidate proof against the device list just fetched. Invalidate it first
+    // so a failed LAN reload cannot preserve proof for a key that has changed.
+    for (const result of Object.values(lanData.results || {})) result.key_current = false;
+    await loadLan();
     applyLan();
     indexChanges();
     indexDevices();
@@ -951,6 +986,7 @@ async function loadDevices(msg, inline, refresh) {
   } finally {
     $("refreshBtn").disabled = false;
     $("refreshBtn").textContent = "Refresh";
+    if (inline) renderPanel();
   }
 }
 
@@ -1161,6 +1197,9 @@ function icon(name) {
     chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 6 6 6-6 6"/></svg>',
     more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="19" r="1.8" fill="currentColor"/></svg>',
     close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6 6 18"/></svg>',
+    check: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m8 12 3 3 5-6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    attention: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v6m0 4v.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    pending: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 12h8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   };
   return icons[name] || "";
 }
@@ -1411,6 +1450,7 @@ function copyOnClick(container) {
 copyOnClick($("rows"));
 copyOnClick($("panelBody"));
 copyOnClick($("setupBody"));
+copyOnClick($("networkBody"));
 // Device links stay in the current view, including a gateway's setup view.
 $("panel").addEventListener("click", (e) => {
   const tab = e.target.closest("[data-setup-tool]");
@@ -1419,16 +1459,18 @@ $("panel").addEventListener("click", (e) => {
     repaintSetup(`[data-setup-tool="${setupTool}"]`);
     return;
   }
+  const action = e.target.closest("[data-setup-action], [data-network-action]");
+  if (action) { panelAction(action.dataset.setupAction || action.dataset.networkAction, action); return; }
   const link = e.target.closest("[data-open-device]");
-  if (link) { openPanel(link.dataset.openDevice, panelView); return; }
+  if (link) { navigatePanel(link.dataset.openDevice, panelView, link); return; }
   const quick = e.target.closest("[data-check-ip]");
-  const form = quick && $("panelBody").querySelector("[data-lan-check]");
+  const form = quick && $("networkBody").querySelector("[data-lan-check]");
   if (form) {
     form.elements.ip.value = quick.dataset.checkIp;
     form.requestSubmit();
   }
 });
-$("setupBody").addEventListener("keydown", (e) => {
+function setupTabKeydown(e) {
   const tab = e.target.closest("[data-setup-tool]");
   if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
   e.preventDefault();
@@ -1437,12 +1479,14 @@ $("setupBody").addEventListener("keydown", (e) => {
     : (i + (e.key === "ArrowRight" ? 1 : -1) + SETUP_TOOLS.length) % SETUP_TOOLS.length;
   setupTool = SETUP_TOOLS[next].id;
   repaintSetup(`[data-setup-tool="${setupTool}"]`);
-});
-$("setupBody").addEventListener("change", (e) => {
+}
+$("setupBody").addEventListener("keydown", setupTabKeydown);
+function setupEditionChange(e) {
   if (!e.target.matches("[data-localtuya-edition]")) return;
   localTuyaEdition = e.target.value;
   repaintSetup("[data-localtuya-edition]");
-});
+}
+$("setupBody").addEventListener("change", setupEditionChange);
 
 // open the details panel for the clicked row
 $("rows").addEventListener("click", (e) => {
@@ -1464,38 +1508,156 @@ $("rows").addEventListener("click", (e) => {
   openPanel(tr.dataset.id);
 });
 
-// ---- details panel ----
+// ---- details panel navigation ----
+// Register each page's rendering and focus here. Navigation and Back share one
+// stack, regardless of how many pages or related devices a path visits.
+const PANEL_PAGES = {
+  details: {
+    body: "panelBody", backLabel: "Back to device details",
+    title: d => d.name || "(unnamed)",
+    render: d => fieldSections(d) + dpSection(d) + rawSection(d),
+  },
+  setup: {
+    body: "setupBody", backLabel: "Back to set up in…",
+    title: d => `Set up “${d.name || d.id}” in…`, render: setupSection,
+    focus: '[aria-selected="true"]',
+  },
+  network: {
+    body: "networkBody", backLabel: "Back to local network",
+    title: d => `Local network for “${d.name || d.id}”`, render: networkSection,
+    focus: "[data-lan-check] input",
+  },
+};
+function panelPageKey(id, view) { return JSON.stringify([id, view]); }
+function copyPanelState(state) {
+  return { ...state,
+    disclosures: (state.disclosures || []).map(item => ({ ...item })),
+    draft: state.draft ? { ...state.draft } : null,
+    selection: state.selection ? { ...state.selection } : null,
+    setup: state.setup ? { ...state.setup } : null,
+  };
+}
+function panelNodeSelector(el, body) {
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  const parts = [];
+  for (let node = el; node !== body; node = node.parentElement) {
+    const siblings = [...node.parentElement.children].filter(sibling => sibling.tagName === node.tagName);
+    parts.unshift(`${node.tagName.toLowerCase()}:nth-of-type(${siblings.indexOf(node) + 1})`);
+  }
+  return `#${body.id} > ${parts.join(" > ")}`;
+}
+function panelFocusSelector(el) {
+  if (!el || !$("panel").contains(el)) return null;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  const body = $(PANEL_PAGES[panelView].body);
+  if (!body.contains(el)) return null;
+  // Stable control attributes avoid storing copy values, which can be keys.
+  for (const attr of ["data-setup-action", "data-network-action", "data-setup-tool", "data-open-device", "data-localtuya-edition", "data-key-toggle"]) {
+    if (el.hasAttribute(attr)) return `#${body.id} [${attr}="${CSS.escape(el.getAttribute(attr))}"]`;
+  }
+  return panelNodeSelector(el, body);
+}
+function capturePanelPage() {
+  if (!panelPage || $("panel").dataset.deviceId !== selectedId || $("panel").dataset.view !== panelView) return;
+  const body = $(PANEL_PAGES[panelView].body), state = panelPage.state;
+  state.scroll = body.scrollTop;
+  state.disclosures = [...body.querySelectorAll("details")].map(el => {
+    const classes = [...el.classList].map(name => CSS.escape(name)).join(".");
+    const unique = classes && body.querySelectorAll(`details.${classes}`).length === 1;
+    return { selector: unique ? `details.${classes}` : panelNodeSelector(el, body), open: el.open };
+  });
+  if (panelView === "setup") {
+    const advanced = body.querySelector("[data-setup-advanced]");
+    // Read live disclosure state; its toggle event may still be queued.
+    if (advanced) setupAdvancedOpen = advanced.open;
+    state.setup = { tool: setupTool, edition: localTuyaEdition, advanced: setupAdvancedOpen };
+  }
+  const input = body.querySelector("[data-lan-check] input");
+  state.draft = input && input.value !== input.defaultValue ? {
+    id: input.form.dataset.lanCheck, value: input.value,
+  } : null;
+  state.selection = input ? { id: input.form.dataset.lanCheck,
+    start: input.selectionStart, end: input.selectionEnd } : null;
+  panelPageCache.set(panelPageKey(selectedId, panelView), copyPanelState(state));
+}
+function newPanelPage(id, view) {
+  const state = copyPanelState(panelPageCache.get(panelPageKey(id, view)) || {});
+  // A forward visit inherits the current tool. Back restores its own snapshot.
+  if (view === "setup") state.setup = { tool: setupTool, edition: localTuyaEdition, advanced: setupAdvancedOpen };
+  return { id, view, state };
+}
+function activatePanelPage(page) {
+  panelPage = page; selectedId = page.id; panelView = page.view;
+  if (panelView === "setup" && page.state.setup) {
+    setupTool = page.state.setup.tool;
+    localTuyaEdition = page.state.setup.edition;
+    setupAdvancedOpen = page.state.setup.advanced;
+  }
+}
+function focusPanelPage(selector) {
+  const page = PANEL_PAGES[panelView], body = $(page.body);
+  const remembered = selector && $("panel").querySelector(selector);
+  const normal = page.focus && body.querySelector(page.focus);
+  const focus = remembered && !remembered.disabled ? remembered : normal && !normal.disabled ? normal : body;
+  focus.focus({ preventScroll: true });
+  if (focus.matches("[data-lan-check] input") && panelPage.state.selection) {
+    const selection = panelPage.state.selection;
+    if (selection.id === focus.form.dataset.lanCheck) focus.setSelectionRange(selection.start, selection.end);
+  }
+}
+// Table and notice links start a new panel visit. Links inside it use navigatePanel.
 function openPanel(id, view = "details") {
-  selectedId = id;
-  panelView = view;
-  if (!renderPanel()) return;
+  if (!PANEL_PAGES[view] || !deviceData.some(d => d.id === id)) return;
+  const row = panelOpener && panelOpener.closest("#rows tr[data-id]");
+  panelOpenerSelector = row ? `#${CSS.escape(row.id)} [data-open]`
+    : panelOpener && panelOpener.hasAttribute("data-open-device")
+      ? `#notices [data-open-device="${CSS.escape(panelOpener.dataset.openDevice)}"]` : null;
+  panelHistory = []; panelPageCache.clear();
+  activatePanelPage(newPanelPage(id, view));
+  if (!renderPanel(false)) return;
   document.body.classList.add("panel-open");
   $("panel").setAttribute("aria-hidden", "false");
   $("panel").focus();
   markSelectedRow();
 }
-function openSetup() {
-  if (!selectedId) return;
-  panelView = "setup";
-  if (!renderPanel()) return;
-  $("setupBody").querySelector('[aria-selected="true"]').focus({ preventScroll: true });
+function navigatePanel(id, view, opener = document.activeElement) {
+  if (!panelPage || !PANEL_PAGES[view] || !deviceData.some(d => d.id === id)) return;
+  if (id === selectedId && view === panelView) return;
+  capturePanelPage();
+  panelHistory.push({ ...panelPage, state: copyPanelState(panelPage.state), returnFocus: panelFocusSelector(opener) });
+  activatePanelPage(newPanelPage(id, view));
+  if (!renderPanel(false)) return;
+  focusPanelPage(); markSelectedRow();
 }
-function showDetails() {
-  if (!selectedId) return;
-  panelView = "details";
-  if (!renderPanel()) return;
-  $("panelSetupOpen").focus({ preventScroll: true });
+function openSetup() { if (selectedId) navigatePanel(selectedId, "setup", $("panelSetupOpen")); }
+function openNetwork(opener = document.activeElement) { if (selectedId) navigatePanel(selectedId, "network", opener); }
+function backPanel() {
+  if (!panelPage) return;
+  capturePanelPage();
+  while (panelHistory.length) {
+    const page = panelHistory.pop();
+    // Refreshes can remove earlier devices. Never restore an old device record.
+    if (!PANEL_PAGES[page.view] || !deviceData.some(d => d.id === page.id)) continue;
+    activatePanelPage(page);
+    if (!renderPanel(false)) return;
+    focusPanelPage(page.returnFocus); markSelectedRow();
+    return;
+  }
+  closePanel();
 }
 function closePanel() {
   if (!selectedId) return;
-  selectedId = null;
-  panelView = "details";
-  delete $("panel").dataset.deviceId;
+  selectedId = null; panelPage = null; panelView = "details";
+  panelHistory = []; panelPageCache.clear();
+  delete $("panel").dataset.deviceId; delete $("panel").dataset.view;
   document.body.classList.remove("panel-open");
   $("panel").setAttribute("aria-hidden", "true");
   markSelectedRow();
-  if (panelOpener && panelOpener.isConnected) panelOpener.focus();
-  panelOpener = null;
+  const original = panelOpener && panelOpener.isConnected && panelOpener.matches("button, a, [tabindex]") ? panelOpener : null;
+  const opener = original || (panelOpenerSelector && document.querySelector(panelOpenerSelector));
+  if (opener && !opener.disabled && opener.getClientRects().length) opener.focus();
+  else if ($("filter").getClientRects().length) $("filter").focus();
+  panelOpener = null; panelOpenerSelector = null;
 }
 function markSelectedRow() {
   for (const tr of $("rows").querySelectorAll("tr[data-id]")) {
@@ -1503,57 +1665,46 @@ function markSelectedRow() {
   }
 }
 
-// Repaints the open panel (after a refresh or a local-key toggle).
-// Returns false when there is nothing to show.
-function renderPanel() {
-  if (!selectedId) return false;
+// Regenerate content from current device/LAN data; history stores only UI state.
+function renderPanel(capture = true) {
+  if (!panelPage) return false;
   const d = deviceData.find(dev => dev.id === selectedId);
-  if (!d) { closePanel(); return false; }   // the device is gone after a refresh
-  const sameDevice = $("panel").dataset.deviceId === d.id;
-  const detailsBody = $("panelBody"), setupBody = $("setupBody");
-  if (sameDevice) {
-    // The hidden body's scrollTop is zero. Save only the visible view's position
-    // so Back restores where the user left off in the other view.
-    if (!detailsBody.classList.contains("hidden")) panelScroll.details = detailsBody.scrollTop;
-    if (!setupBody.classList.contains("hidden")) panelScroll.setup = setupBody.scrollTop;
-  } else panelScroll = { details: 0, setup: 0 };
-  const disclosures = sameDevice ? [...detailsBody.querySelectorAll("details.data-points, details.raw")]
-    .map(el => ({ selector: `details.${el.className}`, open: el.open })) : [];
-  // A details toggle event is queued. Read the live state before replacing the
-  // card, even when the user changes edition or tool before that event fires.
-  const advanced = setupBody.querySelector("[data-setup-advanced]");
-  if (advanced) setupAdvancedOpen = advanced.open;
-  // An IP half-typed into this device's Check field survives the repaint, and
-  // so does its focus.
-  const typing = detailsBody.querySelector("[data-lan-check] input");
-  const same = !!typing && typing.form.dataset.lanCheck === d.id;
-  const draft = same && typing.value !== typing.defaultValue ? typing.value : null;
-  const caret = same && panelView === "details" && document.activeElement === typing
-    ? [typing.selectionStart, typing.selectionEnd] : null;
-  const setup = panelView === "setup";
+  if (!d) { backPanel(); return false; }
+  const page = PANEL_PAGES[panelView], body = $(page.body);
+  const active = document.activeElement;
+  const focus = capture && body.contains(active) ? panelFocusSelector(active) : null;
+  if (capture) capturePanelPage();
+  const state = panelPage.state, actionView = panelView !== "details";
   $("panel").dataset.deviceId = d.id;
-  $("panelTitle").textContent = setup ? `Set up “${d.name || d.id}” in…` : d.name || "(unnamed)";
-  $("panelTitle").classList.toggle("setup-title", setup);
-  $("panelTitle").title = setup ? $("panelTitle").textContent : "";
-  $("panelSub").classList.toggle("hidden", setup);
-  $("panelSub").innerHTML = setup ? ""
+  $("panel").dataset.view = panelView;
+  $("panelTitle").textContent = page.title(d);
+  $("panelTitle").classList.toggle("setup-title", actionView);
+  $("panelTitle").title = actionView ? $("panelTitle").textContent : "";
+  $("panelSub").classList.toggle("hidden", actionView);
+  $("panelSub").innerHTML = actionView ? ""
     : [statusBadge(d), esc(d.product_name), esc(d.category)]
       .filter(part => part && part !== "-").join("<span>·</span>");
-  $("panelNav").classList.toggle("hidden", !setup);
-  $("panelSetupEntry").classList.toggle("hidden", setup);
-  detailsBody.classList.toggle("hidden", setup);
-  setupBody.classList.toggle("hidden", !setup);
-  detailsBody.innerHTML = fieldSections(d) + dpSection(d) + rawSection(d);
-  setupBody.innerHTML = setupSection(d);
-  for (const { selector, open } of disclosures) {
-    const el = detailsBody.querySelector(selector);
+  const previous = panelHistory[panelHistory.length - 1];
+  $("panelNav").classList.toggle("hidden", !previous);
+  $("panelBack").innerHTML = `${icon("chevron")}${esc(previous ? PANEL_PAGES[previous.view].backLabel || "Back" : "Back")}`;
+  $("panelBack").setAttribute("aria-controls", previous ? PANEL_PAGES[previous.view].body : "panelBody");
+  $("panelSetupEntry").classList.toggle("hidden", actionView);
+  for (const [view, definition] of Object.entries(PANEL_PAGES)) {
+    const content = $(definition.body);
+    content.classList.toggle("hidden", view !== panelView);
+    content.innerHTML = view === panelView ? page.render(d) : "";
+  }
+  for (const { selector, open } of state.disclosures || []) {
+    const el = body.querySelector(selector);
     if (el) el.open = open;
   }
-  const input = detailsBody.querySelector("[data-lan-check] input");
-  if (input && draft !== null) input.value = draft;
-  if (input && caret) { input.focus({ preventScroll: true }); input.setSelectionRange(...caret); }
-  if (setup) setupBody.scrollTop = panelScroll.setup;
-  else detailsBody.scrollTop = panelScroll.details;
+  const input = body.querySelector("[data-lan-check] input");
+  if (input && state.draft) {
+    if (input.form.dataset.lanCheck === state.draft.id) input.value = state.draft.value;
+    else state.draft = null;
+  }
+  body.scrollTop = state.scroll || 0;
+  if (focus) focusPanelPage(focus);
   return true;
 }
 
@@ -1590,7 +1741,7 @@ function fieldValue(d, key) {
     const source = keySource(d);
     return `<span class="key-heading">${renderLocalKey(localKeyOf(d))}${renderLocalKeyToggle()}</span>` +
       (source ? `<div class="field-sub">Tuya lists this key on its sub-device ${deviceLink(source)}, not on ` +
-        `the gateway. The gateway answered to it on the local network.</div>` : "");
+        `the gateway. ${String(d.protocol_version) === "3.1" ? "Protocol 3.1 status replies do not verify the key." : "The gateway answered to it on the local network."}</div>` : "");
   }
   if (key === "node_id" && isSubDevice(d)) return renderNodeId(value);
   if (key === "online") return badge(value);
@@ -1630,31 +1781,38 @@ function fieldSections(d) {
 // Local IP and protocol version from the LAN scan, and a check for this device.
 function lanSection(d) {
   const sub = isSubDevice(d), gateway = isGateway(d);
+  const s = setupConnection(d), display = sub && s.local.id ? s.local : d;
   // A gateway Tuya lists without a key is checked with its sub-devices' keys.
   const keyless = !sub && !d.local_key && !gateway;
   // Unless sub-devices name it in gateway_id, nothing says which keys are its.
   const unnamed = unnamedGateway(d);
-  const running = !!(lanData.job && lanData.job.state === "running");
+  const running = !!((lanData.job && lanData.job.state === "running") || (panelCheck && panelCheck.kind === "pending"));
   let html = "";
-  if (lanStatus(d)) {
+  if (lanStatus(display)) {
     const keys = ["lan_status", "local_ip", "protocol_version", "lan_checked_at"]
-      .filter(key => key === "lan_status" || d[key]);
-    html += fieldList(d, keys, sub
-      ? { local_ip: "Gateway IP", protocol_version: "Gateway protocol" } : {});
-  } else if (!sub && !keyless && !unnamed) {
-    html += `<p class="lan-note">Not checked on the local network yet. Use <b>Scan network</b>, ` +
-      `or check it at an IP address below.</p>`;
+      .filter(key => key === "lan_status" || display[key]);
+    const values = { ...display, epochs: {},
+      lan_checked_at: localTime(display.epochs && display.epochs.lan_checked_at) || display.lan_checked_at };
+    html += fieldList(values, keys, sub
+      ? { lan_status: "Last result", local_ip: "Gateway IP", protocol_version: "Gateway protocol" } : { lan_status: "Last result" });
   }
   if (sub) {
     const id = gatewayIdOf(d);
     const via = id && deviceData.find(g => g.id === id);
-    if (!via && d.local_ip) {
-      return html + `<p class="lan-note">A sub-device is reached through its gateway, which answered ` +
+    if (!via && id) {
+      html += `<p class="lan-note">A sub-device is reached through its gateway. Gateway ` +
+        `<span class="mono">${esc(id)}</span> is not included in this device list. Refresh devices to look for it.</p>`;
+    } else if (!via && d.local_ip) {
+      html += `<p class="lan-note">A sub-device is reached through its gateway, which answered ` +
         `at ${esc(d.local_ip)} to this device's key. Tuya doesn't say which gateway that is. ` +
         `Check your gateway at that IP to find out.</p>`;
-    }
-    return html + `<p class="lan-note">A sub-device is reached through its gateway` +
-      (via ? `: ${deviceLink(via)}` : "") + `. Check the gateway instead.</p>`;
+    } else if (via) html += `<p class="lan-note">Gateway: ${deviceLink(via)}.</p>`;
+    else html += `<p class="lan-note">A sub-device is reached through its gateway. Check the gateway instead.</p>`;
+    if (via) return html + lanCheckForm(via, s.host, true);
+    const gateways = deviceData.filter(isGateway);
+    if (!id && gateways.length) html += `<h4>Choose a gateway to check</h4><ul class="network-gateways">` +
+      gateways.map(g => `<li>${deviceLink(g)}</li>`).join("") + `</ul>`;
+    return html;
   }
   if (unnamed) {
     const found = unnamedLeft();
@@ -1676,15 +1834,22 @@ function lanSection(d) {
     }
   }
   if (keyless) {
-    return html + `<p class="lan-note">Tuya doesn't return a local key for this device, so it ` +
+    return html + `<p class="lan-note" data-network-check="local_key" data-state="missing">Tuya doesn't return a local key for this device, so it ` +
       `can't be checked on the local network. Bluetooth-only devices have none.</p>`;
   }
+  return html + lanCheckForm(d, d.local_ip || "");
+}
+
+function lanCheckForm(d, ip, gateway = false) {
+  const running = !!((lanData.job && lanData.job.state === "running") || (panelCheck && panelCheck.kind === "pending"));
   const note = panelCheck && panelCheck.id === d.id ? panelCheck : null;
-  html += `<form class="lan-check" data-lan-check="${esc(d.id)}">` +
-    `<input type="text" name="ip" value="${esc(d.local_ip || "")}" placeholder="Device IP, e.g. 192.168.2.1" ` +
-    `aria-label="IP address to check" autocomplete="off" spellcheck="false">` +
+  let html = `<label class="network-check-label" for="networkCheckIP">${gateway ? "Enter gateway IP address" : "Enter local IP address"}</label>` +
+    `<form class="lan-check" data-lan-check="${esc(d.id)}">` +
+    `<input id="networkCheckIP" type="text" name="ip" value="${esc(ip)}" placeholder="e.g. 192.168.2.1" ` +
+    `aria-label="IP address to check" autocomplete="off" spellcheck="false" required>` +
     `<button type="submit"${running ? " disabled" : ""}>` +
-    `${running && lanData.job.device_id === d.id ? "Checking…" : "Check"}</button></form>`;
+    `${running && ((lanData.job && lanData.job.device_id === d.id) ||
+      (panelCheck && panelCheck.id === d.id && panelCheck.kind === "pending")) ? "Checking…" : "Check"}</button></form>`;
   if (note) html += `<p class="lan-note${note.kind === "error" ? " scan-error" : ""}" aria-live="polite">${esc(note.text)}</p>`;
   return html;
 }
@@ -1699,11 +1864,12 @@ const SETUP_TOOLS = [
 const LOCAL_PROTOCOLS = ["3.1", "3.2", "3.3", "3.4", "3.5"];
 
 function repaintSetup(focus) {
-  const scroll = $("setupBody").scrollTop;
+  const body = $("setupBody");
+  const scroll = body.scrollTop;
   renderPanel();
-  const control = $("setupBody").querySelector(focus);
+  const control = body.querySelector(focus);
   if (control) control.focus({ preventScroll: true });
-  $("setupBody").scrollTop = scroll;
+  body.scrollTop = scroll;
 }
 
 function setupConnection(d) {
@@ -1754,16 +1920,20 @@ function setupTuyaLocal(d, s) {
     setupField("device_cid", cidLabel, cid, { empty: s.sub ? "Not available" : "Leave empty" });
 }
 
+function localTuyaEditionSelector() {
+  const fork = localTuyaEdition === "xzetsubou";
+  return `<div class="setup-edition"><label for="localTuyaEdition">localtuya edition</label>` +
+    `<select id="localTuyaEdition" data-localtuya-edition>` +
+    `<option value="xzetsubou"${fork ? " selected" : ""}>xZetsubou (supports sub-devices)</option>` +
+    `<option value="original"${!fork ? " selected" : ""}>rospogrigio (original)</option></select></div>`;
+}
 function setupLocalTuya(d, s) {
   const fork = localTuyaEdition === "xzetsubou";
   const supported = fork ? LOCAL_PROTOCOLS : LOCAL_PROTOCOLS.filter(v => v !== "3.5");
   const protocol = supported.includes(s.version) ? s.version : !s.version && fork ? "auto" : "";
-  let html = `<div class="setup-edition"><label for="localTuyaEdition">localtuya edition</label>` +
-    `<select id="localTuyaEdition" data-localtuya-edition>` +
-    `<option value="xzetsubou"${fork ? " selected" : ""}>xZetsubou (supports sub-devices)</option>` +
-    `<option value="original"${!fork ? " selected" : ""}>rospogrigio (original)</option></select></div>`;
+  let html = localTuyaEditionSelector();
   if (s.sub && !fork) {
-    return html + `<p class="setup-note">Sub-devices require xZetsubou.</p>`;
+    return html;
   }
   html += setupField("friendly_name", fork ? "Device Name" : "Name", d.name || s.id) +
     setupField("host", s.sub ? "Gateway IP" : fork ? "IP Address" : "Host", s.host) +
@@ -1828,7 +1998,7 @@ function setupTinyTuya(d, s) {
     `<button class="setup-copy" type="button" aria-label="Copy Python snippet" data-setup-copy-snippet` +
     (snippet.code ? ` data-copy="${esc(snippet.code)}"` : " disabled") + `>Copy</button></div>`;
   if (snippet.code) html += `<pre class="mono" data-setup-snippet>${esc(preview)}</pre>`;
-  else html += `<p class="setup-note">Missing: ${esc(snippet.missing.join(", "))}.</p>`;
+  else html += `<p class="setup-note">Complete the missing setup details above to generate the snippet.</p>`;
   return html + `</div>`;
 }
 
@@ -1845,9 +2015,7 @@ function setupChildren(d) {
 
 function setupSection(d) {
   const s = setupConnection(d);
-  const tabs = SETUP_TOOLS.map(t => `<button type="button" role="tab" id="setup-tab-${t.id}" ` +
-    `data-setup-tool="${t.id}" aria-controls="setup-tool-panel" aria-selected="${t.id === setupTool}" ` +
-    `tabindex="${t.id === setupTool ? 0 : -1}">${t.name}</button>`).join("");
+  const tabs = setupTabs("setup");
   const body = setupTool === "tuya-local" ? setupTuyaLocal(d, s)
     : setupTool === "localtuya" ? setupLocalTuya(d, s) : setupTinyTuya(d, s);
   const children = setupChildren(d);
@@ -1858,7 +2026,144 @@ function setupSection(d) {
     `<a href="https://github.com/${repo}" target="_blank" rel="noopener noreferrer">${esc(repo)}</a></footer>`;
   return `<div class="setup-card"><div class="setup-tabs" role="tablist" aria-label="Local setup tool">${tabs}</div>` +
     `<div class="setup-content" id="setup-tool-panel" role="tabpanel" tabindex="0" ` +
-    `aria-labelledby="setup-tab-${setupTool}">${body}${children}${footnote}</div></div>`;
+    `aria-labelledby="setup-tab-${setupTool}">${setupReadinessNote(d)}${body}${children}${footnote}</div></div>`;
+}
+
+function setupTabs(view) {
+  return SETUP_TOOLS.map(t => `<button type="button" role="tab" id="${view}-tab-${t.id}" ` +
+    `data-setup-tool="${t.id}" aria-controls="${view}-tool-panel" aria-selected="${t.id === setupTool}" ` +
+    `tabindex="${t.id === setupTool ? 0 : -1}">${t.name}</button>`).join("");
+}
+
+// Setup guidance stays beside the values it explains; local diagnostics have
+// their own page and never depend on the selected integration.
+function setupReadinessNote(d) {
+  const s = setupConnection(d), tool = setupTool, fork = localTuyaEdition === "xzetsubou";
+  const missing = [], actions = [];
+  const addAction = (id, label) => {
+    const refreshing = id === "refresh" && $("refreshBtn").disabled;
+    const scanning = id === "scan" && ((lanData.job && lanData.job.state === "running") || (panelCheck && panelCheck.kind === "pending"));
+    actions.push(`<button type="button" class="link-btn" data-setup-action="${id}"${refreshing || scanning ? " disabled" : ""}>${refreshing ? "Refreshing…" : label}</button>`);
+  };
+  let text = "";
+  if (s.sub && tool === "localtuya" && !fork) {
+    text = "Sub-devices require the xZetsubou edition.";
+    addAction("edition", "Use xZetsubou");
+  } else {
+    const needsGatewayId = s.sub && tool !== "localtuya";
+    if (!(needsGatewayId ? s.gatewayId : s.id)) missing.push(needsGatewayId ? "gateway ID" : "device ID");
+    if (s.sub && tool === "tinytuya" && !s.id) missing.push("sub-device ID");
+    if (!s.host) missing.push(s.sub ? "gateway IP" : "local IP");
+    if (!s.key) missing.push(s.sub ? "gateway local key" : "local key");
+    const supported = tool === "localtuya" && !fork ? LOCAL_PROTOCOLS.filter(v => v !== "3.5") : LOCAL_PROTOCOLS;
+    const auto = !s.version && (tool === "tuya-local" || (tool === "localtuya" && fork));
+    if (!s.version && !auto) missing.push("protocol version");
+    if (s.sub && !(s.nodeId || (tool === "tuya-local" && d.uuid))) missing.push("sub-device node ID");
+    const unsupported = s.version && !supported.includes(s.version);
+    const network = networkState(d);
+    if (missing.length) text = `Missing: ${missing.join(", ")}.`;
+    if (unsupported) text += `${text ? " " : ""}Protocol ${s.version} is not supported by this ${tool === "localtuya" ? "edition" : "tool"}.`;
+    if (!text && (network.tone === "attention" || network.title === "Check again" || network.childOnline === false))
+      text = "Local access needs attention. Check the latest connection in Local network.";
+    if (!text) return "";
+    if (unsupported && tool === "localtuya" && !fork && s.version === "3.5") addAction("edition", "Use xZetsubou");
+    else if (!s.key || missing.some(label => ["device ID", "sub-device ID", "sub-device node ID"].includes(label)))
+      addAction("refresh", "Refresh devices");
+    else if (!s.host || !s.version && !auto || needsGatewayId && !s.gatewayId) addAction("scan", "Scan network");
+    const manualIP = !s.host && (s.sub ? !!s.gateway : !!d.local_key || isGateway(d));
+    addAction("network", manualIP ? "Enter IP manually" : "Local network");
+  }
+  return `<div class="setup-readiness" data-setup-readiness role="status"><p>${esc(text)}</p>` +
+    `<div class="setup-note-actions">${actions.join("")}</div></div>`;
+}
+
+function networkState(d) {
+  const s = setupConnection(d), r = lanResult(s.local), target = s.sub ? s.gateway : d;
+  const running = (lanData.job && lanData.job.state === "running" &&
+    (lanData.job.kind === "scan" || (target && lanData.job.device_id === target.id))) ||
+    (target && panelCheck && panelCheck.id === target.id && panelCheck.kind === "pending");
+  const failedAttempt = target && panelCheck && panelCheck.id === target.id && panelCheck.kind === "error" &&
+    (!r.checked_at || !panelCheck.finishedAt || r.checked_at <= panelCheck.finishedAt);
+  const accepted = ["ok", ...(s.sub ? ["via_gateway"] : [])].includes(r.status) && r.key_current === true;
+  let title = "Not checked", tone = "pending";
+  const address = s.sub ? "gateway's" : "device's";
+  let note = `Scan your network, or enter the ${address} local IP address manually below.`;
+  if (running) {
+    title = s.sub ? "Checking gateway" : "Checking connection";
+    note = "The result will update when the check finishes.";
+  } else if (s.sub && !target) {
+    title = s.gatewayId ? "Gateway not listed" : "Gateway not identified"; tone = "attention";
+    note = s.gatewayId ? "Refresh the device list to look for this sub-device's gateway."
+      : "Identify the gateway to check this sub-device's local access.";
+  } else if (!s.key && !isGateway(target || d)) {
+    title = "Local key unavailable"; tone = "attention";
+    note = "A local key is needed to check this device.";
+  } else if (failedAttempt) {
+    title = "Check failed"; tone = "attention";
+    note = "Review the last attempt below, then try again.";
+  } else if (["busy", "key_mismatch", "unreachable", "not_found"].includes(r.status)) {
+    title = { busy: "Connection refused", key_mismatch: "Key not accepted", unreachable: "No reply", not_found: "Not found" }[r.status];
+    tone = "attention";
+    note = r.status === "key_mismatch" ? "Refresh the device list, then check again."
+      : r.status === "busy" ? "Another local client may already be connected. Review the last result below, then try again."
+      : `Scan the network again, or enter the ${address} local IP address manually below.`;
+  } else if (["ok", "via_gateway"].includes(r.status) && s.version === "3.1") {
+    title = "Device found";
+    note = "Protocol 3.1 status replies identify the device but do not verify the local key.";
+  } else if (accepted) {
+    title = s.sub ? "Gateway checked" : "Connection checked"; tone = "ready";
+    note = s.sub ? "The gateway answered with the current local key."
+      : "The device answered with the current local key.";
+  } else if (["ok", "via_gateway"].includes(r.status) && r.ip) {
+    title = "Check again";
+    note = "The saved result does not verify the current local key. Check again to update it.";
+  } else if (!s.key && isGateway(target || d)) {
+    note = "Check the gateway at its IP to identify which sub-device holds its local key.";
+  }
+  const child = lanResult(d);
+  const childCurrent = child.key_current === true && child.ip === s.host && child.version === s.version &&
+    (!s.gatewayId || child.gateway_id === s.gatewayId) && (!r.checked_at || child.checked_at >= r.checked_at);
+  const childOnline = s.sub && childCurrent && typeof child.sub_online === "boolean" ? child.sub_online : null;
+  return { s, r, target, title, tone, note, childOnline };
+}
+
+function networkSection(d) {
+  const n = networkState(d);
+  const symbol = n.tone === "ready" ? "check" : n.tone === "attention" ? "attention" : "pending";
+  const state = n.tone === "ready" ? "ready" : n.tone === "attention" ? "attention" : "pending";
+  let child = "";
+  if (n.s.sub) {
+    const label = n.childOnline === false ? "Gateway reports offline" : n.childOnline === true ? "Gateway reports online" : "Sub-device status unknown";
+    const detail = n.childOnline === false ? "Check the sub-device's power and connection to the gateway."
+      : n.childOnline === true ? "The sub-device's own response has not been checked."
+      : "Check the gateway to update its report. Setup will test the sub-device's own response.";
+    child = `<div class="network-child-status" data-network-check="sub_device" data-state="${n.childOnline === false ? "attention" : "pending"}">` +
+      `<p>${label}</p><span class="muted">${detail}</span></div>`;
+  }
+  const busy = (lanData.job && lanData.job.state === "running") || (panelCheck && panelCheck.kind === "pending");
+  const refresh = !n.s.key || n.r.status === "key_mismatch" || (n.s.sub && !n.target);
+  const refreshing = $("refreshBtn").disabled;
+  return `<div class="network-card"><div class="network-summary" data-network-summary data-network-check="connection" ` +
+    `data-state="${state}" data-tone="${n.tone}" role="status"><span class="network-symbol">${icon(symbol)}</span>` +
+    `<div><h3>${esc(n.title)}</h3><p>${esc(n.note)}</p></div></div>` +
+    `${child}${lanSection(d)}<div class="network-actions">` +
+    `<button type="button" data-network-action="scan"${busy ? " disabled" : ""}>Scan network</button>` +
+    (refresh ? `<button type="button" data-network-action="refresh"${refreshing ? " disabled" : ""}>${refreshing ? "Refreshing…" : "Refresh devices"}</button>` : "") +
+    `</div></div>`;
+}
+
+function panelAction(action, opener) {
+  if (!selectedId) return;
+  if (action === "network") { openNetwork(opener); return; }
+  if (action === "edition") { localTuyaEdition = "xzetsubou"; repaintSetup("[data-localtuya-edition]"); return; }
+  if (action === "refresh") {
+    if (!$("refreshBtn").disabled) loadDevices("Updating device list from Tuya…", true, true);
+    return;
+  }
+  if (action === "scan") {
+    closePanel(); showScanBox(true);
+    $("scanTargets").scrollIntoView({ block: "center" }); $("scanTargets").focus();
+  }
 }
 
 // One row per data point: dp id (from local_strategy), current value (status),
@@ -1957,14 +2262,14 @@ $("panelClose").innerHTML = icon("close");
 $("panelClose").onclick = closePanel;
 $("panelSetupOpen").innerHTML = `Set up in…${icon("chevron")}`;
 $("panelSetupOpen").onclick = openSetup;
-$("panelBack").innerHTML = `${icon("chevron")}Back to device details`;
-$("panelBack").onclick = showDetails;
+$("panelNetworkOpen").innerHTML = `Local network${icon("chevron")}`;
+$("panelNetworkOpen").onclick = () => openNetwork($("panelNetworkOpen"));
+$("panelBack").onclick = backPanel;
 $("scrim").onclick = closePanel;
 document.addEventListener("keydown", (e) => {
   // Escape in the confirmation closes only the dialog, not the panel behind it.
   if (e.key === "Escape" && !$("logoutDialog").open) {
-    if (panelView === "setup") showDetails();
-    else closePanel();
+    backPanel();
   }
 });
 
@@ -2147,7 +2452,7 @@ function watchScan(showBox) {
     if (job.kind === "scan") scanProgress(job);
     if (job.state === "running") { next(); return; }
     stopScanWatch();
-    if (job.kind === "device") panelCheck = checkMessage(job);
+    if (job.kind === "device") panelCheck = { ...checkMessage(job), finishedAt: job.finished_at };
     await refreshLan();
   };
   next();
@@ -2162,8 +2467,9 @@ function checkMessage(job) {
   const device = deviceData.find(d => d.id === job.device_id) || {};
   if (r.status === "ok") {
     let text = `Found at ${r.ip}, protocol ${r.version}${r.device22 ? " (device22)" : ""}.`;
+    if (String(r.version) === "3.1") text += " Protocol 3.1 status replies do not verify the local key.";
     const source = r.key_from && deviceData.find(s => s.id === r.key_from);
-    if (source) {
+    if (source && String(r.version) !== "3.1") {
       text += ` It answered to the local key Tuya lists on ${source.name || source.id}.`;
       // lanData still holds what was known before this check.
       const before = keySource(device);
@@ -2228,21 +2534,40 @@ $("scanProgress").addEventListener("click", async (e) => {
   if (lanData.job) { lanData.job = { ...lanData.job, cancelling: true }; scanProgress(lanData.job); }
   await api("/api/lan/scan", { method: "DELETE" });
 });
-$("panelBody").addEventListener("submit", async (e) => {
+$("networkBody").addEventListener("submit", async (e) => {
   const form = e.target.closest("[data-lan-check]");
   if (!form) return;
   e.preventDefault();
-  const id = form.dataset.lanCheck;
-  panelCheck = { id, text: "Checking…" };
-  const { ok, body } = await startScan({ device_id: id, ip: form.elements.ip.value });
+  await checkDevice(form.dataset.lanCheck, form.elements.ip.value);
+});
+async function checkDevice(id, ip) {
+  if ((lanData.job && lanData.job.state === "running") || (panelCheck && panelCheck.kind === "pending")) return;
+  const networkId = panelView === "network" ? selectedId : null;
+  const keepNetworkFocus = () => {
+    const active = document.activeElement;
+    const lost = !active || active === document.body || !active.isConnected || active.disabled;
+    if (networkId && selectedId === networkId && panelView === "network" && lost) {
+      const input = $("networkBody").querySelector("[data-lan-check] input");
+      (input || $("networkBody")).focus({ preventScroll: true });
+    }
+  };
+  panelCheck = { id, text: "Checking…", kind: "pending" };
+  renderPanel();
+  keepNetworkFocus();
+  let response;
+  try { response = await startScan({ device_id: id, ip }); }
+  catch (err) { response = { ok: false, body: {} }; }
+  const { ok, body } = response;
   if (!ok) {
-    panelCheck = { id, kind: "error", text: scanFailure(body) };
+    panelCheck = { id, kind: "error", text: scanFailure(body), finishedAt: Date.now() / 1000 };
     renderPanel();
+    keepNetworkFocus();
     return;
   }
   renderPanel();
+  keepNetworkFocus();
   watchScan(false);
-});
+}
 
 // Every flat field of the fetched devices, in the order the server sent them.
 function csvColumns() {

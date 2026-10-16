@@ -1250,6 +1250,94 @@ def test_a_result_is_dropped_when_a_refresh_changes_its_key_mid_scan(webapp, mon
     assert set(client.get("/api/lan").json["results"]) == {"plug"}
 
 
+def test_a_saved_connection_needs_rechecking_after_key_rotation_across_refreshes(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(
+        {"lamp": _ok("10.0.0.2")}, {"lamp": _ok("10.0.0.2")}))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+    assert client.get("/api/lan").json["results"]["lamp"]["key_current"] is True
+
+    rotated = [dict(d, local_key="ROTATED-KEY-0000") if d["id"] == "lamp" else dict(d)
+               for d in LAN_DEVICES]
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda s, p: rotated)
+    for _ in range(2):
+        assert client.get("/api/devices?refresh=1").status_code == 200
+        result = client.get("/api/lan").json["results"]["lamp"]
+        assert result["key_current"] is False
+        assert (result["status"], result["ip"]) == ("ok", "10.0.0.2")
+
+    _scan(client, device_id="lamp", ip="10.0.0.2")
+    assert client.get("/api/lan").json["results"]["lamp"]["key_current"] is True
+
+
+def test_legacy_lan_cache_has_no_current_key_proof(webapp, monkeypatch):
+    client = _lan_logged_in(webapp, monkeypatch)
+    session = webapp.core.load_session(webapp.SESSION_FILE)
+    with webapp._lan_lock:
+        webapp._save_lan(webapp._session_cache_key(session),
+                         dict(webapp._empty_lan_body(), results={"plug": _ok("10.0.0.1")}))
+
+    result = client.get("/api/lan").json["results"]["plug"]
+    assert result["key_current"] is False
+    assert result["status"] == "ok", "historic LAN results remain available"
+
+
+def test_a_child_connection_proof_depends_on_its_gateways_key(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({
+        "plug": _ok("10.0.0.1", "3.4"),
+        "sensor": dict(_ok("10.0.0.1", "3.4"), status="via_gateway", gateway_id="plug"),
+    }))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+    results = client.get("/api/lan").json["results"]
+    assert results["plug"]["key_current"] and results["sensor"]["key_current"]
+
+    rotated = [dict(d, local_key="ROTATED-KEY-0000") if d["id"] == "plug" else dict(d)
+               for d in LAN_DEVICES]
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda s, p: rotated)
+    client.get("/api/devices?refresh=1")
+    results = client.get("/api/lan").json["results"]
+    assert not results["plug"]["key_current"] and not results["sensor"]["key_current"]
+
+
+def test_a_child_inherits_no_proof_when_its_gateway_key_rotates_mid_scan(webapp, monkeypatch):
+    gate = threading.Event()
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({
+        "plug": _ok("10.0.0.1", "3.4"),
+        "sensor": dict(_ok("10.0.0.1", "3.4"), status="via_gateway", gateway_id="plug"),
+    }, gate=gate))
+    client = _lan_logged_in(webapp, monkeypatch)
+    client.post("/api/lan/scan", json={"targets": "10.0.0.0/30"})
+
+    rotated = [dict(d, local_key="ROTATED-KEY-0000") if d["id"] == "plug" else dict(d)
+               for d in LAN_DEVICES]
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda s, p: rotated)
+    client.get("/api/devices?refresh=1")
+    gate.set()
+    _wait_for_job(client)
+
+    results = client.get("/api/lan").json["results"]
+    assert "plug" not in results
+    assert results["sensor"]["key_current"] is False
+
+
+@pytest.mark.parametrize("changed", [{"gateway_id": "elsewhere"}, {"node_id": "different-node"}])
+def test_a_child_connection_proof_needs_its_original_relationship(webapp, monkeypatch, changed):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({
+        "plug": _ok("10.0.0.1", "3.4"),
+        "sensor": dict(_ok("10.0.0.1", "3.4"), status="via_gateway", gateway_id="plug"),
+    }))
+    client = _lan_logged_in(webapp, monkeypatch)
+    _scan(client)
+
+    reassigned = [dict(d, **changed) if d["id"] == "sensor" else dict(d) for d in LAN_DEVICES]
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda s, p: reassigned)
+    client.get("/api/devices?refresh=1")
+    results = client.get("/api/lan").json["results"]
+    assert results["sensor"]["key_current"] is False
+    assert results["plug"]["key_current"] is True
+
+
 # As Tuya's sharing API lists gateways (issue #7): marked `sub`, with no key of
 # their own, which sits on their sub-devices instead.
 GATEWAY_DEVICES = LAN_DEVICES + [
@@ -1268,6 +1356,26 @@ def test_a_keyless_gateway_can_be_checked_with_its_sub_devices_keys(webapp, monk
 
     assert job["result"]["status"] == "ok" and job["result"]["key_from"] == "valve"
     assert fake.calls[0]["only"] == ["gw"]
+
+
+def test_a_borrowed_gateway_and_child_proof_follow_the_source_key(webapp, monkeypatch):
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan({
+        "gw": dict(_ok("10.0.0.8", "3.4"), key_from="valve"),
+        "valve": dict(_ok("10.0.0.8", "3.4"), status="via_gateway", gateway_id="gw"),
+    }))
+    devices = [dict(d, gateway_id="gw") if d["id"] == "valve" else dict(d)
+               for d in GATEWAY_DEVICES]
+    client = _lan_logged_in(webapp, monkeypatch, devices=devices)
+    _scan(client)
+    results = client.get("/api/lan").json["results"]
+    assert results["gw"]["key_current"] and results["valve"]["key_current"]
+
+    rotated = [dict(d, local_key="ROTATED-KEY-0000") if d["id"] == "valve" else dict(d)
+               for d in devices]
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda s, p: rotated)
+    client.get("/api/devices?refresh=1")
+    results = client.get("/api/lan").json["results"]
+    assert not results["gw"]["key_current"] and not results["valve"]["key_current"]
 
 
 def test_a_keyless_gateway_with_no_sub_device_keys_cant_be_checked(webapp, monkeypatch):
@@ -1334,8 +1442,9 @@ def test_a_check_that_names_a_gateway_takes_its_key_from_the_one_that_had_it(web
     assert "gw-2" not in results, "it waits to be named again"
     assert results["timer"]["gateway_id"] is None and results["timer"]["ip"] == "10.0.0.9"
     # Devices with keys of their own, and their sub-devices, are left as they were.
-    assert results["plug"] == _ok("10.0.0.1")
-    assert results["sensor"] == via("10.0.0.1", "plug")
+    assert results["plug"] == dict(_ok("10.0.0.1"), key_current=True)
+    assert results["sensor"] == dict(via("10.0.0.1", "plug"), key_current=False)
+    assert results["timer"]["key_current"] is False, "its old inferred gateway was undone"
 
 
 def _via(ip, gateway_id=None):
@@ -1409,7 +1518,7 @@ def test_a_scan_drops_what_3_0_stored_for_gateways_marked_sub(webapp, monkeypatc
 
     results = client.get("/api/lan").json["results"]
     assert "gw" not in results and "gw-2" not in results, "so they show check needed"
-    assert results["sensor"] == missed, "a real sub-device keeps its last result"
+    assert results["sensor"] == dict(missed, key_current=False), "a real sub-device keeps its last result"
 
 
 def test_a_gateway_result_is_dropped_when_its_sub_devices_key_changes_mid_scan(webapp, monkeypatch):
@@ -1439,6 +1548,7 @@ def test_lan_results_survive_a_restart_and_are_encrypted(webapp, monkeypatch):
 
     assert b"10.0.0.1" not in blob and b"plug" not in blob
     assert restarted.app.test_client().get("/api/lan").json["results"]["plug"]["version"] == "3.4"
+    assert restarted.app.test_client().get("/api/lan").json["results"]["plug"]["key_current"] is True
 
 
 def test_lan_results_are_ignored_after_switching_accounts(webapp, monkeypatch):
