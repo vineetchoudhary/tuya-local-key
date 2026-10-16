@@ -349,9 +349,15 @@
   .setup-value { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
   .setup-copy { flex: 0 0 auto; padding: 4px 8px; font-size: 12px; }
   .setup-edition { margin-bottom: 12px; }
+  .setup-edition-control { position: relative; }
   .setup-edition select {
-    width: 100%; padding: 7px 8px; border: 1px solid var(--border); border-radius: 7px;
+    appearance: none; -webkit-appearance: none;
+    width: 100%; padding: 7px 36px 7px 8px; border: 1px solid var(--border); border-radius: 7px;
     background: var(--bg); color: var(--fg); font: inherit;
+  }
+  .setup-edition-control > svg {
+    position: absolute; right: 12px; top: 50%; width: 16px; height: 16px;
+    transform: translateY(-50%) rotate(90deg); pointer-events: none;
   }
   .setup-advanced { margin-top: 14px; }
   .setup-advanced summary { cursor: pointer; color: var(--muted); font-weight: 600; }
@@ -1923,9 +1929,9 @@ function setupTuyaLocal(d, s) {
 function localTuyaEditionSelector() {
   const fork = localTuyaEdition === "xzetsubou";
   return `<div class="setup-edition"><label for="localTuyaEdition">localtuya edition</label>` +
-    `<select id="localTuyaEdition" data-localtuya-edition>` +
+    `<div class="setup-edition-control"><select id="localTuyaEdition" data-localtuya-edition>` +
     `<option value="xzetsubou"${fork ? " selected" : ""}>xZetsubou (supports sub-devices)</option>` +
-    `<option value="original"${!fork ? " selected" : ""}>rospogrigio (original)</option></select></div>`;
+    `<option value="original"${!fork ? " selected" : ""}>rospogrigio (original)</option></select>${icon("chevron")}</div></div>`;
 }
 function setupLocalTuya(d, s) {
   const fork = localTuyaEdition === "xzetsubou";
