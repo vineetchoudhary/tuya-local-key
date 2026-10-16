@@ -237,20 +237,53 @@ def test_table_shows_the_scan_columns_only(page):
         assert moved not in body
 
 
-def test_local_keys_are_masked_until_the_toggle_reveals_them(page):
+def test_table_and_panel_local_key_visibility_are_independent(page):
     keys = page.locator("#rows .key")
     assert MASK in keys.first.inner_text()
     assert PLUG.local_key not in page.locator("#rows").inner_text()
-
+    open_panel(page, PLUG.name)
+    panel_toggle = page.locator("#panelBody [data-key-toggle]")
+    table_toggle = page.locator("#thead [data-key-toggle]")
+    panel_key = page.locator("#panelBody .key").element_handle()
     page.click("#thead [data-key-toggle]")
     assert PLUG.local_key in page.locator("#rows").inner_text()
+    assert MASK in field_value(page, "local_key")
+    assert panel_toggle.get_attribute("aria-pressed") == "false"
+    assert panel_key.evaluate("el => el.isConnected"), "table toggles leave the panel untouched"
 
-    # The panel shares the one toggle, in both directions.
-    open_panel(page, PLUG.name)
+    table_key = row(page, PLUG).locator(".key").element_handle()
+    panel_toggle.press("Enter")
     assert PLUG.local_key in field_value(page, "local_key")
-    page.click("#panelBody [data-key-toggle]")
+    assert PLUG.local_key in page.locator("#rows").inner_text()
+    assert table_toggle.get_attribute("aria-pressed") == "true"
+    assert panel_toggle.get_attribute("aria-label") == "Hide local key"
+    assert table_key.evaluate("el => el.isConnected"), "panel toggles leave the table untouched"
+    expect(panel_toggle).to_be_focused()
+
+    table_toggle.click()
+    assert PLUG.local_key not in page.locator("#rows").inner_text()
+    assert PLUG.local_key in field_value(page, "local_key")
+    assert panel_toggle.get_attribute("aria-pressed") == "true"
+
+    panel_toggle.click()
     assert MASK in field_value(page, "local_key")
     assert PLUG.local_key not in page.locator("#rows").inner_text()
+    assert table_toggle.get_attribute("aria-pressed") == "false"
+    assert panel_toggle.get_attribute("aria-label") == "Show local key"
+
+
+def test_panel_keys_start_hidden_when_reopened_or_another_device_is_opened(page):
+    open_panel(page, PLUG.name)
+    page.locator("#panelBody [data-key-toggle]").click()
+    assert PLUG.local_key in field_value(page, "local_key")
+    page.locator("#panelClose").click()
+    open_panel(page, PLUG.name)
+    assert MASK in field_value(page, "local_key")
+    page.locator("#panelBody [data-key-toggle]").click()
+    open_panel(page, LAMP.name)
+    assert MASK in field_value(page, "local_key")
+    assert LAMP.local_key not in field_value(page, "local_key")
+    assert page.locator("#thead [data-key-toggle]").get_attribute("aria-pressed") == "false"
 
 
 def test_copying_a_masked_key_yields_the_real_value(page):
@@ -1119,6 +1152,8 @@ def test_a_keyless_gateway_shows_the_key_it_answered_to(page, running_app, monke
     assert footnote.is_hidden(), "only while a key it explains is listed"
     page.fill("#filter", "")
     open_panel(page, ZIGBEE_GATEWAY.name)
+    assert VALVE.local_key not in field_value(page, "local_key")
+    page.locator("#panelBody [data-key-toggle]").click()
     assert VALVE.local_key in field_value(page, "local_key")
     assert "Tuya lists this key on its sub-device Garden Valve" in field_value(page, "local_key")
     with page.expect_download() as download:
@@ -1847,6 +1882,42 @@ def test_setup_original_localtuya_explains_its_missing_sub_device_support(page, 
     assert "Sub-devices require" in setup_notice(page).inner_text()
     assert "xZetsubou" in setup_notice(page).inner_text()
     assert page.locator(".setup-card [data-setup-field]").count() == 0
+
+
+@pytest.mark.parametrize("tool", ["tuya-local", "localtuya", "tinytuya"])
+def test_panel_visibility_applies_to_details_setup_and_snippets_without_changing_the_table(
+        page, running_app, monkeypatch, tool):
+    _scans(running_app, monkeypatch, FIRST_SCAN)
+    scanned(page)
+    open_panel(page, PLUG.name)
+    page.locator("#panelBody details.raw summary").click()
+    page.locator("#panelBody [data-key-toggle]").click()
+    assert PLUG.local_key in page.locator("#panelBody details.raw pre").inner_text()
+    page.locator("#panelSetupOpen").click()
+    setup_tool(page, tool)
+    assert PLUG.local_key in setup_value(page, "local_key")
+    if tool == "tinytuya":
+        assert PLUG.local_key in page.locator("[data-setup-snippet]").inner_text()
+    assert PLUG.local_key not in page.locator("#rows").inner_text()
+
+    page.locator("#thead [data-key-toggle]").click()
+    panel_toggle = setup_field(page, "local_key").locator("[data-key-toggle]")
+    panel_toggle.click()
+
+    assert MASK in setup_value(page, "local_key")
+    assert PLUG.local_key in page.locator("#rows").inner_text()
+    assert page.locator("#thead [data-key-toggle]").get_attribute("aria-pressed") == "true"
+    expect(panel_toggle).to_be_focused()
+    setup_field(page, "local_key").locator(".setup-copy").click()
+    assert clipboard(page) == PLUG.local_key
+    if tool == "tinytuya":
+        assert PLUG.local_key not in page.locator("[data-setup-snippet]").inner_text()
+        assert PLUG.local_key in copied_setup_snippet(page)
+
+    page.locator("#panelBack").click()
+    assert MASK in field_value(page, "local_key")
+    assert PLUG.local_key not in page.locator("#panelBody details.raw pre").inner_text()
+    assert PLUG.local_key in page.locator("#rows").inner_text()
 
 
 def test_setup_snippet_preserves_quoted_keys_and_is_masked_until_revealed(page, running_app, monkeypatch):

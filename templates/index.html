@@ -564,7 +564,7 @@ let refreshStatusTimer = null;
 let sortState = { key: null, dir: 1 };   // dir: 1 = ascending, -1 = descending
 let collapsedGateways = new Set();     // new groups start expanded
 let filteredCollapsedGateways = new Set(); // a search reveals matches without losing the usual state
-let localKeysVisible = false;
+let tableKeysVisible = false, panelKeyVisible = false;
 let searchIndex = new WeakMap();         // device -> lowercased haystack for the filter
 let selectedId = null;                   // device shown in the details panel
 let panelView = "details", panelPage = null, panelHistory = [];
@@ -769,10 +769,10 @@ function localKeyOf(d) {
 function localKeyCell(d) {
   if (isSubDevice(d)) return renderNodeId(d.node_id);
   const source = keySource(d);
-  if (!source) return renderLocalKey(localKeyOf(d));
+  if (!source) return renderLocalKey(localKeyOf(d), tableKeysVisible);
   const tip = `Tuya lists this key on its sub-device ${source.name || source.id}, not on the gateway.`;
   // The sub-device's name stays in the tooltip, so this row doesn't read as the sub-device's.
-  return renderLocalKey(localKeyOf(d)) +
+  return renderLocalKey(localKeyOf(d), tableKeysVisible) +
     `<span class="key-mark" title="${esc(tip)}" aria-hidden="true">*</span>` +
     `<span class="sr-only">Key from a sub-device</span>`;
 }
@@ -1244,18 +1244,19 @@ function keyDisplay(value, visible) {
   const length = Math.max(text.length, 12);
   return "•".repeat(Math.min(length, 20));
 }
-function renderLocalKeyToggle() {
-  const label = localKeysVisible ? "Hide local keys" : "Show local keys";
-  return `<button class="icon-btn" type="button" data-key-toggle aria-label="${label}" aria-pressed="${localKeysVisible}" title="${label}">${icon(localKeysVisible ? "eyeOff" : "eye")}</button>`;
+function renderLocalKeyToggle(scope) {
+  const visible = scope === "panel" ? panelKeyVisible : tableKeysVisible;
+  const label = `${visible ? "Hide" : "Show"} local ${scope === "panel" ? "key" : "keys"}`;
+  return `<button class="icon-btn" type="button" data-key-toggle="${scope}" aria-label="${label}" aria-pressed="${visible}" title="${label}">${icon(visible ? "eyeOff" : "eye")}</button>`;
 }
 function renderLocalKeyHeader() {
   // The account's full list keeps the heading stable through filtering and collapse.
   const label = deviceData.some(isSubDevice) ? "Local Key / Node ID" : "Local Key";
-  return `<span class="key-heading"><span>${label}</span>${renderLocalKeyToggle()}</span>`;
+  return `<span class="key-heading"><span>${label}</span>${renderLocalKeyToggle("table")}</span>`;
 }
-function renderLocalKey(value) {
+function renderLocalKey(value, visible) {
   const text = String(value ?? "");
-  return `<button class="key mono" type="button" title="Copy local key" aria-label="Copy local key" data-copy="${esc(text)}">${keyDisplay(text, localKeysVisible)}</button>`;
+  return `<button class="key mono" type="button" title="Copy local key" aria-label="Copy local key" data-copy="${esc(text)}">${keyDisplay(text, visible)}</button>`;
 }
 function renderNodeId(value) {
   const text = String(value ?? "");
@@ -1431,11 +1432,18 @@ $("thead").addEventListener("click", (e) => {
   render();
 });
 
-// show/hide every local key (the table header and the panel share one toggle)
+// Each eye controls only its own area, without repainting the other one.
 document.addEventListener("click", (e) => {
-  if (!e.target.closest("[data-key-toggle]")) return;
-  localKeysVisible = !localKeysVisible;
-  render();
+  const toggle = e.target.closest("[data-key-toggle]");
+  if (!toggle) return;
+  if (toggle.dataset.keyToggle === "panel") {
+    panelKeyVisible = !panelKeyVisible;
+    renderPanel();
+  } else {
+    tableKeysVisible = !tableKeysVisible;
+    renderHead(); renderRows(computeList());
+    $("thead").querySelector("[data-key-toggle]").focus({ preventScroll: true });
+  }
 });
 
 // copy any value marked with data-copy (table cells and panel fields alike)
@@ -1593,6 +1601,7 @@ function newPanelPage(id, view) {
   return { id, view, state };
 }
 function activatePanelPage(page) {
+  if (selectedId !== page.id) panelKeyVisible = false;
   panelPage = page; selectedId = page.id; panelView = page.view;
   if (panelView === "setup" && page.state.setup) {
     setupTool = page.state.setup.tool;
@@ -1619,6 +1628,7 @@ function openPanel(id, view = "details") {
     : panelOpener && panelOpener.hasAttribute("data-open-device")
       ? `#notices [data-open-device="${CSS.escape(panelOpener.dataset.openDevice)}"]` : null;
   panelHistory = []; panelPageCache.clear();
+  panelKeyVisible = false;
   activatePanelPage(newPanelPage(id, view));
   if (!renderPanel(false)) return;
   document.body.classList.add("panel-open");
@@ -1654,6 +1664,7 @@ function backPanel() {
 function closePanel() {
   if (!selectedId) return;
   selectedId = null; panelPage = null; panelView = "details";
+  panelKeyVisible = false;
   panelHistory = []; panelPageCache.clear();
   delete $("panel").dataset.deviceId; delete $("panel").dataset.view;
   document.body.classList.remove("panel-open");
@@ -1745,7 +1756,7 @@ function fieldValue(d, key) {
   const value = d[key];
   if (key === "local_key") {
     const source = keySource(d);
-    return `<span class="key-heading">${renderLocalKey(localKeyOf(d))}${renderLocalKeyToggle()}</span>` +
+    return `<span class="key-heading">${renderLocalKey(localKeyOf(d), panelKeyVisible)}${renderLocalKeyToggle("panel")}</span>` +
       (source ? `<div class="field-sub">Tuya lists this key on its sub-device ${deviceLink(source)}, not on ` +
         `the gateway. ${String(d.protocol_version) === "3.1" ? "Protocol 3.1 status replies do not verify the key." : "The gateway answered to it on the local network."}</div>` : "");
   }
@@ -1904,11 +1915,11 @@ function setupField(key, label, value, options = {}) {
   const shown = !available ? `<span class="dash">${esc(options.empty || "Not available")}</span>`
     : options.device ? `<button class="link-btn" type="button" data-open-device="${esc(options.device.id)}" ` +
       `aria-label="Set up ${esc(options.device.name || options.device.id)}">${esc(text)}</button>`
-    : options.secret ? keyDisplay(text, localKeysVisible) : esc(text);
+    : options.secret ? keyDisplay(text, panelKeyVisible) : esc(text);
   return `<div class="setup-field" data-setup-field="${esc(key)}">` +
     `<div class="setup-label">${esc(label)}</div>` +
     `<div class="setup-value-row"><code class="setup-value mono">${shown}</code>` +
-    (options.secret && available ? renderLocalKeyToggle() : "") +
+    (options.secret && available ? renderLocalKeyToggle("panel") : "") +
     `<button class="setup-copy" type="button" aria-label="Copy ${esc(label)}"` +
     (available ? ` data-copy="${esc(text)}"` : " disabled") + `>Copy</button></div></div>`;
 }
@@ -1999,7 +2010,7 @@ function setupTinyTuya(d, s) {
     setupField("cid", "Sub-device node ID", s.nodeId) +
     setupField("parent", "Parent gateway", "gateway");
   const snippet = tinytuyaSnippet(d, s);
-  const preview = localKeysVisible ? snippet.code : tinytuyaSnippet(d, s, true).code;
+  const preview = panelKeyVisible ? snippet.code : tinytuyaSnippet(d, s, true).code;
   html += `<div class="setup-snippet"><div class="setup-snippet-head"><span class="setup-label">Python snippet</span>` +
     `<button class="setup-copy" type="button" aria-label="Copy Python snippet" data-setup-copy-snippet` +
     (snippet.code ? ` data-copy="${esc(snippet.code)}"` : " disabled") + `>Copy</button></div>`;
@@ -2256,7 +2267,7 @@ function dpSection(d) {
 // respects the local-key toggle; the copy button always yields the real values.
 function rawSection(d) {
   const full = JSON.stringify(d, null, 2);
-  const masked = localKeysVisible || !d.local_key
+  const masked = panelKeyVisible || !d.local_key
     ? full
     : JSON.stringify({ ...d, local_key: keyDisplay(d.local_key, false) }, null, 2);
   return `<details class="raw"><summary>Raw JSON</summary>` +
