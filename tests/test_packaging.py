@@ -131,7 +131,9 @@ def test_downloads_badge_workflow_feeds_the_readme_badge():
     assert workflow["permissions"] == {"contents": "write"}
     # It writes to the badges branch only, never to main.
     pushes = re.findall(r"git push[^\n]*", text)
-    assert pushes == ["git push -q origin HEAD:badges"]
+    assert pushes == [
+        'git push -q --force-with-lease="refs/heads/badges:$previous" origin "$commit:refs/heads/badges"'
+    ]
     # It refuses to overwrite a good badge when the count can't be read.
     assert 'if [ -z "$count" ]' in text and "exit 1" in text
     assert "badges%2Fdownloads.json" in readme

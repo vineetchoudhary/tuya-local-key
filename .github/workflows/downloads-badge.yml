@@ -36,7 +36,10 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           remote="https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if ! git clone -q --depth 1 --branch badges "$remote" out 2>/dev/null; then
+          previous=""
+          if git clone -q --depth 1 --branch badges "$remote" out 2>/dev/null; then
+            previous=$(git -C out rev-parse HEAD)
+          else
             # First run: start the branch with no history from main.
             git init -q out
             git -C out checkout -q --orphan badges
@@ -46,11 +49,13 @@ jobs:
           printf '{"schemaVersion": 1, "label": "downloads", "message": "%s", "color": "2f6fed"}\n' \
             "$COUNT" > downloads.json
           git add downloads.json
-          if git diff --cached --quiet; then
+          # Inspect the actual commit: a shallow clone hides older history.
+          if git diff --cached --quiet && ! git cat-file -p HEAD | grep -q '^parent '; then
             echo "Unchanged at $COUNT."
             exit 0
           fi
-          git -c user.name="github-actions[bot]" \
+          # No parent means the badges branch always contains just one commit.
+          commit=$(git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -q -m "Update downloads badge to $COUNT"
-          git push -q origin HEAD:badges
+              commit-tree "$(git write-tree)" -m "Update downloads badge to $COUNT")
+          git push -q --force-with-lease="refs/heads/badges:$previous" origin "$commit:refs/heads/badges"
