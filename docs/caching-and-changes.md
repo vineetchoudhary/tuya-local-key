@@ -24,6 +24,16 @@ If a fetch fails, the saved list is shown instead of an error, labelled as a sna
 
 The same applies when your login expires. Local keys do not expire with the login, so the saved list is still correct: it stays on screen, and the notice offers to log in again rather than dropping you at the login screen with nothing. Logging out is what clears the saved list.
 
+## Saved Device Exclusions
+
+[Device exclusions](usage.md#excluding-devices) are preferences, saved separately from the encrypted device and network caches in `device-preferences.json` beside `SESSION_FILE` (`/data` in Docker and Home Assistant).
+
+The file contains excluded device IDs and a hashed account identity, with no local keys, login tokens, or device snapshots. It has owner-only file permissions. Logging out or setting `DEVICE_CACHE=off` keeps these preferences. Use **Restore all** in the excluded-devices view to clear the current account's exclusions.
+
+The account identity uses the login's client ID, user code, and region endpoint, so a new QR login or token renewal preserves exclusions. A different user code or region has a separate preference set. The preferences are shared by browsers connected to the same installation.
+
+The [home filter](usage.md#filtering-by-home) uses home names and device membership stored with the encrypted device list. Its selected value is a separate browser preference, scoped to the account. An older saved list remains usable without home metadata; Refresh fetches it from Tuya.
+
 ## Change Detection
 
 Every refresh is compared against the list you saw before it, and anything that moved is summarised above the table.
@@ -40,4 +50,4 @@ A [network scan](network-scanning.md) is compared against the scan before it in 
 
 Changed rows are badged in the table so they are findable in a long list, and the filter box matches the badge text: type `key changed` to narrow to just those. Selecting a device name in the summary opens its details panel, where the new key is ready to copy.
 
-The summary is a comparison, so the first list after logging in never has one, and switching accounts does not report every device as new. Dismissing it hides it until the next refresh finds something. Key values never appear in the summary itself, only the fact that one changed.
+The summary is a comparison, so the first list after logging in never has one, and switching accounts does not report every device as new. Device-specific changes follow the selected active or excluded view. Excluding or restoring a device does not create a device-change event. Dismissing the summary hides it until the next refresh finds something. Key values never appear in the summary itself, only the fact that one changed.

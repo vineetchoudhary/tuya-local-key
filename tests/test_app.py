@@ -1817,3 +1817,465 @@ def test_the_job_says_when_a_cancel_is_under_way(webapp, monkeypatch):
 
     assert job["state"] == "running" and job["cancelling"] is True
     assert _wait_for_job(client)["cancelling"] is False
+
+
+PREFERENCE_SESSION = {"client_id": "client-id", "user_code": "account-a",
+                      "endpoint": "https://openapi.tuyaeu.com", "terminal_id": "terminal-a",
+                      "token_info": {"access_token": "secret"}}
+
+
+def _exclusion_logged_in(webapp, monkeypatch, session=None, load_devices=True):
+    session = dict(PREFERENCE_SESSION if session is None else session)
+    webapp.core.save_session(webapp.SESSION_FILE, session)
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda s, p: [
+        {"id": "plug", "name": "Plug", "local_key": "plug-key"},
+        {"id": "lamp", "name": "Lamp", "local_key": "lamp-key"}])
+    monkeypatch.setattr(webapp.core, "web_dict", lambda d: dict(d))
+    client = webapp.app.test_client()
+    if load_devices:
+        assert client.get("/api/devices").status_code == 200
+    return client
+
+
+def _cloud_unavailable(*args, **kwargs):
+    raise AssertionError("Device preferences must not contact Tuya")
+
+
+def test_exclusions_require_a_saved_session(webapp):
+    client = webapp.app.test_client()
+    for method in (client.get, client.patch):
+        response = method("/api/device-exclusions")
+        assert response.status_code == 401 and response.json == {"error": "not_logged_in"}
+        assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_exclusions_need_a_complete_account_identity(webapp):
+    webapp.core.save_session(webapp.SESSION_FILE, {"token_info": {}})
+    client = webapp.app.test_client()
+    assert client.get("/api/device-exclusions").status_code == 409
+    response = client.patch("/api/device-exclusions", json={"exclude": ["plug"]})
+    assert response.status_code == 409 and response.json["error"] == "account_identity_unavailable"
+    assert not Path(webapp.DEVICE_PREFERENCES_FILE).exists()
+
+
+def test_preferences_read_without_a_snapshot_or_cloud_call(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    monkeypatch.setattr(webapp.core, "devices_from_session", _cloud_unavailable)
+    response = client.get("/api/device-exclusions")
+    assert response.status_code == 200
+    assert response.json == {"excluded_ids": [], "revision": 0,
+        "account_id": webapp.device_preferences.account_id(PREFERENCE_SESSION)}
+    assert not Path(webapp.DEVICE_PREFERENCES_FILE).exists()
+
+
+def test_exclusion_deltas_are_idempotent_and_never_filter_server_devices(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    digest = client.get("/api/device-exclusions").json["account_id"]
+    first = client.patch("/api/device-exclusions", json={"exclude": ["plug", "plug"], "account_id": digest})
+    assert first.status_code == 200
+    assert first.json == {"excluded_ids": ["plug"], "revision": 1, "account_id": digest}
+    assert client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).json == first.json
+    second = client.patch("/api/device-exclusions", json={"exclude": ["lamp"], "restore": ["plug"]})
+    assert second.json == {"excluded_ids": ["lamp"], "revision": 2, "account_id": digest}
+    assert client.patch("/api/device-exclusions", json={}).json == second.json
+    assert [d["id"] for d in client.get("/api/devices").json["devices"]] == ["plug", "lamp"]
+    assert [d["id"] for d in webapp._session_devices(PREFERENCE_SESSION)] == ["plug", "lamp"]
+
+
+@pytest.mark.parametrize("payload", [None, [], "plug", {"exclude": "plug"}, {"restore": None},
+    {"exclude": [""]}, {"exclude": ["  "]}, {"exclude": [True]}, {"exclude": [123]},
+    {"exclude": [{}]}, {"exclude": ["plug\n"]}, {"exclude": ["\ud800"]}, {"exclude": ["x" * 257]},
+    {"exclude": ["plug"], "restore": ["plug"]}, {"excluded_ids": ["plug"]},
+    {"restore_all": 1}, {"restore_all": "true"}, {"restore_all": True, "exclude": ["plug"]},
+    {"restore_all": True, "restore": ["plug"]},
+    {"exclude": ["plug"] * 2001}])
+def test_invalid_exclusion_batches_fail_atomically(webapp, monkeypatch, payload):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    saved = client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).json
+    response = client.patch("/api/device-exclusions", data=json.dumps(payload), content_type="application/json")
+    assert response.status_code == 400 and response.json["error"] == "invalid_exclusions"
+    assert client.get("/api/device-exclusions").json == saved
+
+
+@pytest.mark.parametrize("data, content_type", [("{", "application/json"),
+    ('{"exclude": ["plug"]}', "text/plain"), (" " * (256 * 1024 + 1), "application/json"),
+    ("[" * 1100 + "]" * 1100, "application/json")])
+def test_invalid_or_oversized_exclusion_requests_are_bounded(webapp, monkeypatch, data, content_type):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    response = client.patch("/api/device-exclusions", data=data, content_type=content_type)
+    assert response.status_code == 400 and response.json["error"] == "invalid_exclusions"
+    assert client.get("/api/device-exclusions").json["revision"] == 0
+
+
+def test_exclude_requires_an_account_snapshot_and_rejects_unknown_ids(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    response = client.patch("/api/device-exclusions", json={"exclude": ["plug"]})
+    assert response.status_code == 409 and response.json["error"] == "device_snapshot_required"
+    assert client.get("/api/devices").status_code == 200
+    response = client.patch("/api/device-exclusions", json={"exclude": ["plug", "unknown"]})
+    assert response.status_code == 400
+    assert response.json == {"error": "unknown_device_ids", "unknown_ids": ["unknown"]}
+    assert client.get("/api/device-exclusions").json["excluded_ids"] == []
+
+
+def test_restore_allows_ids_missing_from_snapshot_and_needs_no_snapshot(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    client.patch("/api/device-exclusions", json={"exclude": ["plug", "lamp"]})
+    webapp._clear_devices_cache()
+    monkeypatch.setattr(webapp.core, "devices_from_session", _cloud_unavailable)
+    response = client.patch("/api/device-exclusions", json={"restore": ["plug", "lamp", "absent"]})
+    assert response.status_code == 200 and response.json["excluded_ids"] == []
+    assert response.json["revision"] == 2
+
+
+def test_preferences_and_account_context_are_current_for_cached_and_stale_devices(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    before = client.get("/api/devices").json
+    saved = client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).json
+    assert before["account_id"] == saved["account_id"]
+    assert client.get("/api/devices").json == before
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: (_ for _ in ()).throw(RuntimeError("offline")))
+    stale = client.get("/api/devices?refresh=1")
+    assert stale.json["stale"] is True and stale.json["account_id"] == saved["account_id"]
+    assert client.get("/api/device-exclusions").json == saved
+    assert "account_id" not in webapp._devices_cache["body"]
+    assert "changes" not in client.get("/api/devices").json
+    assert "excluded_ids" not in webapp._devices_cache["body"]
+
+
+def test_preferences_survive_restart_cache_off_and_qr_renewal(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    saved = client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).json
+    client.post("/api/logout")
+    assert Path(webapp.DEVICE_PREFERENCES_FILE).exists()
+    monkeypatch.setenv("DEVICE_CACHE", "off")
+    restarted = _restart(webapp)
+    renewed = dict(PREFERENCE_SESSION, terminal_id="new-terminal", token_info={"access_token": "new-token"})
+    client = _exclusion_logged_in(restarted, monkeypatch, renewed)
+    assert client.get("/api/device-exclusions").json == saved
+    assert not Path(restarted.DEVICE_CACHE_FILE).exists()
+    assert not Path(restarted.DEVICE_CACHE_KEY_FILE).exists()
+    assert _restart(webapp).app.test_client().get("/api/device-exclusions").json == saved
+
+
+def test_exclusions_are_separate_for_accounts_and_stale_tab_writes_are_rejected(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    saved_a = client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).json
+    other = dict(PREFERENCE_SESSION, user_code="account-b")
+    client = _exclusion_logged_in(webapp, monkeypatch, other)
+    saved_b = client.get("/api/device-exclusions").json
+    assert saved_b["excluded_ids"] == [] and saved_b["account_id"] != saved_a["account_id"]
+    response = client.patch("/api/device-exclusions", json={"exclude": ["lamp"], "account_id": saved_a["account_id"]})
+    assert response.status_code == 409 and response.json["error"] == "account_changed"
+    assert client.patch("/api/device-exclusions", json={"exclude": ["lamp"]}).json["excluded_ids"] == ["lamp"]
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    assert client.get("/api/device-exclusions").json == saved_a
+
+
+def test_preferences_error_never_reports_a_successful_save_or_empty_set(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    saved = client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).json
+
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(webapp.device_preferences.core, "atomic_write", fail)
+        response = client.patch("/api/device-exclusions", json={"exclude": ["lamp"]})
+    assert response.status_code == 503 and response.json["error"] == "preferences_unavailable"
+    assert client.get("/api/device-exclusions").json == saved
+    Path(webapp.DEVICE_PREFERENCES_FILE).write_text("corrupt")
+    assert client.get("/api/device-exclusions").status_code == 503
+    assert client.patch("/api/device-exclusions", json={"restore": ["plug"]}).status_code == 503
+    assert Path(webapp.DEVICE_PREFERENCES_FILE).read_text() == "corrupt"
+
+
+def test_two_tabs_delta_updates_do_not_lose_either_selection(webapp, monkeypatch):
+    _exclusion_logged_in(webapp, monkeypatch)
+    barrier = threading.Barrier(2)
+    responses = []
+
+    def exclude(dev_id):
+        barrier.wait(2)
+        responses.append(webapp.app.test_client().patch("/api/device-exclusions", json={"exclude": [dev_id]}))
+
+    threads = [threading.Thread(target=exclude, args=(dev_id,)) for dev_id in ("plug", "lamp")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(3)
+    assert [response.status_code for response in responses] == [200, 200]
+    final = webapp.app.test_client().get("/api/device-exclusions").json
+    assert final["excluded_ids"] == ["lamp", "plug"] and final["revision"] == 2
+
+
+def test_preferences_are_available_while_a_cloud_refresh_is_running(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    started, release = threading.Event(), threading.Event()
+
+    def blocking(*args):
+        started.set()
+        assert release.wait(3)
+        return []
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", blocking)
+    thread = threading.Thread(target=lambda: webapp.app.test_client().get("/api/devices?refresh=1"))
+    thread.start()
+    assert started.wait(2)
+    try:
+        assert client.get("/api/device-exclusions").status_code == 200
+        assert client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).status_code == 200
+    finally:
+        release.set()
+        thread.join(3)
+
+
+def test_logout_cannot_race_a_preference_save_into_a_new_account(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    saving, release = threading.Event(), threading.Event()
+    original_update = webapp._device_preferences.update
+
+    def blocking_update(*args, **kwargs):
+        saving.set()
+        assert release.wait(3)
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(webapp._device_preferences, "update", blocking_update)
+    results = {}
+    writer = threading.Thread(target=lambda: results.update(save=webapp.app.test_client().patch(
+        "/api/device-exclusions", json={"exclude": ["plug"]})))
+    writer.start()
+    assert saving.wait(2)
+    logout_done = threading.Event()
+
+    def logout():
+        results["logout"] = webapp.app.test_client().post("/api/logout")
+        logout_done.set()
+
+    transition = threading.Thread(target=logout)
+    transition.start()
+    assert not logout_done.wait(0.05)
+    release.set()
+    writer.join(3)
+    transition.join(3)
+    assert results["save"].status_code == 200 and results["logout"].status_code == 200
+    assert client.get("/api/device-exclusions").status_code == 401
+    client = _exclusion_logged_in(webapp, monkeypatch, dict(PREFERENCE_SESSION, user_code="account-b"))
+    assert client.get("/api/device-exclusions").json["excluded_ids"] == []
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    assert client.get("/api/device-exclusions").json["excluded_ids"] == ["plug"]
+
+
+def test_an_inflight_login_cannot_resurrect_a_logged_out_session(webapp, monkeypatch):
+    started, release = threading.Event(), threading.Event()
+
+    def blocking_login(*args):
+        started.set()
+        assert release.wait(3)
+        return dict(PREFERENCE_SESSION)
+
+    monkeypatch.setattr(webapp.core, "poll_login", blocking_login)
+    with webapp._lock:
+        webapp._pending["token"] = {"user_code": "account-a", "created_at": time.time()}
+    responses = []
+    thread = threading.Thread(target=lambda: responses.append(webapp.app.test_client().post(
+        "/api/login/poll", json={"token": "token"})))
+    thread.start()
+    assert started.wait(2)
+    assert webapp.app.test_client().post("/api/logout").status_code == 200
+    release.set()
+    thread.join(3)
+    assert responses[0].status_code == 409
+    assert not Path(webapp.SESSION_FILE).exists()
+
+
+def test_real_qr_relogin_retains_only_the_same_accounts_preferences(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    saved = client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).json
+    sessions = [dict(PREFERENCE_SESSION, terminal_id="qr-terminal"),
+                dict(PREFERENCE_SESSION, user_code="account-b")]
+
+    for index, session in enumerate(sessions):
+        monkeypatch.setattr(webapp.core, "poll_login", lambda *args: session)
+        token = f"token-{index}"
+        with webapp._lock:
+            webapp._pending[token] = {"user_code": session["user_code"], "created_at": time.time()}
+        assert client.post("/api/login/poll", json={"token": token}).json == {"status": "confirmed"}
+        assert client.get("/api/device-exclusions").json["excluded_ids"] == (["plug"] if index == 0 else [])
+    assert webapp._device_preferences.get(saved["account_id"]) == saved
+
+
+def test_logout_waits_for_sdk_token_save_then_removes_the_old_session(webapp, monkeypatch):
+    _exclusion_logged_in(webapp, monkeypatch)
+    fetching, release, logged_out = threading.Event(), threading.Event(), threading.Event()
+    responses = []
+
+    def sdk_refresh(session, path):
+        fetching.set()
+        assert release.wait(3)
+        webapp.core.save_session(path, dict(session, token_info={"access_token": "renewed"}))
+        return []
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", sdk_refresh)
+    fetch = threading.Thread(target=lambda: responses.append(webapp.app.test_client().get("/api/devices?refresh=1")))
+    fetch.start()
+    assert fetching.wait(2)
+
+    def logout():
+        responses.append(webapp.app.test_client().post("/api/logout"))
+        logged_out.set()
+
+    transition = threading.Thread(target=logout)
+    transition.start()
+    assert not logged_out.wait(0.05)
+    release.set()
+    fetch.join(3)
+    transition.join(3)
+    assert len(responses) == 2 and all(response.status_code == 200 for response in responses)
+    assert not Path(webapp.SESSION_FILE).exists()
+    assert webapp.app.test_client().get("/api/device-exclusions").status_code == 401
+
+
+def test_restore_all_clears_large_sets_without_a_device_snapshot_or_cloud(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    digest = client.get("/api/device-exclusions").json["account_id"]
+    webapp._device_preferences.update(digest, exclude=[f"device-{number}" for number in range(2100)])
+    monkeypatch.setattr(webapp.core, "devices_from_session", _cloud_unavailable)
+    result = client.patch("/api/device-exclusions", json={"restore_all": True, "account_id": digest})
+    assert result.status_code == 200
+    assert result.json == {"excluded_ids": [], "revision": 2, "account_id": digest}
+    assert client.patch("/api/device-exclusions", json={"restore_all": True}).json == result.json
+
+
+def test_lan_response_identifies_its_account_for_client_snapshot_pairing(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    account_a = client.get("/api/device-exclusions").json["account_id"]
+    assert client.get("/api/lan").json["account_id"] == account_a
+    client = _exclusion_logged_in(webapp, monkeypatch, dict(PREFERENCE_SESSION, user_code="account-b"))
+    account_b = client.get("/api/devices").json["account_id"]
+    response = client.get("/api/lan")
+    assert response.json["account_id"] == account_b and account_b != account_a
+
+
+def test_scan_mutations_check_account_and_return_account_context(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    digest = client.get("/api/device-exclusions").json["account_id"]
+    gate = threading.Event()
+    fake = FakeScan({}, gate=gate)
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+    response = client.post("/api/lan/scan", json={"targets": "10.0.0.1", "account_id": "stale-account"})
+    assert response.status_code == 409 and response.json["error"] == "account_changed"
+    assert fake.calls == []
+    started = client.post("/api/lan/scan", json={"targets": "10.0.0.1", "account_id": digest})
+    try:
+        assert started.status_code == 202 and started.json["account_id"] == digest
+        progress = client.get("/api/lan/scan")
+        assert progress.json["account_id"] == digest
+        job = webapp._lan_job
+        refusal = client.delete("/api/lan/scan", json={"account_id": "stale-account"})
+        assert refusal.status_code == 409 and refusal.json["error"] == "account_changed"
+        assert not job["cancel"].is_set()
+        cancelled = client.delete("/api/lan/scan", json={"account_id": digest})
+        assert cancelled.status_code == 200 and cancelled.json["account_id"] == digest
+        assert job["cancel"].is_set()
+    finally:
+        gate.set()
+        _wait_for_job(client)
+
+
+def test_scan_preparation_rechecks_account_before_registering_a_job(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    digest = client.get("/api/device-exclusions").json["account_id"]
+    fake = FakeScan({})
+    monkeypatch.setattr(webapp.lan_scan, "scan", fake)
+
+    def switch_account():
+        with webapp._account_lock:
+            webapp.core.save_session(webapp.SESSION_FILE, dict(PREFERENCE_SESSION, user_code="account-b"))
+
+    monkeypatch.setattr(webapp.lan_scan, "require_scanner", switch_account)
+    response = client.post("/api/lan/scan", json={"targets": "10.0.0.1", "account_id": digest})
+    assert response.status_code == 409 and response.json["error"] == "account_changed"
+    assert webapp._lan_job is None and fake.calls == []
+
+
+def _devices_with_homes(webapp):
+    return webapp.core.Devices([
+        {"id": "plug", "name": "Plug", "local_key": "plug-key", "owner_id": "not-a-home"},
+        {"id": "lamp", "name": "Lamp", "local_key": "lamp-key"}],
+        homes=[{"id": 101, "name": "Main home"}, {"id": "202", "name": "Other home"},
+               {"id": "303", "name": "Empty home"}],
+        home_ids={"plug": [101, "202"], "lamp": ["202"]})
+
+
+def test_devices_adds_authoritative_home_memberships_and_keeps_full_snapshot(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    fetched = _devices_with_homes(webapp)
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: fetched)
+    response = client.get("/api/devices")
+
+    assert response.status_code == 200
+    assert response.json["homes"] == [{"id": "101", "name": "Main home"},
+        {"id": "202", "name": "Other home"}, {"id": "303", "name": "Empty home"}]
+    plug, lamp = response.json["devices"]
+    assert plug["home_ids"] == ["101", "202"] and plug["home_names"] == ["Main home", "Other home"]
+    assert lamp["home_ids"] == ["202"] and lamp["home_names"] == ["Other home"]
+    assert "home_ids" not in fetched[0], "web overlays leave source device records unchanged"
+    assert [device["id"] for device in webapp._session_devices(PREFERENCE_SESSION)] == ["plug", "lamp"]
+    assert client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).status_code == 200
+    assert len(client.get("/api/devices").json["devices"]) == 2
+
+
+def test_home_metadata_survives_cache_hits_and_restart(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    fetched = _devices_with_homes(webapp)
+    calls = []
+
+    def fetch(*args):
+        calls.append(1)
+        return fetched
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fetch)
+    first = client.get("/api/devices")
+    assert client.get("/api/devices").json == first.json
+    restarted = _restart(webapp)
+    assert restarted.app.test_client().get("/api/devices").json == first.json
+    assert calls == [1]
+
+
+def test_failed_home_refresh_retains_the_complete_cached_membership(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: _devices_with_homes(webapp))
+    first = client.get("/api/devices").json
+
+    def failed_fetch(*args):
+        raise RuntimeError("Home device request failed")
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", failed_fetch)
+    response = client.get("/api/devices?refresh=1")
+    assert response.status_code == 200 and response.json["stale"] is True
+    assert response.json["homes"] == first["homes"] and response.json["devices"] == first["devices"]
+    assert response.json["refresh_failed"] is True
+
+
+def test_old_cached_lists_have_no_home_metadata_until_explicit_refresh(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch)
+    old = client.get("/api/devices").json
+    assert "homes" not in old and all("home_ids" not in d for d in old["devices"])
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: _devices_with_homes(webapp))
+    assert client.get("/api/devices").json == old
+    refreshed = client.get("/api/devices?refresh=1").json
+    assert len(refreshed["homes"]) == 3
+    assert all(device["home_ids"] for device in refreshed["devices"])
+    assert "changes" not in refreshed, "adding home metadata does not invent device changes"
+
+
+def test_known_empty_homes_are_distinct_from_unavailable_home_metadata(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: webapp.core.Devices(
+        [], homes=[{"id": "empty", "name": "An empty home"}]))
+    response = client.get("/api/devices").json
+    assert response["devices"] == [] and response["homes"] == [{"id": "empty", "name": "An empty home"}]
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: webapp.core.Devices([]))
+    refreshed = client.get("/api/devices?refresh=1").json
+    assert refreshed["devices"] == [] and refreshed["homes"] == []

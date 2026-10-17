@@ -40,9 +40,9 @@ def test_release_version_is_consistent_across_metadata():
     pyproject = (ROOT / "pyproject.toml").read_text()
 
     version = config["version"]
-    headings = re.findall(r"^## (\S+)$", changelog, re.M)
+    headings = re.findall(r"^## (\d+\.\d+(?:\.\d+)?)$", changelog, re.M)
 
-    assert headings[0] == version, "newest changelog entry must be the app version"
+    assert headings[0] == version, "newest released changelog entry must be the app version"
     assert f"...v{version}" in changelog, "changelog needs a compare link for this release"
     assert re.search(rf'^version = "{re.escape(version)}\.\d+"$', pyproject, re.M), \
         "pyproject version must share the app's major.minor"
@@ -68,6 +68,7 @@ def test_dockerfile_has_home_assistant_labels_and_runtime_contract():
     assert "USER appuser" not in dockerfile
     assert "SESSION_FILE=/data/session.json" in dockerfile
     assert "device_cache.py" in dockerfile
+    assert "device_preferences.py" in dockerfile
     assert "lan_scan.py" in dockerfile
     assert 'VOLUME ["/data"]' in dockerfile
     assert "waitress-serve --listen=0.0.0.0:${PORT:-8000}" in dockerfile

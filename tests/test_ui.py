@@ -197,11 +197,11 @@ def record_shot(page, gallery, node):
 
 
 def cell_texts(page, column):
-    return page.locator(f"#rows tr td:nth-child({column})").all_inner_texts()
+    return page.locator(f"#rows tr td[data-column='{column}']").all_inner_texts()
 
 
 def open_panel(page, name):
-    page.click(f"#rows tr:has-text('{name}') td:first-child")
+    page.click(f"#rows tr:has-text('{name}') td.name-col")
     # "visible", not just "attached": the panel is visibility:hidden until the
     # slide-in starts, and innerText reads empty while it is.
     page.wait_for_selector("#panel[aria-hidden='false']", state="visible")
@@ -231,6 +231,7 @@ def test_table_shows_the_scan_columns_only(page):
         "Update Time", "Details",
     ]
     assert page.locator("#rows tr").count() == len(DEVICES)
+    assert page.locator("#selectAllDevices, #rows [data-device-select]").count() == 0
     # Fields that moved into the panel are not duplicated in the table.
     body = page.locator("#rows").inner_text()
     for moved in (PLUG.uuid, PLUG.category, PLUG.ip):
@@ -331,7 +332,7 @@ def test_panel_shows_local_time_utc_and_epoch(page):
     assert "2025-07-08 18:40:00 UTC" in updated
     assert str(demo_devices.UPDATE_TIME) in updated
     # The table reads local, not UTC.
-    assert "2025-07-09 00:10:00" in cell_texts(page, 8)[0]
+    assert "2025-07-09 00:10:00" in cell_texts(page, "update_time")[0]
 
 
 def data_points(page):
@@ -398,13 +399,13 @@ def test_panel_closes_on_escape_and_on_the_close_button(page):
 
 def test_filter_matches_names_specs_and_rendered_times(page):
     page.fill("#filter", "plug")
-    assert cell_texts(page, 1) == [PLUG.name]
+    assert cell_texts(page, "name") == [PLUG.name]
 
     page.fill("#filter", "cur_power")       # a data point code, only in the specs
-    assert cell_texts(page, 1) == [PLUG.name]
+    assert cell_texts(page, "name") == [PLUG.name]
 
     page.fill("#filter", "00:10:00")        # local time, rendered in the browser
-    assert len(cell_texts(page, 1)) == 3    # every device that has timestamps
+    assert len(cell_texts(page, "name")) == 3    # every device that has timestamps
 
     page.fill("#filter", "no-such-device")
     assert page.locator("#rows tr").count() == 0
@@ -415,11 +416,11 @@ def test_filter_matches_names_specs_and_rendered_times(page):
 
 def test_sorting_by_name_toggles_direction(page):
     page.click("#thead th[data-key='name']")
-    ascending = cell_texts(page, 1)
+    ascending = cell_texts(page, "name")
     assert ascending == sorted(ascending, key=str.lower)
 
     page.click("#thead th[data-key='name']")
-    assert cell_texts(page, 1) == list(reversed(ascending))
+    assert cell_texts(page, "name") == list(reversed(ascending))
 
 
 def test_csv_export_keeps_the_fields_dropped_from_the_table(page, tmp_path):
@@ -467,6 +468,9 @@ def _forget_devices(app):
             app._devices_cache_loaded = True
         app._clear_lan()
         app.device_cache.clear(app.DEVICE_CACHE_FILE, app.DEVICE_CACHE_KEY_FILE, app.LAN_CACHE_FILE)
+        # Visibility preferences intentionally outlive cache clears in the app.
+        # Each browser test still needs its own account preference state.
+        Path(app.DEVICE_PREFERENCES_FILE).unlink(missing_ok=True)
 
 
 @pytest.fixture()
@@ -718,11 +722,11 @@ def test_a_scan_fills_the_protocol_column_and_the_status_badges(page, running_ap
 
     assert calls[0]["targets"] == ["192.168.1.1", "192.168.1.2"]
     assert calls[0]["routers"] == {"192.168.1.1"}, "scanned, but taken for the router"
-    assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "3.4"
-    assert "3.3" in row(page, LAMP).locator("td:nth-child(5)").inner_text()
-    assert "device22" in row(page, LAMP).locator("td:nth-child(5)").inner_text()
-    assert row(page, PLUG).locator("td:nth-child(2)").inner_text().split() == ["LAN", "reachable"]
-    assert row(page, LAMP).locator("td:nth-child(2)").inner_text().split() == ["LAN", "busy"]
+    assert row(page, PLUG).locator("td[data-column='protocol_version']").inner_text() == "3.4"
+    assert "3.3" in row(page, LAMP).locator("td[data-column='protocol_version']").inner_text()
+    assert "device22" in row(page, LAMP).locator("td[data-column='protocol_version']").inner_text()
+    assert row(page, PLUG).locator("td[data-column='online']").inner_text().split() == ["LAN", "reachable"]
+    assert row(page, LAMP).locator("td[data-column='online']").inner_text().split() == ["LAN", "busy"]
     assert "via gateway" in row(page, SENSOR).inner_text()
     assert "not found" in row(page, BARE).inner_text()
     notice = page.locator("#lanSummaryNotice").inner_text()
@@ -752,14 +756,14 @@ def test_scanned_waits_for_the_new_results_when_a_summary_already_exists(
 
     scanned(page)
 
-    assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "3.5"
+    assert row(page, PLUG).locator("td[data-column='protocol_version']").inner_text() == "3.5"
     open_network(page, PLUG.name)
     assert field_value(page, "local_ip") == "192.168.2.62"
 
 
 def test_a_devices_status_falls_back_to_the_cloud_flag_without_a_scan(page):
-    assert row(page, PLUG).locator("td:nth-child(2)").inner_text() == "online"
-    assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "-"
+    assert row(page, PLUG).locator("td[data-column='online']").inner_text() == "online"
+    assert row(page, PLUG).locator("td[data-column='protocol_version']").inner_text() == "-"
 
 
 def test_the_status_column_sorts_lan_results_ahead_of_the_cloud_flag(page, running_app, monkeypatch):
@@ -769,7 +773,7 @@ def test_the_status_column_sorts_lan_results_ahead_of_the_cloud_flag(page, runni
 
     page.click("#thead th[data-key='online']")
 
-    names = [n.strip() for n in cell_texts(page, 1)]
+    names = [n.strip() for n in cell_texts(page, "name")]
     # reachable, then the cloud's online (the lamp), then busy, then the cloud's offline
     assert names == [PLUG.name, LAMP.name, BARE.name, SENSOR.name]
     assert "3 online" in page.locator("#count").inner_text()
@@ -811,7 +815,7 @@ def test_a_sub_device_whose_gateway_wasnt_found_is_greyed_out(page, running_app,
     _scans(running_app, monkeypatch, FIRST_SCAN)   # the sensor's gateway: not reached
     scanned(page)
 
-    badge = row(page, SENSOR).locator("td:nth-child(2) .badge")
+    badge = row(page, SENSOR).locator("td[data-column='online'] .badge")
     assert "muted" in badge.get_attribute("class")
     assert "reached through" not in page.locator("#lanSummaryNotice").inner_text()
     open_network(page, SENSOR.name)
@@ -824,7 +828,7 @@ def test_a_sub_device_reached_through_its_gateway_reads_as_reachable(page, runni
     _scans(running_app, monkeypatch, reached)
     scanned(page)
 
-    badge = row(page, SENSOR).locator("td:nth-child(2) .badge")
+    badge = row(page, SENSOR).locator("td[data-column='online'] .badge")
     assert "on" in badge.get_attribute("class").split()
     assert "plus 1 sub-device reached through its gateway" in page.locator("#lanSummaryNotice").inner_text()
 
@@ -836,7 +840,7 @@ def test_a_sub_device_reads_as_its_gateway_reports_it(page, running_app, monkeyp
     _scans(running_app, monkeypatch, reported, sub_devices_offline=int(not online))
     scanned(page)
 
-    badge = row(page, SENSOR).locator("td:nth-child(2) .badge")
+    badge = row(page, SENSOR).locator("td[data-column='online'] .badge")
     assert badge.inner_text().split() == ["LAN", *text.split()]
     assert cls in badge.get_attribute("class").split()
     state = "online" if online else "offline"
@@ -899,7 +903,7 @@ def test_one_device_can_be_checked_from_the_panel(page, running_app, monkeypatch
 
     assert calls[0]["targets"] == ["192.168.1.50"]
     assert calls[0]["only"] == [LAMP.id], "the whole list goes along, but only the lamp is looked for"
-    assert row(page, LAMP).locator("td:nth-child(5)").inner_text() == "3.5"
+    assert row(page, LAMP).locator("td[data-column='protocol_version']").inner_text() == "3.5"
     assert page.locator("#lanSummaryNotice").count() == 0, "a single check is not a scan"
 
 
@@ -935,7 +939,7 @@ def listed_ids(page):
 
 
 def test_local_key_heading_tracks_the_full_account_not_the_visible_rows(page, running_app, monkeypatch):
-    heading = page.locator("#thead th").nth(3)
+    heading = page.locator("#thead th").filter(has=page.locator("[data-key-toggle]"))
     _serves(running_app, monkeypatch, [PLUG, ZIGBEE_GATEWAY, BLE_GATEWAY])
     refreshed(page, "#changesNotice")
     assert heading.inner_text() == "Local Key", "gateway node IDs do not change the heading"
@@ -988,7 +992,7 @@ def test_a_missing_node_id_does_not_fall_back_to_the_uuid_or_local_key(page, run
     _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
     page.click("#thead [data-key-toggle]")
 
-    cell = row(page, sub).locator("td:nth-child(4)")
+    cell = row(page, sub).locator("td[data-column='local_key']")
     assert cell.inner_text() == "-"
     assert cell.locator(".dash").get_attribute("title") == \
         "Tuya did not return a Node ID for this sub-device."
@@ -1082,7 +1086,7 @@ def test_known_sub_devices_start_expanded_below_the_gateway(page, running_app, m
         assert child.get_attribute("data-gateway-id") == ZIGBEE_GATEWAY.id
         assert "sub-device-row" in child.get_attribute("class")
         assert child.get_attribute("id") in toggle.get_attribute("aria-controls").split()
-        assert child.locator("td:nth-child(5)").inner_text() == "-"
+        assert child.locator("td[data-column='protocol_version']").inner_text() == "-"
     assert row(page, SENSOR).get_attribute("data-gateway-id") is None, "its gateway is not in the list"
     if width < 600:
         node = row(page, VALVE).locator(".node-id")
@@ -1171,7 +1175,7 @@ def test_a_keyless_gateway_shows_the_key_it_answered_to(page, running_app, monke
     scanned(page)
 
     page.click("#thead [data-key-toggle]")
-    key_cell = row(page, ZIGBEE_GATEWAY).locator("td:nth-child(4)")
+    key_cell = row(page, ZIGBEE_GATEWAY).locator("td[data-column='local_key']")
     assert VALVE.local_key in key_cell.inner_text()
     assert key_cell.locator(".key-mark").get_attribute("title") == \
         "Tuya lists this key on its sub-device Garden Valve, not on the gateway."
@@ -1210,13 +1214,13 @@ def test_a_sub_device_shows_its_gateways_version_only_as_the_gateways(page, runn
     })
     scanned(page)
 
-    protocol = row(page, VALVE).locator("td:nth-child(5)")
+    protocol = row(page, VALVE).locator("td[data-column='protocol_version']")
     assert protocol.inner_text() == "-", "a sub-device has no protocol version of its own"
     assert protocol.locator(".dash").get_attribute("title") == \
         "Reached through its gateway, which uses protocol 3.4"
-    assert row(page, ZIGBEE_GATEWAY).locator("td:nth-child(5)").inner_text() == "3.4"
+    assert row(page, ZIGBEE_GATEWAY).locator("td[data-column='protocol_version']").inner_text() == "3.4"
     page.click("#thead th[data-key='protocol_version']")
-    names = page.locator("#rows tr td:first-child").all_inner_texts()
+    names = cell_texts(page, "name")
     assert names[-2].startswith(ZIGBEE_GATEWAY.name)
     assert names[-1].startswith(VALVE.name), "a sub-device stays under its gateway when sorting by protocol"
 
@@ -1321,7 +1325,7 @@ def test_one_click_checks_a_gateway_and_the_one_left_is_checked_too(page, runnin
     notice = page.locator("#lanSummaryNotice").inner_text()
     assert f"2 gateways answered to local keys Tuya lists on sub-devices: {found}." in notice
     for gateway in (ZIGBEE_GATEWAY, BLE_GATEWAY):
-        assert row(page, gateway).locator("td:nth-child(2)").inner_text().split() == ["LAN", "check", "needed"]
+        assert row(page, gateway).locator("td[data-column='online']").inner_text().split() == ["LAN", "check", "needed"]
     open_network(page, VALVE.name)
     assert "which answered at 192.168.2.8 to this device's key" in page.locator("#networkBody").inner_text()
     open_network(page, BLE_GATEWAY.name)
@@ -1365,7 +1369,7 @@ def test_the_last_targets_prefill_the_next_scan(page, running_app, monkeypatch):
     page.click("#scanBtn")
 
     assert page.locator("#scanTargets").input_value() == "192.168.2.0/24, 192.168.3.0/24"
-    assert row(page, PLUG).locator("td:nth-child(5)").inner_text() == "3.4", "results come back on load"
+    assert row(page, PLUG).locator("td[data-column='protocol_version']").inner_text() == "3.4", "results come back on load"
 
 
 def test_a_version_change_is_called_out_and_dismissed_on_its_own(page, running_app, monkeypatch):
@@ -1431,13 +1435,14 @@ def in_menu(page):
 def test_every_action_fits_in_a_wide_header(page):
     assert in_menu(page) == []
     assert page.locator("#moreWrap").is_hidden()
+    assert page.locator("#moreMenu").is_hidden()
 
 
 def test_a_narrow_header_moves_actions_into_the_menu_on_one_line(page):
     one_line = page.locator("header").bounding_box()["height"]
 
     page.set_viewport_size({"width": 375, "height": 800})
-    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+    page.wait_for_function("!!document.querySelector('#moreMenu #logoutBtn')")
 
     assert page.locator("header").bounding_box()["height"] == one_line
     assert "refreshBtn" not in in_menu(page), "Refresh is the last to go"
@@ -1447,20 +1452,20 @@ def test_a_narrow_header_moves_actions_into_the_menu_on_one_line(page):
 
     page.click("#moreBtn")
     assert page.locator("#moreMenu").is_visible()
-    assert page.evaluate("document.activeElement.id") == in_menu(page)[0]
+    expect(page.locator("#moreMenu button:visible").first).to_be_focused()
     page.click("#moreMenu #scanBtn")
 
     assert page.locator("#moreMenu").is_hidden()
     assert page.locator("#scanBox").is_visible()
 
     page.set_viewport_size({"width": 1440, "height": 1000})
-    page.wait_for_function("document.getElementById('moreWrap').classList.contains('hidden')")
+    page.wait_for_function("!document.querySelector('#moreMenu #logoutBtn')")
     assert in_menu(page) == []
 
 
 def test_the_menu_closes_on_escape_and_on_an_outside_click(page):
     page.set_viewport_size({"width": 375, "height": 800})
-    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+    page.wait_for_function("!!document.querySelector('#moreMenu #logoutBtn')")
 
     page.click("#moreBtn")
     page.keyboard.press("Escape")
@@ -1478,14 +1483,14 @@ def test_opening_the_panel_moves_actions_out_of_its_way(page):
     assert in_menu(page) == []
 
     open_panel(page, PLUG.name)
-    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+    page.wait_for_function("!!document.querySelector('#moreMenu #logoutBtn')")
 
     assert "logoutBtn" in in_menu(page)
 
 
 def test_the_menu_button_is_as_tall_as_the_buttons_beside_it(page):
     page.set_viewport_size({"width": 375, "height": 800})
-    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+    page.wait_for_function("!!document.querySelector('#moreMenu #logoutBtn')")
 
     more = page.locator("#moreBtn").bounding_box()
     refresh = page.locator("#refreshBtn").bounding_box()
@@ -1573,7 +1578,7 @@ def test_confirming_logs_out(page, restores_session):
 
 def test_log_out_from_the_menu_asks_too(page, running_app):
     page.set_viewport_size({"width": 375, "height": 800})
-    page.wait_for_function("!document.getElementById('moreWrap').classList.contains('hidden')")
+    page.wait_for_function("!!document.querySelector('#moreMenu #logoutBtn')")
 
     page.click("#moreBtn")
     page.click("#moreMenu #logoutBtn")
@@ -2694,3 +2699,1030 @@ def test_network_short_mobile_viewport_keeps_header_fixed_and_actions_reachable(
     assert box["y"] >= title_box["y"] + title_box["height"]
     assert box["y"] + box["height"] <= 640
     assert box["x"] >= 0 and box["x"] + box["width"] <= 320
+
+
+# --------------------------------------------------------------------------- #
+# Persistent device exclusions (issue #9)
+# --------------------------------------------------------------------------- #
+def device_checkbox(page, device):
+    identity = device if isinstance(device, str) else device.id
+    return page.locator(f"#rows [data-device-select='{identity}']")
+
+
+def select_devices(page, *devices):
+    enter_selection(page)
+    for device in devices:
+        device_checkbox(page, device).check()
+
+
+def enter_selection(page):
+    expect(page.locator("#devices")).to_be_visible()
+    if not page.locator("#selectAllDevices").count():
+        open_filters(page)
+        page.locator("#selectDevicesBtn").click()
+    expect(page.locator("#selectAllDevices")).to_be_visible()
+
+
+def switch_device_view(page):
+    if page.locator("#backToDevicesBtn").is_visible():
+        page.locator("#backToDevicesBtn").click()
+    else:
+        open_filters(page)
+        page.locator("#excludedViewBtn").click()
+
+
+def assert_no_selection(page):
+    assert page.locator("#rows [data-device-select]:checked").count() == 0
+    if page.locator("#bulkActions").is_visible():
+        expect(page.locator("#selectionCount")).to_have_text("0 selected")
+        expect(page.locator("#bulkActions button:not(.hidden)").filter(
+            has_text="selected")).to_be_disabled()
+
+
+def save_selection(page, *, restore=False):
+    with page.expect_response(lambda response:
+                              response.url.endswith("/api/device-exclusions") and
+                              response.request.method == "PATCH") as saved:
+        page.locator("#restoreSelected" if restore else "#excludeSelected").click()
+    saved.value.finished()
+    assert saved.value.status == 200
+    expect(page.locator("#bulkActions")).to_be_hidden()
+    return saved.value.json()
+
+
+def export_rows(page, tmp_path, filename):
+    with page.expect_download() as download:
+        page.locator("#csvBtn").click()
+    assert download.value.suggested_filename == filename
+    path = tmp_path / filename
+    download.value.save_as(path)
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def test_exclusions_selection_is_opt_in_and_done_clears_without_saving(page):
+    original_headers = page.locator("#thead th").all_inner_texts()
+    assert page.locator("#rows input[type='checkbox'], #thead input[type='checkbox']").count() == 0
+    assert page.locator("#thead .select-col, #rows .select-col").count() == 0
+    enter_selection(page)
+    assert page.locator("#rows [data-device-select]").count() == len(DEVICES)
+    assert page.locator("#selectAllDevices").get_attribute("aria-label")
+    expect(page.locator("#excludeSelected")).to_be_disabled()
+    select_devices(page, PLUG)
+    page.locator("#selectionDoneBtn").click()
+
+    assert page.locator("#rows input[type='checkbox'], #thead input[type='checkbox']").count() == 0
+    assert page.locator("#thead .select-col, #rows .select-col").count() == 0
+    assert page.locator("#thead th").all_inner_texts() == original_headers
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+    select_devices(page, PLUG)
+    save_selection(page)
+    assert page.locator("#rows [data-device-select], #selectAllDevices").count() == 0
+    switch_device_view(page)
+    expect(row(page, PLUG)).to_be_visible()
+    assert page.locator("#rows [data-device-select], #selectAllDevices").count() == 0
+    open_panel(page, PLUG.name)
+    assert page.locator("#panelTitle").inner_text() == PLUG.name
+
+
+@pytest.mark.parametrize("width", [1440, 390])
+def test_exclusions_whole_row_toggles_selection_without_opening_details(page, width):
+    page.set_viewport_size({"width": width, "height": 1000})
+    enter_selection(page)
+    assert page.locator("#rows [data-open], #thead .details-col").count() == 0
+    for column in ("name", "id", "online"):
+        cell = row(page, PLUG).locator(f"td[data-column='{column}']")
+        cell.click()
+        expect(device_checkbox(page, PLUG)).to_be_checked()
+        expect(page.locator("#selectionCount")).to_have_text("1 selected")
+        assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+        cell.click()
+        expect(device_checkbox(page, PLUG)).not_to_be_checked()
+        expect(page.locator("#selectionCount")).to_have_text("0 selected")
+    row(page, PLUG).locator("td.select-col").click(position={"x": 3, "y": 3})
+    expect(device_checkbox(page, PLUG)).to_be_checked()
+    device_checkbox(page, PLUG).click()
+    expect(device_checkbox(page, PLUG)).not_to_be_checked()
+    expect(page.locator("#selectionCount")).to_have_text("0 selected")
+    key = row(page, PLUG).locator("[data-copy]").first
+    key.click()
+    expect(key).to_have_text("copied!")
+    assert clipboard(page) == PLUG.local_key
+    expect(device_checkbox(page, PLUG)).not_to_be_checked()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+    page.locator("#selectionDoneBtn").click()
+    open_panel(page, PLUG.name)
+    assert page.locator("#panelTitle").inner_text() == PLUG.name
+
+
+def test_exclusions_whole_row_restores_current_and_missing_devices_without_details(
+        page, running_app, monkeypatch):
+    select_devices(page, PLUG, LAMP)
+    save_selection(page)
+    _serves(running_app, monkeypatch, [LAMP, SENSOR, BARE])
+    refreshed(page, "#rows tr")
+    switch_device_view(page)
+    enter_selection(page)
+    for device in (PLUG, LAMP):
+        page.locator(f"#rows tr[data-id='{device.id}'] td[data-column='name']").click()
+        expect(device_checkbox(page, device)).to_be_checked()
+    expect(page.locator("#selectionCount")).to_have_text("2 selected")
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+    assert save_selection(page, restore=True)["excluded_ids"] == []
+    switch_device_view(page)
+    assert set(listed_ids(page)) == {LAMP.id, SENSOR.id, BARE.id}
+
+
+def test_exclusions_bulk_round_trip_persists_across_reload_and_restores_without_refresh(page):
+    select_devices(page, PLUG, LAMP)
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+    expect(page.locator("#selectionCount")).to_contain_text("2 selected")
+    assert page.locator("#selectAllDevices").evaluate("el => el.indeterminate")
+
+    result = save_selection(page)
+
+    assert set(result["excluded_ids"]) == {PLUG.id, LAMP.id}
+    assert result["revision"] > 0 and result["account_id"]
+    assert listed_ids(page) == [SENSOR.id, BARE.id]
+    expect(page.locator("#excludedViewBtn")).to_contain_text("2")
+    assert page.locator("#changesNotice").count() == 0
+    page.reload(wait_until="networkidle")
+    expect(row(page, PLUG)).to_have_count(0)
+    assert listed_ids(page) == [SENSOR.id, BARE.id]
+
+    switch_device_view(page)
+    expect(row(page, PLUG)).to_be_visible()
+    assert set(listed_ids(page)) == {PLUG.id, LAMP.id}
+    assert PLUG.local_key not in row(page, PLUG).inner_text()
+    select_devices(page, PLUG)
+    save_selection(page, restore=True)
+    expect(row(page, PLUG)).to_have_count(0)
+    assert listed_ids(page) == [LAMP.id]
+    page.locator("#restoreAll").click()
+    expect(page.locator("#rows tr")).to_have_count(0)
+    switch_device_view(page)
+    expect(page.locator("#rows tr")).to_have_count(len(DEVICES))
+    assert page.locator("#changesNotice").count() == 0
+
+
+def test_exclusions_select_all_only_selects_visible_matches_not_collapsed_children_or_context(
+        page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY,
+                   _named_sub(VALVE, ZIGBEE_GATEWAY), _named_sub(WATER_TIMER, ZIGBEE_GATEWAY))
+    row(page, ZIGBEE_GATEWAY).locator("[data-gateway-toggle]").click()
+    enter_selection(page)
+    page.locator("#selectAllDevices").check()
+    assert page.locator("#rows [data-device-select]:checked").count() == len(DEVICES) + 1
+    assert not device_checkbox(page, VALVE).is_checked()
+    assert not device_checkbox(page, WATER_TIMER).is_checked()
+    page.locator("#clearSelection").click()
+    page.fill("#filter", VALVE.name)
+    assert listed_ids(page) == [ZIGBEE_GATEWAY.id, VALVE.id]
+    row(page, ZIGBEE_GATEWAY).locator("td[data-column='id']").click()
+    assert_no_selection(page)
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+
+    page.locator("#selectAllDevices").check()
+
+    assert device_checkbox(page, VALVE).is_checked()
+    assert device_checkbox(page, ZIGBEE_GATEWAY).is_disabled()
+    expect(page.locator("#selectionCount")).to_contain_text("1 selected")
+    result = save_selection(page)
+    assert result["excluded_ids"] == [VALVE.id]
+    expect(page.locator("#rows tr")).to_have_count(0)
+
+
+def test_exclusions_selection_survives_sort_and_redraw_but_clears_on_search_and_view(page):
+    select_devices(page, LAMP)
+    save_selection(page)
+    enter_selection(page)
+    checkbox = device_checkbox(page, PLUG)
+    checkbox.focus()
+    checkbox.press("Space")
+    expect(checkbox).to_be_checked()
+    expect(checkbox).to_be_focused()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+    page.locator("#thead th[data-key='name']").click()
+    expect(checkbox).to_be_checked()
+    page.locator("#thead [data-key-toggle]").click()
+    expect(checkbox).to_be_checked()
+    page.fill("#filter", "plug")
+    expect(checkbox).not_to_be_checked()
+    assert_no_selection(page)
+    select_devices(page, PLUG)
+    switch_device_view(page)
+    expect(page.locator("#bulkActions")).to_be_hidden()
+    switch_device_view(page)
+    enter_selection(page)
+    expect(device_checkbox(page, PLUG)).not_to_be_checked()
+
+
+def test_exclusions_selection_prunes_collapsed_children_and_devices_removed_by_refresh(
+        page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY,
+                   _named_sub(VALVE, ZIGBEE_GATEWAY))
+    select_devices(page, PLUG, VALVE)
+    row(page, ZIGBEE_GATEWAY).locator("[data-gateway-toggle]").click()
+    assert device_checkbox(page, PLUG).is_checked()
+    assert not device_checkbox(page, VALVE).is_checked()
+    expect(page.locator("#selectionCount")).to_contain_text("1 selected")
+    _serves(running_app, monkeypatch, [LAMP, SENSOR, BARE])
+    refreshed(page, "#changesNotice")
+    assert_no_selection(page)
+
+
+def test_exclusions_failed_write_keeps_rows_and_selection_and_can_be_retried(page):
+    def fail_write(route):
+        if route.request.method == "PATCH":
+            route.fulfill(status=503, json={"error": "Could not save device exclusions. Try again."})
+        else:
+            route.continue_()
+
+    page.route("**/api/device-exclusions", fail_write)
+    select_devices(page, PLUG, LAMP)
+    page.locator("#excludeSelected").click()
+    expect(page.locator("#exclusionError")).to_be_visible()
+    expect(page.locator("#filterCount")).to_be_hidden()
+    expect(page.locator("#excludeSelected")).to_be_enabled()
+    assert listed_ids(page) == [device.id for device in DEVICES]
+    assert device_checkbox(page, PLUG).is_checked() and device_checkbox(page, LAMP).is_checked()
+    assert page.locator("#selectionCount").inner_text().startswith("2 selected")
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+    page.unroute("**/api/device-exclusions", fail_write)
+
+    save_selection(page)
+
+    expect(page.locator("#exclusionError")).to_be_hidden()
+    expect(page.locator("#filterCount")).to_have_text("2")
+    assert listed_ids(page) == [SENSOR.id, BARE.id]
+
+
+def test_exclusions_failed_save_is_not_replayed_after_the_selection_context_changes(page):
+    def fail_write(route):
+        if route.request.method == "PATCH":
+            route.fulfill(status=503, json={"error": "preference_unavailable"})
+        else:
+            route.continue_()
+
+    page.route("**/api/device-exclusions", fail_write)
+    select_devices(page, PLUG)
+    page.locator("#excludeSelected").click()
+    expect(page.locator("#exclusionError")).to_be_visible()
+    page.fill("#filter", LAMP.name)
+    expect(page.locator("#exclusionError")).to_be_hidden()
+    assert_no_selection(page)
+    page.unroute("**/api/device-exclusions", fail_write)
+    select_devices(page, LAMP)
+
+    assert save_selection(page)["excluded_ids"] == [LAMP.id]
+
+    page.fill("#filter", "")
+    expect(row(page, PLUG)).to_be_visible()
+    expect(row(page, LAMP)).to_have_count(0)
+
+
+def test_exclusions_initial_load_failure_hides_table_until_a_successful_retry(page):
+    def fail_read(route):
+        route.fulfill(status=503, json={"error": "Device preferences could not be read. Try again."})
+
+    page.route("**/api/device-exclusions", fail_read)
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#retryExclusions")).to_be_visible()
+    expect(page.locator("#rows tr")).to_have_count(0)
+    assert page.locator("#exclusionError").get_attribute("role") == "alert"
+    page.unroute("**/api/device-exclusions", fail_read)
+
+    page.locator("#retryExclusions").click()
+
+    expect(page.locator("#rows tr")).to_have_count(len(DEVICES))
+    expect(page.locator("#exclusionError")).to_be_hidden()
+
+
+def test_exclusions_failed_background_read_preserves_the_last_saved_view(page):
+    select_devices(page, PLUG)
+    save_selection(page)
+
+    def fail_read(route):
+        route.fulfill(status=503, json={"error": "preference_unavailable"})
+
+    page.route("**/api/device-exclusions", fail_read)
+    page.evaluate("window.dispatchEvent(new Event('focus'))")
+    expect(page.locator("#exclusionError")).to_be_visible()
+    assert listed_ids(page) == [LAMP.id, SENSOR.id, BARE.id]
+    page.unroute("**/api/device-exclusions", fail_read)
+    page.locator("#retryExclusions").click()
+    expect(page.locator("#exclusionError")).to_be_hidden()
+    assert listed_ids(page) == [LAMP.id, SENSOR.id, BARE.id]
+
+
+def test_exclusions_late_older_read_cannot_undo_a_successful_save(page):
+    previous = page.request.get(page.url + "api/device-exclusions").json()
+    held = []
+
+    def delay_read(route):
+        if route.request.method == "GET":
+            held.append(route)
+        else:
+            route.continue_()
+
+    page.route("**/api/device-exclusions", delay_read)
+    with page.expect_request(lambda request: request.url.endswith("/api/device-exclusions") and
+                             request.method == "GET"):
+        page.evaluate("window.dispatchEvent(new Event('focus'))")
+    select_devices(page, PLUG)
+    saved = save_selection(page)
+    assert saved["revision"] > previous["revision"]
+    assert len(held) == 1
+
+    with page.expect_response(lambda response: response.url.endswith("/api/device-exclusions") and
+                              response.request.method == "GET") as response:
+        held[0].fulfill(status=200, json=previous)
+    response.value.finished()
+    page.wait_for_timeout(100)
+
+    expect(row(page, PLUG)).to_have_count(0)
+    expect(page.locator("#excludedViewBtn")).to_contain_text("1")
+    assert page.evaluate("exclusionRevision") == saved["revision"]
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == [PLUG.id]
+
+
+def test_exclusions_mismatched_account_responses_do_not_render_a_mixed_device_list(page):
+    def different_account(route):
+        route.fulfill(status=200, json={"account_id": "another-account", "revision": 0,
+                                        "excluded_ids": []})
+
+    page.route("**/api/device-exclusions", different_account)
+    page.reload(wait_until="networkidle")
+
+    expect(page.locator("#retryExclusions")).to_be_visible()
+    expect(page.locator("#rows tr")).to_have_count(0)
+    expect(page.locator("#filter")).to_be_disabled()
+    assert PLUG.local_key not in page.locator("#devices").inner_text()
+    page.unroute("**/api/device-exclusions", different_account)
+    page.locator("#retryExclusions").click()
+    expect(page.locator("#rows tr")).to_have_count(len(DEVICES))
+    expect(page.locator("#exclusionError")).to_be_hidden()
+
+
+def test_exclusions_account_changed_during_save_requires_reload_and_never_replays_selection(
+        page, restores_session):
+    select_devices(page, PLUG, LAMP)
+    path = Path(restores_session.SESSION_FILE)
+    session = json.loads(path.read_text())
+    session["user_code"] = "a-different-account"
+    path.write_text(json.dumps(session))
+    patches = []
+    page.on("request", lambda request: patches.append(request.post_data_json)
+            if request.url.endswith("/api/device-exclusions") and request.method == "PATCH" else None)
+
+    with page.expect_response(lambda response: response.url.endswith("/api/device-exclusions") and
+                              response.request.method == "PATCH") as rejected:
+        page.locator("#excludeSelected").click()
+    assert rejected.value.status == 409
+    expect(page.locator("#exclusionError")).to_be_visible()
+    expect(page.locator("#retryExclusions")).to_be_visible()
+    page.locator("#retryExclusions").click()
+
+    expect(page.locator("#exclusionError")).to_be_hidden()
+    expect(page.locator("#rows tr")).to_have_count(len(DEVICES))
+    expect(page.locator("#bulkActions")).to_be_hidden()
+    enter_selection(page)
+    expect(device_checkbox(page, PLUG)).not_to_be_checked()
+    assert len(patches) == 1
+    assert set(patches[0]["exclude"]) == {PLUG.id, LAMP.id}
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+
+
+def test_exclusions_missing_ids_can_be_restored_but_never_exported(page, running_app, monkeypatch,
+                                                                 tmp_path):
+    select_devices(page, PLUG, LAMP)
+    save_selection(page)
+    _serves(running_app, monkeypatch, [LAMP, SENSOR, BARE])
+    refreshed(page, "#rows tr")
+    active_csv = export_rows(page, tmp_path, "tuya-local-key.csv")
+    assert {device["id"] for device in active_csv} == {SENSOR.id, BARE.id}
+    switch_device_view(page)
+    missing = page.locator(f"#rows tr[data-id='{PLUG.id}'][data-missing]")
+    expect(missing).to_be_visible()
+    assert "Not in the current device list" in missing.inner_text()
+    assert missing.locator("[data-open], .key, [data-copy]").count() == 0
+    excluded_csv = export_rows(page, tmp_path, "tuya-local-key-excluded.csv")
+    assert [device["id"] for device in excluded_csv] == [LAMP.id]
+    page.fill("#filter", LAMP.name)
+    assert [device["id"] for device in export_rows(page, tmp_path, "tuya-local-key-excluded.csv")] == [LAMP.id]
+    page.fill("#filter", PLUG.id)
+    select_devices(page, PLUG)
+    assert save_selection(page, restore=True)["excluded_ids"] == [LAMP.id]
+    expect(missing).to_have_count(0)
+    page.locator("#restoreAll").click()
+    expect(page.locator("#restoreAll")).to_be_hidden()
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+
+
+def test_exclusions_restore_all_includes_ids_hidden_by_search(page):
+    enter_selection(page)
+    page.locator("#selectAllDevices").check()
+    save_selection(page)
+    expect(page.locator("#rows tr")).to_have_count(0)
+    assert "excluded" in page.locator("#devices").inner_text().lower()
+    switch_device_view(page)
+    page.fill("#filter", PLUG.name)
+    assert listed_ids(page) == [PLUG.id]
+
+    page.locator("#restoreAll").click()
+
+    expect(page.locator("#rows tr")).to_have_count(0)
+    switch_device_view(page)
+    assert listed_ids(page) == [PLUG.id]
+    page.fill("#filter", "")
+    expect(page.locator("#rows tr")).to_have_count(len(DEVICES))
+
+
+def test_exclusions_change_notices_follow_the_view_without_acknowledging_hidden_changes(
+        page, running_app, monkeypatch):
+    select_devices(page, PLUG)
+    save_selection(page)
+    _serves(running_app, monkeypatch, _with_rotated_key())
+    refreshed(page, "#rows tr")
+    assert page.locator("#changesNotice").count() == 0
+    switch_device_view(page)
+    expect(page.locator("#changesNotice")).to_contain_text("1 local key changed")
+    assert PLUG.name in page.locator("#changesNotice").inner_text()
+    assert "ROTATED-KEY-9999" not in page.locator("#changesNotice").inner_text()
+    select_devices(page, PLUG)
+    save_selection(page, restore=True)
+    assert page.locator("#changesNotice").count() == 0
+    switch_device_view(page)
+    expect(page.locator("#changesNotice")).to_contain_text("1 local key changed")
+    assert "key changed" in row(page, PLUG).inner_text().lower()
+
+
+@pytest.mark.parametrize("hide_gateway, hide_child", [(True, False), (False, True), (True, True)])
+def test_exclusions_gateway_visibility_keeps_account_wide_scan_and_child_setup_evidence(
+        page, running_app, monkeypatch, hide_gateway, hide_child):
+    child = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, child)
+    hidden = [device for device, excluded in ((ZIGBEE_GATEWAY, hide_gateway), (child, hide_child))
+              if excluded]
+    select_devices(page, *hidden)
+    save_selection(page)
+    expected_ids = {device.id for device in DEVICES} | {
+        device.id for device in (ZIGBEE_GATEWAY, child) if device not in hidden}
+    assert set(listed_ids(page)) == expected_ids, "group context must respect each device's visibility"
+    calls = _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=child.id),
+        child.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+
+    scanned(page)
+
+    assert {ZIGBEE_GATEWAY.id, child.id} <= set(calls[0]["devices"])
+    assert set(listed_ids(page)) == expected_ids
+    assert "all account devices" in page.locator("#lanSummaryNotice").inner_text()
+    if hide_child:
+        if not hide_gateway:
+            open_setup(page, ZIGBEE_GATEWAY.name)
+            assert page.locator(f".setup-children [data-open-device='{child.id}']").count() == 0
+            assert "excluded sub-device" in page.locator("#setupBody").inner_text().lower()
+            page.locator("#panelClose").click()
+        switch_device_view(page)
+    open_setup(page, child.name)
+    assert setup_value(page, "device_id") == ZIGBEE_GATEWAY.id + (" Excluded" if hide_gateway else "")
+    assert setup_field(page, "device_id").locator("button.setup-copy").get_attribute("data-copy") == ZIGBEE_GATEWAY.id
+    assert setup_value(page, "host") == "192.168.2.8"
+    assert setup_value(page, "protocol_version") == "3.4"
+    assert setup_value(page, "device_cid") == child.node_id
+    assert setup_field(page, "local_key").locator("button.setup-copy").get_attribute("data-copy") == child.local_key
+    setup_tool(page, "tinytuya")
+    snippets = execute_setup_snippet(copied_setup_snippet(page), monkeypatch)
+    assert snippets[0].id == ZIGBEE_GATEWAY.id
+    assert snippets[0].real_local_key == child.local_key.encode("latin1")
+    assert snippets[1].id == child.id and snippets[1].parent is snippets[0]
+    if hide_gateway and not hide_child:
+        page.locator(f".setup-card [data-open-device='{ZIGBEE_GATEWAY.id}']").click()
+        expect(page.locator("#panel [data-excluded-note]")).to_contain_text("Excluded")
+        assert setup_value(page, "dev_id") == ZIGBEE_GATEWAY.id
+        with page.expect_response(lambda response: response.url.endswith("/api/device-exclusions") and
+                                  response.request.method == "PATCH") as restored:
+            page.locator(f"#panel [data-restore-device='{ZIGBEE_GATEWAY.id}']").click()
+        assert restored.value.status == 200
+        expect(row(page, ZIGBEE_GATEWAY)).to_be_visible()
+        expect(page.locator("#panel [data-excluded-note]")).to_have_count(0)
+        page.locator("#panelBack").click()
+        assert page.locator("#panelTitle").inner_text() == f"Set up “{child.name}” in…"
+
+
+@pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"),
+                                         (390, "light"), (390, "dark")])
+def test_exclusions_controls_fit_and_keyboard_focus_survives_selected_row_removal(page, width, scheme):
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.emulate_media(color_scheme=scheme)
+    if width >= 900:
+        open_panel(page, LAMP.name)
+    enter_selection(page)
+    checkbox = device_checkbox(page, PLUG)
+    assert PLUG.name in checkbox.get_attribute("aria-label")
+    checkbox.focus()
+    checkbox.press("Space")
+    expect(checkbox).to_be_focused()
+    assert page.evaluate("document.documentElement.scrollWidth") <= width
+
+    action = page.locator("#excludeSelected")
+    action.scroll_into_view_if_needed()
+    box = action.bounding_box()
+    assert box["x"] >= 0 and box["x"] + box["width"] <= width
+    save_selection(page)
+
+    if width >= 900:
+        assert page.locator("#panelTitle").inner_text() == LAMP.name
+        assert page.locator("#panel").get_attribute("aria-hidden") == "false"
+    assert page.evaluate("document.activeElement !== document.body && document.activeElement.isConnected")
+    if width >= 900:
+        page.locator("#panelClose").click()
+    switch_device_view(page)
+    expect(row(page, PLUG)).to_be_visible()
+    select_devices(page, PLUG)
+    expect(page.locator("#restoreSelected")).to_be_visible()
+    restore_box = page.locator("#restoreSelected").bounding_box()
+    assert restore_box["x"] >= 0 and restore_box["x"] + restore_box["width"] <= width
+    assert page.evaluate("document.documentElement.scrollWidth") <= width
+
+
+# --------------------------------------------------------------------------- #
+# SDK home membership filters the presentation while setup/scans keep all data.
+# --------------------------------------------------------------------------- #
+HOMES = [
+    {"id": "home-a", "name": "Home"},
+    {"id": "home-b", "name": "Home"},
+    {"id": "home-empty", "name": "Holiday home"},
+]
+HOME_MEMBERSHIP = {
+    PLUG.id: ["home-a", "home-b"],   # shared: both authoritative memberships survive
+    LAMP.id: ["home-b"],
+    BARE.id: ["home-a"],
+    SENSOR.id: [],
+}
+
+
+def serves_homes(page, app, monkeypatch, *, devices=DEVICES, homes=HOMES,
+                 membership=HOME_MEMBERSHIP):
+    _serves(app, monkeypatch, app.core.Devices(devices, homes=homes, home_ids=membership))
+    refreshed(page, "#filtersBtn")
+
+
+def open_filters(page):
+    if page.locator("#filtersPopover").is_hidden():
+        page.locator("#filtersBtn").click()
+    expect(page.locator("#filtersPopover")).to_be_visible()
+
+
+def select_home(page, home_id=""):
+    open_filters(page)
+    value = "unknown" if home_id == "unknown" else "home:" + home_id if home_id else ""
+    page.locator("#homeFilter").select_option(value)
+
+
+def test_homes_use_authoritative_ids_preserve_shared_membership_and_show_empty_unknown_groups(
+        page, running_app, monkeypatch, tmp_path):
+    serves_homes(page, running_app, monkeypatch)
+    assert page.locator("#homeFilter option[value='home:home-a']").inner_text() == "Home (home-a)"
+    assert page.locator("#homeFilter option[value='home:home-b']").inner_text() == "Home (home-b)"
+    assert page.locator("#homeFilter option[value='home:home-empty']").inner_text() == "Holiday home"
+    select_home(page, "home-a")
+    assert set(listed_ids(page)) == {PLUG.id, BARE.id}
+    assert page.locator("#count").inner_text().startswith("2 devices")
+    assert {device["id"] for device in export_rows(page, tmp_path, "tuya-local-key.csv")} == {PLUG.id, BARE.id}
+    page.fill("#filter", "kitchen")
+    assert listed_ids(page) == [PLUG.id]
+    select_home(page, "home-b")
+    assert listed_ids(page) == [PLUG.id], "a shared device belongs to either home by ID"
+    page.fill("#filter", "")
+    assert set(listed_ids(page)) == {PLUG.id, LAMP.id}
+    select_home(page, "home-empty")
+    assert listed_ids(page) == []
+    expect(page.locator("#emptyDevices")).to_be_visible()
+    select_home(page, "unknown")
+    assert listed_ids(page) == [SENSOR.id]
+    select_home(page)
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    assert page.locator("#rows [data-device-select], #selectAllDevices").count() == 0
+
+
+def test_homes_filter_is_remembered_on_reload_and_missing_home_returns_to_all(
+        page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch)
+    select_home(page, "home-b")
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#homeFilter")).to_have_value("home:home-b")
+    assert set(listed_ids(page)) == {PLUG.id, LAMP.id}
+    serves_homes(page, running_app, monkeypatch, homes=[HOMES[0]],
+                 membership={PLUG.id: ["home-a"], BARE.id: ["home-a"]})
+    expect(page.locator("#homeFilter")).to_have_value("")
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+
+
+def test_homes_remembered_filter_is_scoped_to_the_logged_in_account(
+        page, restores_session, monkeypatch):
+    serves_homes(page, restores_session, monkeypatch)
+    select_home(page, "home-a")
+    path = Path(restores_session.SESSION_FILE)
+    original_session = json.loads(path.read_text())
+    another_session = dict(original_session, user_code="different-home-account")
+    path.write_text(json.dumps(another_session))
+    refreshed(page, "#filtersBtn")
+    expect(page.locator("#homeFilter")).to_have_value("")
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    select_home(page, "home-b")
+    path.write_text(json.dumps(original_session))
+    refreshed(page, "#filtersBtn")
+    expect(page.locator("#homeFilter")).to_have_value("home:home-a")
+    assert set(listed_ids(page)) == {PLUG.id, BARE.id}
+
+
+def test_homes_remembered_filter_survives_a_snapshot_without_home_metadata(
+        page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch)
+    select_home(page, "home-b")
+    _serves(running_app, monkeypatch, DEVICES)
+    refreshed(page, "#filtersBtn")
+    open_filters(page)
+    expect(page.locator("#homeFilter")).to_have_value("")
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    page.reload(wait_until="networkidle")
+    open_filters(page)
+    expect(page.locator("#homeHint [data-refresh-homes]")).to_be_visible()
+    serves_homes(page, running_app, monkeypatch)
+    expect(page.locator("#homeFilter")).to_have_value("home:home-b")
+    assert set(listed_ids(page)) == {PLUG.id, LAMP.id}
+
+
+def test_homes_filter_still_works_when_browser_storage_is_unavailable(
+        page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.add_init_script("""(() => {
+      for (const method of ["getItem", "setItem"]) {
+        Object.defineProperty(Storage.prototype, method, {
+          configurable: true, value: () => { throw new Error("Storage unavailable"); }
+        });
+      }
+    })();""")
+    page.reload(wait_until="networkidle")
+    select_home(page, "home-a")
+    assert set(listed_ids(page)) == {PLUG.id, BARE.id}
+    page.locator("#thead th[data-key='name']").click()
+    assert set(listed_ids(page)) == {PLUG.id, BARE.id}
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#homeFilter")).to_have_value("")
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    assert errors == []
+
+
+def test_homes_old_snapshot_requires_explicit_refresh_and_never_infers_membership(
+        page, running_app, monkeypatch):
+    assert page.locator("#homeFilter option").all_inner_texts() == ["All homes"]
+    open_filters(page)
+    expect(page.locator("#homeHint [data-refresh-homes]")).to_be_visible()
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    refreshed_requests = []
+    page.on("request", lambda request: refreshed_requests.append(request.url)
+            if "/api/devices?refresh=1" in request.url else None)
+    _serves(running_app, monkeypatch,
+            running_app.core.Devices(DEVICES, homes=HOMES, home_ids=HOME_MEMBERSHIP))
+    page.reload(wait_until="networkidle")
+    open_filters(page)
+    expect(page.locator("#homeHint [data-refresh-homes]")).to_be_visible()
+    assert refreshed_requests == [], "loading a metadata-free snapshot must not trigger extra cloud queries"
+    with page.expect_response(lambda response: response.url.endswith("/api/devices?refresh=1")):
+        page.locator("#homeHint [data-refresh-homes]").click()
+    expect(page.locator("#homeFilter option[value='home:home-a']")).to_have_count(1)
+    expect(page.locator("#homeHint")).to_be_hidden()
+    select_home(page, "home-a")
+    assert set(listed_ids(page)) == {PLUG.id, BARE.id}
+
+
+def test_homes_known_empty_metadata_has_no_refresh_warning(page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch, homes=[], membership={})
+    expect(page.locator("#homeHint")).to_be_hidden()
+    assert "All homes" in page.locator("#homeFilter option").all_inner_texts()
+    assert page.locator("#homeFilter option[value^='home:']").count() == 0
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+
+
+@pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"),
+                                         (390, "light"), (390, "dark")])
+def test_homes_browse_controls_fit_without_selection_column(page, running_app, monkeypatch, width, scheme):
+    serves_homes(page, running_app, monkeypatch)
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.emulate_media(color_scheme=scheme)
+    select_home(page, "home-b")
+    home = page.locator("#homeFilter")
+    assert home.get_attribute("aria-label") == "Filter by home"
+    expect(home).to_be_focused()
+    assert set(listed_ids(page)) == {PLUG.id, LAMP.id}
+    assert page.locator("#thead input[type='checkbox'], #rows input[type='checkbox']").count() == 0
+    search = page.locator("#filter").bounding_box()
+    toggle = page.locator("#filtersBtn").bounding_box()
+    assert toggle["x"] + toggle["width"] <= search["x"]
+    assert abs(search["y"] + search["height"] / 2 - toggle["y"] - toggle["height"] / 2) <= 1
+    box = home.bounding_box()
+    assert box["x"] >= 0 and box["x"] + box["width"] <= width
+    popover = page.locator("#filtersPopover").bounding_box()
+    assert popover["x"] >= 16 and popover["x"] + popover["width"] <= width - 16
+    arrow = page.locator("#homeChevron").bounding_box()
+    assert box["x"] + box["width"] - arrow["x"] - arrow["width"] >= 12
+    assert page.evaluate("document.documentElement.scrollWidth") <= width
+
+
+def test_filter_precedes_search_and_escape_keeps_the_device_panel_open(
+        page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch)
+    expect(page.locator("#filtersPopover")).to_be_hidden()
+    assert page.locator("#headerActions #selectDevicesBtn, #headerActions #excludedViewBtn").count() == 0
+    assert page.locator(".list-filters #filtersBtn").count() == 1
+    assert page.locator(".list-filters").evaluate(
+        "el => [...el.children].map(child => child.id)") == ["filterWrap", "filter"]
+    expect(page.locator("#filtersBtn")).to_have_accessible_name("Filter")
+    page.locator("#filtersBtn").focus()
+    page.keyboard.press("Tab")
+    expect(page.locator("#filter")).to_be_focused()
+    open_panel(page, PLUG.name)
+    open_filters(page)
+    expect(page.locator("#homeFilter")).to_be_focused()
+    assert page.locator("#filtersPopover #selectDevicesBtn").count() == 1
+    page.keyboard.press("Escape")
+    expect(page.locator("#filtersPopover")).to_be_hidden()
+    expect(page.locator("#filtersBtn")).to_be_focused()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "false"
+
+
+def test_filters_popover_closes_on_outside_click_and_selection_enters_from_it(page):
+    open_filters(page)
+    page.locator("#count").click()
+    expect(page.locator("#filtersPopover")).to_be_hidden()
+    expect(page.locator("#filtersBtn")).to_have_attribute("aria-expanded", "false")
+    enter_selection(page)
+    expect(page.locator("#filtersPopover")).to_be_hidden()
+    expect(page.locator("#selectAllDevices")).to_be_focused()
+    page.locator("#selectionDoneBtn").click()
+    expect(page.locator("#filtersBtn")).to_be_focused()
+    assert page.locator("#rows input[type='checkbox']").count() == 0
+
+
+def test_filters_clear_all_without_exclusions_resets_home_and_search_without_cloud_or_write(
+        page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch)
+    requests = []
+    page.on("request", lambda request: requests.append(request.url)
+            if "/api/devices" in request.url or request.method == "PATCH" else None)
+    select_home(page, "home-a")
+    expect(page.locator("#filterCount")).to_be_visible()
+    expect(page.locator("#filterCount")).to_have_text("1")
+    page.locator("#filtersClose").click()
+    expect(page.locator("#filterCount")).to_be_visible()
+    page.locator("#filter").fill(PLUG.name)
+    open_filters(page)
+    assert page.locator("#resetHomeFilter").count() == 0
+    assert page.locator(".filter-popover-head #clearAllFilters").count() == 1
+    page.locator("#clearAllFilters").click()
+    expect(page.locator("#homeFilter")).to_have_value("")
+    expect(page.locator("#filter")).to_have_value("")
+    expect(page.locator("#filterCount")).to_be_hidden()
+    expect(page.locator("#clearAllFilters")).to_be_disabled()
+    expect(page.locator("#homeFilter")).to_be_focused()
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    assert requests == []
+
+
+def test_excluded_control_is_inside_filter_after_exclusion_and_hides_after_restoration(page):
+    open_filters(page)
+    expect(page.locator("#excludedViewBtn")).to_be_hidden()
+    page.locator("#filtersClose").click()
+    select_devices(page, PLUG)
+    save_selection(page)
+    expect(page.locator("#filtersPopover")).to_be_hidden()
+    expect(page.locator("#filterCount")).to_have_text("1")
+    assert page.locator(".list-filters > #excludedViewBtn").count() == 0
+    open_filters(page)
+    expect(page.locator("#filtersPopover #excludedViewBtn")).to_be_visible()
+    expect(page.locator("#excludedViewBtn")).to_contain_text("1")
+    switch_device_view(page)
+    expect(page.locator("#filtersPopover")).to_be_hidden()
+    expect(page.locator("#excludedViewBtn")).to_have_attribute("aria-pressed", "true")
+    select_devices(page, PLUG)
+    save_selection(page, restore=True)
+    expect(page.locator("#filterCount")).to_be_hidden()
+    open_filters(page)
+    expect(page.locator("#excludedViewBtn")).to_be_visible()
+    page.locator("#backToDevicesBtn").click()
+    open_filters(page)
+    expect(page.locator("#excludedViewBtn")).to_be_hidden()
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+
+
+def test_filter_badge_combines_saved_exclusions_and_home_and_survives_reload(
+        page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch)
+    select_devices(page, PLUG, LAMP)
+    save_selection(page)
+    expect(page.locator("#filterCount")).to_have_text("2")
+    select_home(page, "home-a")
+    expect(page.locator("#filterCount")).to_have_text("3")
+    expect(page.locator("#filtersBtn")).to_have_accessible_name(
+        "Filter (3): 2 excluded devices, 1 home filter")
+    expect(page.locator("#excludedViewBtn")).to_have_text("Excluded devices (2)")
+    page.locator("#filtersClose").click()
+    page.locator("#filter").fill("nothing matches")
+    expect(page.locator("#filterCount")).to_have_text("3")
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#filterCount")).to_have_text("3")
+    open_filters(page)
+    page.locator("#homeFilter").select_option("")
+    expect(page.locator("#filterCount")).to_have_text("2")
+    switch_device_view(page)
+    select_devices(page, PLUG)
+    save_selection(page, restore=True)
+    expect(page.locator("#filterCount")).to_have_text("1")
+    page.locator("#restoreAll").click()
+    expect(page.locator("#filterCount")).to_be_hidden()
+    expect(page.locator("#filtersBtn")).to_have_accessible_name("Filter")
+
+
+@pytest.mark.parametrize("view", ["active", "excluded"])
+def test_filters_clear_all_restores_every_exclusion_and_resets_home_search_and_view(
+        page, running_app, monkeypatch, view):
+    serves_homes(page, running_app, monkeypatch)
+    select_devices(page, PLUG, LAMP)
+    save_selection(page)
+    select_home(page, "home-a")
+    page.locator("#filtersClose").click()
+    if view == "excluded":
+        switch_device_view(page)
+    page.locator("#filter").fill("nothing matches")
+    open_filters(page)
+    with page.expect_response(lambda response: response.url.endswith("/api/device-exclusions")
+                              and response.request.method == "PATCH") as saved:
+        page.locator("#clearAllFilters").click()
+    saved.value.finished()
+    assert saved.value.status == 200
+    assert saved.value.request.post_data_json["restore_all"] is True
+    expect(page.locator("#homeFilter")).to_have_value("")
+    expect(page.locator("#filter")).to_have_value("")
+    expect(page.locator("#filterCount")).to_be_hidden()
+    expect(page.locator("#backToDevicesBtn")).to_be_hidden()
+    expect(page.locator("#excludedViewBtn")).to_be_hidden()
+    expect(page.locator("#clearAllFilters")).to_be_disabled()
+    expect(page.locator("#homeFilter")).to_be_focused()
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#homeFilter")).to_have_value("")
+    expect(page.locator("#filterCount")).to_be_hidden()
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+
+
+def test_filters_clear_all_failed_save_keeps_filters_and_selection_then_retry_clears_them(
+        page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch)
+    select_devices(page, PLUG, LAMP)
+    save_selection(page)
+    select_home(page, "home-a")
+    page.locator("#filtersClose").click()
+    page.locator("#filter").fill(BARE.name)
+    select_devices(page, BARE)
+
+    def fail_write(route):
+        if route.request.method == "PATCH":
+            route.fulfill(status=503, json={"error": "storage_unavailable"})
+        else:
+            route.continue_()
+
+    page.route("**/api/device-exclusions", fail_write)
+    open_filters(page)
+    page.locator("#clearAllFilters").click()
+    expect(page.locator("#exclusionError")).to_contain_text("Could not clear all filters")
+    expect(page.locator("#filterCount")).to_have_text("3")
+    expect(page.locator("#homeFilter")).to_have_value("home:home-a")
+    expect(page.locator("#filter")).to_have_value(BARE.name)
+    expect(device_checkbox(page, BARE)).to_be_checked()
+    assert set(page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"]) == {PLUG.id, LAMP.id}
+    page.unroute("**/api/device-exclusions", fail_write)
+    page.locator("#retryExclusions").click()
+    expect(page.locator("#filterCount")).to_be_hidden()
+    expect(page.locator("#filter")).to_have_value("")
+    expect(page.locator("#homeFilter")).to_have_value("")
+    expect(page.locator("#bulkActions")).to_be_hidden()
+    expect(page.locator("#filtersBtn")).to_be_focused()
+    expect(page.locator("#exclusionError")).to_be_hidden()
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+
+
+def test_homes_changing_filter_clears_selection_and_excludes_only_current_home_matches(
+        page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch)
+    select_home(page, "home-a")
+    select_devices(page, PLUG)
+    select_home(page, "home-b")
+    assert_no_selection(page)
+    select_devices(page, LAMP)
+    assert save_selection(page)["excluded_ids"] == [LAMP.id]
+    assert listed_ids(page) == [PLUG.id]
+    select_home(page, "home-a")
+    assert set(listed_ids(page)) == {PLUG.id, BARE.id}
+    switch_device_view(page)
+    assert listed_ids(page) == []
+    expect(page.locator("#restoreAll")).to_contain_text("all homes")
+    page.locator("#restoreAll").click()
+    expect(page.locator("#restoreAll")).to_be_hidden()
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+
+
+def test_homes_missing_excluded_devices_are_unknown_and_can_still_be_restored(
+        page, running_app, monkeypatch):
+    serves_homes(page, running_app, monkeypatch)
+    select_devices(page, PLUG)
+    save_selection(page)
+    serves_homes(page, running_app, monkeypatch, devices=[LAMP, SENSOR, BARE])
+    switch_device_view(page)
+    select_home(page, "home-a")
+    assert listed_ids(page) == []
+    select_home(page, "unknown")
+    assert listed_ids(page) == [PLUG.id]
+    expect(page.locator(f"#rows tr[data-id='{PLUG.id}'][data-missing]")).to_be_visible()
+    select_devices(page, PLUG)
+    assert save_selection(page, restore=True)["excluded_ids"] == []
+
+
+def test_homes_gateway_context_stays_in_home_while_setup_and_scan_keep_full_account_evidence(
+        page, running_app, monkeypatch):
+    child = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    serves_homes(page, running_app, monkeypatch,
+                 devices=list(DEVICES) + [ZIGBEE_GATEWAY, child],
+                 membership={**HOME_MEMBERSHIP, ZIGBEE_GATEWAY.id: ["home-a"], child.id: ["home-b"]})
+    select_home(page, "home-b")
+    assert set(listed_ids(page)) == {PLUG.id, LAMP.id, child.id}
+    page.fill("#filter", child.name)
+    assert listed_ids(page) == [child.id], "a gateway in another home must not return as a context row"
+    calls = _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=child.id),
+        child.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+    assert {ZIGBEE_GATEWAY.id, child.id} <= set(calls[0]["devices"])
+    assert listed_ids(page) == [child.id]
+    open_setup(page, child.name)
+    assert setup_value(page, "device_id") == ZIGBEE_GATEWAY.id
+    assert setup_value(page, "host") == "192.168.2.8"
+    assert setup_field(page, "local_key").locator("button.setup-copy").get_attribute("data-copy") == child.local_key
+    page.locator(f".setup-card [data-open-device='{ZIGBEE_GATEWAY.id}']").click()
+    assert setup_value(page, "device_id") == ZIGBEE_GATEWAY.id
+    assert listed_ids(page) == [child.id]
+    page.locator("#panelBack").click()
+    assert page.locator("#panelTitle").inner_text() == f"Set up “{child.name}” in…"
+
+
+def test_homes_change_notices_and_csv_follow_the_selected_home(page, running_app, monkeypatch, tmp_path):
+    serves_homes(page, running_app, monkeypatch)
+    select_home(page, "home-a")
+    changed = _with_rotated_key()
+    changed[demo_devices.LAMP].name = "A renamed lamp in the other home"
+    serves_homes(page, running_app, monkeypatch, devices=changed)
+    expect(page.locator("#changesNotice")).to_contain_text("1 local key changed")
+    assert "renamed" not in page.locator("#changesNotice").inner_text()
+    assert {device["id"] for device in export_rows(page, tmp_path, "tuya-local-key.csv")} == {PLUG.id, BARE.id}
+    select_home(page, "home-b")
+    expect(page.locator("#changesNotice")).to_contain_text("1 device renamed")
+    assert "1 local key changed" in page.locator("#changesNotice").inner_text()
+    select_home(page, "home-empty")
+    assert page.locator("#changesNotice").count() == 0
+
+
+@pytest.mark.parametrize("previous_homes_known", [True, False])
+def test_homes_removed_device_notices_use_prior_membership_and_legacy_removals_stay_unknown(
+        page, running_app, monkeypatch, previous_homes_known):
+    if previous_homes_known:
+        serves_homes(page, running_app, monkeypatch)
+    serves_homes(page, running_app, monkeypatch, devices=[PLUG, SENSOR])
+    select_home(page, "home-a")
+    if previous_homes_known:
+        expect(page.locator("#changesNotice")).to_contain_text("1 device removed")
+        assert BARE.name in page.locator("#changesNotice").inner_text()
+        assert LAMP.name not in page.locator("#changesNotice").inner_text()
+    else:
+        assert page.locator("#changesNotice").count() == 0
+    select_home(page, "home-b")
+    if previous_homes_known:
+        expect(page.locator("#changesNotice")).to_contain_text("1 device removed")
+        assert LAMP.name in page.locator("#changesNotice").inner_text()
+        assert BARE.name not in page.locator("#changesNotice").inner_text()
+    else:
+        assert page.locator("#changesNotice").count() == 0
+    select_home(page, "unknown")
+    if previous_homes_known:
+        assert page.locator("#changesNotice").count() == 0
+    else:
+        expect(page.locator("#changesNotice")).to_contain_text("2 devices removed")
+        assert BARE.name in page.locator("#changesNotice").inner_text()
+        assert LAMP.name in page.locator("#changesNotice").inner_text()

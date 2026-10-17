@@ -9,6 +9,7 @@ Endpoints (JSON unless noted):
   POST /api/login/poll      -> {"status": "pending"|"confirmed"|"expired"}
   GET  /api/devices         -> {"devices": [...], "cached_at": ts,
                                 "changes"?: {...}, "stale"?: true} | 401/502 {"error"}
+  GET/PATCH /api/device-exclusions -> {"excluded_ids": [...], "revision", "account_id"}
   POST /api/logout          -> {"ok": true}
   GET  /api/lan             -> {"results", "summary", "changes", "changes_at",
                                 "targets", "job"} | 401
@@ -30,6 +31,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_file
 
 import device_cache
+import device_preferences
 import lan_scan
 import tuya_devices as core
 
@@ -73,6 +75,11 @@ DEVICE_CACHE_KEY_FILE = os.environ.get(
 LAN_CACHE_FILE = os.environ.get(
     "LAN_CACHE_FILE", os.path.join(_SESSION_DIR, "lan.cache")
 )
+DEVICE_PREFERENCES_FILE = os.environ.get(
+    "DEVICE_PREFERENCES_FILE", os.path.join(_SESSION_DIR, "device-preferences.json")
+)
+MAX_EXCLUSION_REQUEST_BYTES = 256 * 1024
+MAX_EXCLUSION_BATCH = 2000
 DEVICE_CACHE_PERSIST = _setting("DEVICE_CACHE", "on").lower() not in {
     "off", "0", "false", "no",
 }
@@ -98,6 +105,12 @@ _devices_cache = None
 _devices_cache_loaded = False
 _devices_cache_lock = threading.Lock()
 _devices_fetch_lock = threading.Lock()
+# Account transitions take the fetch lock first, so an SDK token renewal cannot
+# write an old session back after logout/login. Preference reads and writes use
+# only the short account lock and never wait for a cloud request.
+_account_lock = threading.Lock()
+_account_generation = 0
+_device_preferences = device_preferences.PreferenceStore(DEVICE_PREFERENCES_FILE)
 # LAN scan results, stored like the device list and cleared with it. One scan
 # job at a time, on its own thread; _lan_lock guards both.
 _lan_cache = None
@@ -183,6 +196,17 @@ def _snapshot_body(cache, refresh, reason):
     if refresh:
         body["refresh_failed"] = True
     return body
+
+
+def _devices_response(body, session):
+    """Tie device/LAN responses, including old cache snapshots, to an account."""
+    try:
+        digest = device_preferences.account_id(session)
+    except device_preferences.AccountIdentityError:
+        # Old/incomplete sessions can still report their existing device error;
+        # the preferences endpoint explicitly asks them to log in again.
+        return jsonify(body)
+    return jsonify(dict(body, account_id=digest))
 
 
 def _is_session_invalid_error(error):
@@ -284,6 +308,7 @@ def login_start():
 
 @app.post("/api/login/poll")
 def login_poll():
+    global _account_generation
     data = _json_object()
     token = str(data.get("token") or "").strip()
     with _lock:
@@ -292,16 +317,22 @@ def login_poll():
         user_code = login["user_code"] if login else None
     if not user_code:
         return jsonify({"status": "expired"}), 404
-
+    with _account_lock:
+        generation = _account_generation
     session = core.poll_login(token, user_code)
     if session:
-        try:
-            core.save_session(SESSION_FILE, session)
-        except Exception as e:
-            return jsonify({"error": f"session_save_failed: {e}"}), 500
-        with _lock:
-            _pending.pop(token, None)
-        _clear_devices_cache()
+        with _devices_fetch_lock, _account_lock:
+            with _lock:
+                if generation != _account_generation or token not in _pending:
+                    return jsonify({"status": "expired"}), 409
+            try:
+                core.save_session(SESSION_FILE, session)
+            except Exception as e:
+                return jsonify({"error": f"session_save_failed: {e}"}), 500
+            _account_generation += 1
+            with _lock:
+                _pending.pop(token, None)
+            _clear_devices_cache()
         return jsonify({"status": "confirmed"})
     return jsonify({"status": "pending"})
 
@@ -309,7 +340,8 @@ def login_poll():
 @app.get("/api/devices")
 def devices():
     global _devices_cache, _devices_cache_loaded
-    session = core.load_session(SESSION_FILE)
+    with _account_lock:
+        session = core.load_session(SESSION_FILE)
     if not session:
         return jsonify({"error": "not_logged_in"}), 401
     refresh = request.args.get("refresh") in {"1", "true", "yes"}
@@ -319,18 +351,24 @@ def devices():
         with _devices_cache_lock:
             cached = _cached_devices_response(session, request_start)
         if cached:
-            return jsonify(cached)
+            return _devices_response(cached, session)
 
     with _devices_fetch_lock:
+        with _account_lock:
+            current = core.load_session(SESSION_FILE)
+            if not current:
+                return jsonify({"error": "not_logged_in"}), 401
+            if _session_cache_key(current) != _session_cache_key(session):
+                return jsonify({"error": "account_changed"}), 409
         with _devices_cache_lock:
             cache = _devices_cache_for_session(session)
 
             if cache and cache["cached_at"] >= request_start:
-                return jsonify(cache["body"])
+                return _devices_response(cache["body"], session)
             if not refresh:
                 cached = _cached_devices_response(session, request_start)
                 if cached:
-                    return jsonify(cached)
+                    return _devices_response(cached, session)
             previous = cache
 
         try:
@@ -338,9 +376,9 @@ def devices():
         except Exception as e:
             invalid = _is_session_invalid_error(e)
             if previous:
-                return jsonify(_snapshot_body(
+                return _devices_response(_snapshot_body(
                     previous, refresh, "session_invalid" if invalid else "fetch_failed"
-                ))
+                ), session)
             if invalid:
                 _clear_devices_cache()
                 return jsonify({"error": "session_invalid"}), 401
@@ -353,6 +391,13 @@ def devices():
             "cached_at": now,
             "cache_expires_at": now + DEVICE_CACHE_TTL_SECONDS,
         }
+        if isinstance(devs, core.Devices):
+            body["homes"] = devs.homes
+            home_names = {home["id"]: home["name"] for home in devs.homes}
+            for device in listed:
+                ids = devs.home_ids.get(str(device.get("id")), [])
+                device["home_ids"] = list(ids)
+                device["home_names"] = [home_names.get(home_id, "") for home_id in ids]
         if previous:
             changes = core.diff_devices(previous["body"].get("devices", []), listed)
             if any(changes.values()):
@@ -367,18 +412,90 @@ def devices():
             _devices_cache_loaded = True
         if DEVICE_CACHE_PERSIST:
             device_cache.save(DEVICE_CACHE_FILE, DEVICE_CACHE_KEY_FILE, entry)
-        return jsonify(body)
+        return _devices_response(body, session)
+
+
+def _preference_account():
+    """Resolve the saved account while holding _account_lock."""
+    session = core.load_session(SESSION_FILE)
+    if not session:
+        return None, None, (jsonify({"error": "not_logged_in"}), 401)
+    try:
+        digest = device_preferences.account_id(session)
+    except device_preferences.AccountIdentityError:
+        return None, None, (jsonify({"error": "account_identity_unavailable"}), 409)
+    return session, digest, None
+
+
+@app.get("/api/device-exclusions")
+def device_exclusions():
+    with _account_lock:
+        _, digest, error = _preference_account()
+        if error:
+            return error
+        try:
+            return jsonify(_device_preferences.get(digest))
+        except device_preferences.PreferenceError:
+            return jsonify({"error": "preferences_unavailable"}), 503
+
+
+@app.patch("/api/device-exclusions")
+def update_device_exclusions():
+    with _account_lock:
+        session, digest, error = _preference_account()
+        if error:
+            return error
+        if (request.content_length is not None
+                and request.content_length > MAX_EXCLUSION_REQUEST_BYTES):
+            return jsonify({"error": "invalid_exclusions"}), 400
+        payload = request.stream.read(MAX_EXCLUSION_REQUEST_BYTES + 1)
+        try:
+            data = json.loads(payload)
+        except (ValueError, UnicodeError, RecursionError):
+            data = None
+        if (len(payload) > MAX_EXCLUSION_REQUEST_BYTES or not request.is_json
+                or not isinstance(data, dict)
+                or set(data) - {"exclude", "restore", "restore_all", "account_id"}):
+            return jsonify({"error": "invalid_exclusions"}), 400
+        exclude, restore = data.get("exclude", []), data.get("restore", [])
+        restore_all = data.get("restore_all", False)
+        if (not isinstance(exclude, list) or not isinstance(restore, list)
+                or type(restore_all) is not bool or (restore_all and (exclude or restore))
+                or len(exclude) + len(restore) > MAX_EXCLUSION_BATCH
+                or any(not device_preferences.valid_device_id(value)
+                       for value in exclude + restore)):
+            return jsonify({"error": "invalid_exclusions"}), 400
+        exclude, restore = set(exclude), set(restore)
+        if exclude & restore:
+            return jsonify({"error": "invalid_exclusions"}), 400
+        if "account_id" in data and data["account_id"] != digest:
+            return jsonify({"error": "account_changed"}), 409
+        if exclude:
+            listed = _session_devices(session)
+            if listed is None:
+                return jsonify({"error": "device_snapshot_required"}), 409
+            unknown = exclude - {device.get("id") for device in listed}
+            if unknown:
+                return jsonify({"error": "unknown_device_ids", "unknown_ids": sorted(unknown)}), 400
+        try:
+            return jsonify(_device_preferences.update(
+                digest, exclude=exclude, restore=restore, restore_all=restore_all))
+        except device_preferences.PreferenceError:
+            return jsonify({"error": "preferences_unavailable"}), 503
 
 
 @app.post("/api/logout")
 def logout():
-    try:
-        os.remove(SESSION_FILE)
-    except OSError:
-        pass
-    with _lock:
-        _pending.clear()
-    _clear_devices_cache()
+    global _account_generation
+    with _devices_fetch_lock, _account_lock:
+        try:
+            os.remove(SESSION_FILE)
+        except OSError:
+            pass
+        _account_generation += 1
+        with _lock:
+            _pending.clear()
+        _clear_devices_cache()
     return jsonify({"ok": True})
 
 
@@ -755,27 +872,44 @@ def lan_state():
         evidence = body.get("key_evidence") or {}
         results = {dev_id: dict(result, key_current=_lan_key_current(result, evidence.get(dev_id), current))
                    for dev_id, result in (body.get("results") or {}).items()}
-        return jsonify({
+        return _devices_response({
             "results": results,
             "summary": body.get("summary"),
             "changes": body.get("changes"),
             "changes_at": body.get("changes_at"),
             "targets": body.get("targets") or LAN_SUBNET,
             "job": _job_view(job),
-        })
+        }, session)
 
 
 def _bad_targets(message):
     return jsonify({"error": "bad_targets", "message": message}), 400
 
 
+def _scan_account_precondition(session, data):
+    """A tab may supply its account before mutating a scan. Hold _account_lock."""
+    if "account_id" not in data:
+        return None
+    try:
+        digest = device_preferences.account_id(session)
+    except device_preferences.AccountIdentityError:
+        return jsonify({"error": "account_identity_unavailable"}), 409
+    if data["account_id"] != digest:
+        return jsonify({"error": "account_changed"}), 409
+    return None
+
+
 @app.post("/api/lan/scan")
 def lan_scan_start():
     global _lan_job
-    session, session_key = _lan_session()
-    if not session:
-        return jsonify({"error": "not_logged_in"}), 401
     data = _json_object()
+    with _account_lock:
+        session, session_key = _lan_session()
+        if not session:
+            return jsonify({"error": "not_logged_in"}), 401
+        error = _scan_account_precondition(session, data)
+        if error:
+            return error
 
     # Keys come from the device list already loaded: a scan never calls Tuya.
     devices = _session_devices(session)
@@ -843,11 +977,17 @@ def lan_scan_start():
         "device_links": {d.get("id"): _device_link(d) for d in devices},
         "cancel": threading.Event(),
     }
-    with _lan_lock:
-        if _lan_job is not None and _lan_job["state"] == "running":
-            return jsonify({"error": "scan_running"}), 409
-        _lan_job = job
-        view = _job_view(job)
+    with _account_lock:
+        current, current_key = _lan_session()
+        if not current:
+            return jsonify({"error": "not_logged_in"}), 401
+        if current_key != session_key:
+            return jsonify({"error": "account_changed"}), 409
+        with _lan_lock:
+            if _lan_job is not None and _lan_job["state"] == "running":
+                return jsonify({"error": "scan_running"}), 409
+            _lan_job = job
+            view = _job_view(job)
     # Its own thread, so a scan doesn't hold one of waitress's request threads.
     thread = threading.Thread(
         target=_run_lan_job, args=(job, targets, devices, known, only, routers),
@@ -860,7 +1000,7 @@ def lan_scan_start():
         with _lan_lock:
             job.update(state="failed", error="scan_failed", finished_at=time.time())
         return jsonify({"error": "scan_failed"}), 503
-    return jsonify({"job": view}), 202
+    return _devices_response({"job": view}, session), 202
 
 
 @app.get("/api/lan/scan")
@@ -870,18 +1010,23 @@ def lan_scan_progress():
         return jsonify({"error": "not_logged_in"}), 401
     with _lan_lock:
         job = _lan_job if _lan_job and _lan_job["session_key"] == session_key else None
-        return jsonify({"job": _job_view(job)})
+        return _devices_response({"job": _job_view(job)}, session)
 
 
 @app.delete("/api/lan/scan")
 def lan_scan_cancel():
-    session, session_key = _lan_session()
-    if not session:
-        return jsonify({"error": "not_logged_in"}), 401
-    with _lan_lock:
-        if _lan_job and _lan_job["session_key"] == session_key and _lan_job["state"] == "running":
-            _lan_job["cancel"].set()
-    return jsonify({"ok": True})
+    data = _json_object()
+    with _account_lock:
+        session, session_key = _lan_session()
+        if not session:
+            return jsonify({"error": "not_logged_in"}), 401
+        error = _scan_account_precondition(session, data)
+        if error:
+            return error
+        with _lan_lock:
+            if _lan_job and _lan_job["session_key"] == session_key and _lan_job["state"] == "running":
+                _lan_job["cancel"].set()
+        return _devices_response({"ok": True}, session)
 
 
 def run_dev_server():

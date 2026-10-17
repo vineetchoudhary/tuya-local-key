@@ -53,6 +53,7 @@
   .more-menu .menu-item:hover, .more-menu .menu-item:focus-visible {
     background: color-mix(in srgb, var(--accent) 11%, transparent); outline: none;
   }
+  .menu-divider { border-top: 1px solid var(--border); margin: 4px 6px; }
   .app-icon { width: 32px; height: 32px; border-radius: 7px; display: block; flex: 0 0 auto; }
   header h1 {
     font-size: 17px; margin: 0; font-weight: 650; min-width: 0;
@@ -115,6 +116,58 @@
   .note b { color: var(--fg); font-weight: 650; }
   .toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
   .toolbar .grow { flex: 1 1 auto; }
+  .toolbar input { min-width: 100px; }
+  .list-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+    gap: 10px; flex: 1 1 340px; margin-left: auto; min-width: 0; }
+  .list-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+    gap: 8px; flex: 0 1 520px; min-width: 0; }
+  .list-filters input { width: auto; flex: 1 1 160px; min-width: 100px; max-width: 260px;
+    padding: 8px 10px; font-size: 14px; }
+  .filter-wrap { position: relative; flex: 0 0 auto; }
+  .filter-toggle { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .filter-toggle svg { display: block; width: 15px; height: 15px; }
+  .filter-toggle[data-active="true"], .view-button[aria-pressed="true"] {
+    color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  }
+  .filter-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px;
+    padding: 0 4px; font-size: 11px; border-radius: 999px; color: var(--accent-fg); background: var(--accent); }
+  .filter-count.hidden { display: none; }
+  .filter-popover { position: fixed; z-index: 30; width: 280px; max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px); overflow-y: auto; padding: 14px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+  .filter-popover-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .filter-popover-title { display: flex; flex: 1; align-items: baseline; gap: 6px; min-width: 0; }
+  .filter-popover-head h3 { margin: 0; font-size: 14px; }
+  .filter-popover label { margin-bottom: 6px; font-weight: 600; }
+  .home-select-wrap { position: relative; }
+  .home-filter { appearance: none; -webkit-appearance: none; width: 100%; min-width: 0; padding: 9px 40px 9px 12px;
+    font: inherit; font-size: 14px; color: var(--fg); background: var(--card);
+    border: 1px solid var(--border); border-radius: 8px; text-overflow: ellipsis; }
+  .home-select-chevron { position: absolute; right: 14px; top: 50%; width: 14px; height: 14px;
+    color: var(--muted); pointer-events: none; transform: translateY(-50%) rotate(90deg); }
+  .home-select-chevron svg { display: block; width: 14px; height: 14px; }
+  .filter-selection { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .filter-selection button { width: 100%; padding: 8px 10px; text-align: left; font-size: 13px; }
+  .filter-reset { font-size: 12px; white-space: nowrap; color: var(--muted); }
+  .view-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-left: auto; }
+  .view-actions.hidden { display: none; }
+  .home-hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+  @media (max-width: 550px) {
+    .list-controls, .list-filters { flex-basis: 100%; }
+    .list-filters input { flex-basis: 130px; max-width: none; }
+  }
+  .view-button { padding: 7px 10px; font-size: 13px; }
+  .bulk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px;
+    padding: 8px 10px; border-radius: 8px; background: var(--code-bg); }
+  .bulk-actions.hidden { display: none; }
+  .bulk-actions button { padding: 6px 10px; font-size: 13px; }
+  .selection-count { font-size: 13px; font-weight: 600; margin-right: 2px; }
+  #selectionDoneBtn { margin-left: auto; }
+  .exclusion-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; color: var(--off); font-size: 13px; }
+  .exclusion-error.hidden { display: none; }
+  .exclusion-error button { padding: 5px 9px; font-size: 13px; }
   .count { font-weight:600; }
   .count .muted { color: var(--muted); font-weight: 400; }
   .updated {
@@ -240,16 +293,26 @@
   a { color: var(--accent); }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
-  /* Rows open the details panel */
+  /* Rows select devices in selection mode and open details while browsing. */
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-  tbody tr.selected { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+  tbody:not(.selection-mode) tr.selected, tbody tr.bulk-selected { background: color-mix(in srgb, var(--accent) 13%, transparent); }
   .device-name { display: inline-flex; align-items: center; gap: 6px; }
   .gateway-toggle, .gateway-spacer { width: 24px; flex: 0 0 24px; }
   .gateway-toggle { height: 24px; border: 0; background: none; }
   .gateway-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
   .gateway-count { cursor: help; }
-  .sub-device-row td:first-child { padding-left: 36px; }
+  .sub-device-row td.name-col { padding-left: 36px; }
+  th.select-col, td.select-col { width: 38px; min-width: 38px; padding: 9px 10px; }
+  .select-col input { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: var(--accent); cursor: pointer; }
+  .select-col input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .select-col input:disabled { cursor: default; }
+  tr.missing-device { cursor: default; }
+  tbody.selection-mode tr.missing-device { cursor: pointer; }
+  tbody.selection-mode tr.selection-disabled { cursor: default; }
+  .empty-list { white-space: normal; text-align: center; color: var(--muted); padding: 30px 12px; }
+  .empty-list button { margin-top: 10px; }
+  .excluded-panel-note { margin: 12px 0; font-size: 13px; color: var(--muted); }
   .sub-device-row .gateway-spacer::before {
     content: ""; display: block; width: 12px; height: 10px; margin-left: 4px; margin-top: -5px;
     border-left: 1px solid var(--border); border-bottom: 1px solid var(--border);
@@ -435,10 +498,11 @@
     <button id="scanBtn" aria-expanded="false" aria-controls="scanBox">Scan network</button>
     <button id="refreshBtn">Refresh</button>
     <button id="logoutBtn">Log out</button>
-    <div class="more-wrap hidden" id="moreWrap">
+    <div class="more-wrap" id="moreWrap">
       <button id="moreBtn" class="icon-btn more-btn" type="button" aria-haspopup="menu"
               aria-expanded="false" aria-controls="moreMenu" aria-label="More actions" title="More actions"></button>
-      <div id="moreMenu" class="more-menu hidden" role="menu" aria-label="More actions"></div>
+      <div id="moreMenu" class="more-menu hidden" role="menu" aria-label="More actions">
+      </div>
     </div>
   </div>
 </header>
@@ -495,9 +559,50 @@
       <span class="count" id="count"></span>
       <span class="updated hidden" id="updated"></span>
       <span class="refresh-status hidden" id="refreshStatus" aria-live="polite"></span>
-      <span class="grow"></span>
-      <input id="filter" type="text" placeholder="Filter…" style="max-width:200px" autocomplete="off">
+      <div class="list-controls">
+        <div class="list-filters">
+          <div id="filterWrap" class="filter-wrap">
+            <button id="filtersBtn" class="view-button filter-toggle" type="button" aria-haspopup="dialog"
+                    aria-label="Filter" aria-expanded="false" aria-controls="filtersPopover"><span id="filtersIcon" aria-hidden="true"></span>Filter<span id="filterCount" class="filter-count hidden" aria-hidden="true"></span></button>
+            <div id="filtersPopover" class="filter-popover hidden" role="dialog" aria-labelledby="filtersTitle">
+              <div class="filter-popover-head">
+                <div class="filter-popover-title">
+                  <h3 id="filtersTitle">Filters</h3>
+                  <span class="filter-reset">(<button id="clearAllFilters" class="link-btn" type="button">Clear all</button>)</span>
+                </div>
+                <button id="filtersClose" class="icon-btn" type="button" aria-label="Close filters" title="Close filters"></button>
+              </div>
+              <label for="homeFilter">Home</label>
+              <div class="home-select-wrap">
+                <select id="homeFilter" class="home-filter" aria-label="Filter by home"><option value="">All homes</option></select>
+                <span id="homeChevron" class="home-select-chevron" aria-hidden="true"></span>
+              </div>
+              <p id="homeHint" class="home-hint hidden"><button class="link-btn" type="button" data-refresh-homes>Refresh</button> to load your homes.</p>
+              <div class="filter-selection">
+                <button id="selectDevicesBtn" type="button">Select devices</button>
+                <button id="excludedViewBtn" class="view-button hidden" type="button" aria-pressed="false">Excluded devices (0)</button>
+              </div>
+            </div>
+          </div>
+          <input id="filter" type="text" aria-label="Search devices" placeholder="Search devices…" autocomplete="off">
+        </div>
+        <div id="viewActions" class="view-actions hidden">
+          <button id="backToDevicesBtn" class="link-btn" type="button">Back to devices</button>
+          <button id="restoreAll" class="view-button hidden" type="button">Restore all</button>
+        </div>
+      </div>
     </div>
+    <div id="bulkActions" class="bulk-actions hidden" aria-label="Selected devices">
+      <span id="selectionCount" class="selection-count"></span>
+      <button id="excludeSelected" class="primary" type="button">Exclude selected</button>
+      <button id="restoreSelected" class="primary hidden" type="button">Restore selected</button>
+      <button id="clearSelection" type="button">Clear selection</button>
+      <button id="selectionDoneBtn" type="button">Done</button>
+    </div>
+    <div id="exclusionError" class="exclusion-error hidden" role="alert">
+      <span id="exclusionErrorText"></span><button id="retryExclusions" type="button">Retry</button>
+    </div>
+    <span id="exclusionStatus" class="sr-only" role="status" aria-live="polite"></span>
     <div class="scan-box hidden" id="scanBox">
       <form id="scanForm">
         <label for="scanTargets">Your IoT VLAN or subnet, or device IP addresses</label>
@@ -507,11 +612,12 @@
           <button id="scanClose" type="button">Close</button>
         </div>
       </form>
-      <p class="hint">Enter the subnet your Tuya devices are on, such as your IoT VLAN. Several can be separated by commas. Finds each device's local IP and protocol version by connecting to it on TCP port <b>6668</b> with its local key. Devices on another VLAN work too, as long as your firewall lets this machine reach port 6668 there. Up to 1,024 addresses. If you have many devices, the scan may take longer.</p>
+      <p class="hint">Scans all account devices, including excluded devices. Enter the subnet your Tuya devices are on, such as your IoT VLAN. Several can be separated by commas. Finds each device's local IP and protocol version by connecting to it on TCP port <b>6668</b> with its local key. Devices on another VLAN work too, as long as your firewall lets this machine reach port 6668 there. Up to 1,024 addresses. If you have many devices, the scan may take longer.</p>
       <div id="scanProgress" class="scan-progress hidden" aria-live="polite"></div>
       <div id="scanError" class="scan-error hidden" role="alert"></div>
     </div>
-    <div class="table-scroll">
+    <div id="emptyDevices" class="empty-list hidden" role="status"></div>
+    <div id="tableScroll" class="table-scroll">
       <table id="table">
         <thead id="thead"></thead>
         <tbody id="rows"></tbody>
@@ -525,7 +631,7 @@
 <dialog id="logoutDialog" class="confirm" aria-labelledby="logoutTitle" aria-describedby="logoutText">
   <form method="dialog">
     <h2 id="logoutTitle">Log out?</h2>
-    <p id="logoutText">This removes your login, the saved device list with its local keys, and the network scan results from this app. To see them again, log in with a new QR code from the Smart Life app.</p>
+    <p id="logoutText">This removes your login, the saved device list with its local keys, and the network scan results from this app. Device exclusions are kept for your account. To see your devices again, log in with a new QR code from the Smart Life app.</p>
     <div class="confirm-actions">
       <button id="logoutCancel" value="cancel" autofocus>Cancel</button>
       <button id="logoutConfirm" value="logout" class="danger">Log out</button>
@@ -567,6 +673,13 @@ let filteredCollapsedGateways = new Set(); // a search reveals matches without l
 let tableKeysVisible = false, panelKeyVisible = false;
 let searchIndex = new WeakMap();         // device -> lowercased haystack for the filter
 let selectedId = null;                   // device shown in the details panel
+let bulkSelectedIds = new Set();          // selection is independent of the details panel
+let selectionMode = false;
+let excludedIds = new Set(), deviceView = "active";
+let homes = null, selectedHome = "", preferredHome = "";
+let exclusionsLoaded = false, exclusionRevision = -1, accountId = null;
+let exclusionBusy = false, exclusionFailure = "", pendingExclusionSave = null;
+let deviceLoadGeneration = 0, exclusionLoadGeneration = 0, accountGeneration = 0;
 let panelView = "details", panelPage = null, panelHistory = [];
 const panelPageCache = new Map();        // UI state for pages visited in this open panel
 let deviceChanges = null;                // what the last fetch found had changed
@@ -803,8 +916,16 @@ function applyLan() {
   }
 }
 async function loadLan() {
+  const session = accountGeneration, expectedAccount = accountId;
   const { ok, body } = await api("/api/lan");
-  if (!ok) return false;
+  if (!ok || session !== accountGeneration) return false;
+  if (expectedAccount && body.account_id !== expectedAccount) {
+    // Another browser can replace the saved login between our paired device /
+    // preference reads and this request. Never attach its LAN proof to these keys.
+    if (typeof body.account_id === "string" && body.account_id) loadDevices();
+    else exclusionError("Could not verify the account for network results. Refresh the device list to try again.");
+    return false;
+  }
   lanData = {
     results: body.results || {}, summary: body.summary || null, changes: body.changes || null,
     changes_at: body.changes_at || null, targets: body.targets || "", job: body.job || null,
@@ -881,6 +1002,318 @@ async function api(path, opts) {
   return { ok: r.ok, status: r.status, body };
 }
 
+// Filters never change the source device records used for setup and scans.
+function homeIdsOf(d) {
+  return Array.isArray(d && d.home_ids) ? d.home_ids.filter(id => typeof id === "string" && id) : [];
+}
+function matchesHome(d) {
+  if (!selectedHome) return true;
+  const ids = homeIdsOf(d);
+  return selectedHome === "unknown" ? !ids.length : ids.includes(selectedHome.slice(5));
+}
+function inCurrentView(id, fallback) {
+  return excludedIds.has(id) === (deviceView === "excluded") && matchesHome(deviceData.find(d => d.id === id) || fallback);
+}
+function homePreferenceKey() { return `tuya-local-key.home.${accountId}`; }
+function rememberHome() {
+  preferredHome = selectedHome;
+  try { localStorage.setItem(homePreferenceKey(), selectedHome); } catch (e) {}
+}
+function unknownHomeNeeded() {
+  return deviceData.some(d => !homeIdsOf(d).length) ||
+    [...excludedIds].some(id => !deviceData.some(d => d.id === id));
+}
+function homeOptions() {
+  const options = [{ value: "", label: "All homes" }];
+  if (homes === null) return options;
+  const names = new Map();
+  homes.forEach(home => names.set(home.name, (names.get(home.name) || 0) + 1));
+  for (const home of homes) options.push({ value: `home:${home.id}`,
+    label: names.get(home.name) > 1 ? `${home.name} (${home.id})` : home.name });
+  if (unknownHomeNeeded()) options.push({ value: "unknown", label: "Unknown home" });
+  return options;
+}
+function loadHomes(body) {
+  const ids = new Set();
+  homes = Array.isArray(body.homes) ? body.homes.filter(home => home && typeof home.id === "string" &&
+    home.id && !ids.has(home.id) && ids.add(home.id)).map(home => ({
+      id: home.id, name: typeof home.name === "string" && home.name.trim() ? home.name : `Home ${home.id}`,
+    })) : null;
+  const previousHome = selectedHome;
+  selectedHome = homes !== null && homeOptions().some(option => option.value === preferredHome) ? preferredHome : "";
+  if (selectedHome !== previousHome) {
+    abandonFailedExclusionSave(); bulkSelectedIds.clear(); filteredCollapsedGateways.clear();
+  }
+  // An older cache cannot disprove the saved preference. Keep it until a fresh
+  // home list arrives, without pretending its device memberships are known.
+  if (homes !== null && selectedHome !== preferredHome) rememberHome();
+}
+function renderHomeFilter() {
+  const options = homeOptions();
+  if (!options.some(option => option.value === selectedHome)) {
+    abandonFailedExclusionSave(); bulkSelectedIds.clear(); selectedHome = ""; rememberHome();
+  }
+  $("homeFilter").innerHTML = options.map(option => `<option value="${esc(option.value)}">${esc(option.label)}</option>`).join("");
+  $("homeFilter").value = selectedHome;
+  $("homeFilter").disabled = !exclusionsLoaded || exclusionBusy || options.length < 2;
+  $("homeHint").classList.toggle("hidden", !exclusionsLoaded || homes !== null || !deviceData.length);
+  const refresh = $("homeHint").querySelector("[data-refresh-homes]");
+  refresh.disabled = $("refreshBtn").disabled;
+  refresh.textContent = refresh.disabled ? "Refreshing…" : "Refresh";
+}
+function positionFiltersPopover() {
+  const popover = $("filtersPopover");
+  if (popover.classList.contains("hidden")) return;
+  const anchor = $("filtersBtn").getBoundingClientRect();
+  const { width, height } = popover.getBoundingClientRect();
+  const left = Math.max(16, Math.min(anchor.right - width, innerWidth - width - 16));
+  let top = anchor.bottom + 8;
+  if (top + height > innerHeight - 16 && anchor.top - height - 8 >= 16) top = anchor.top - height - 8;
+  popover.style.left = `${left}px`;
+  popover.style.top = `${Math.max(16, Math.min(top, innerHeight - height - 16))}px`;
+}
+function closeFilters(refocus = false) {
+  $("filtersPopover").classList.add("hidden");
+  $("filtersBtn").setAttribute("aria-expanded", "false");
+  if (refocus) $("filtersBtn").focus();
+}
+function openFilters() {
+  closeMoreMenu();
+  $("filtersPopover").classList.remove("hidden");
+  $("filtersBtn").setAttribute("aria-expanded", "true");
+  positionFiltersPopover();
+  const home = $("homeFilter"), select = $("selectDevicesBtn");
+  (!home.disabled ? home : !select.disabled ? select : $("filtersClose")).focus();
+}
+function validExclusions(body) {
+  return typeof body.account_id === "string" && !!body.account_id &&
+    Number.isInteger(body.revision) && body.revision >= 0 &&
+    Array.isArray(body.excluded_ids) && body.excluded_ids.every(id => typeof id === "string" && id.length);
+}
+function resetExclusions() {
+  closeFilters();
+  accountGeneration++; exclusionLoadGeneration++;
+  excludedIds = new Set(); bulkSelectedIds.clear(); deviceView = "active";
+  selectionMode = false; homes = null; selectedHome = preferredHome = "";
+  exclusionsLoaded = false; exclusionRevision = -1; accountId = null;
+  exclusionBusy = false; exclusionFailure = ""; pendingExclusionSave = null;
+}
+function applyExclusions(body) {
+  if (!validExclusions(body)) return false;
+  if (accountId !== body.account_id) {
+    closeFilters();
+    accountGeneration++;
+    resetLan();
+    closePanel(); bulkSelectedIds.clear(); deviceView = "active"; selectionMode = false;
+    collapsedGateways.clear(); filteredCollapsedGateways.clear();
+    tableKeysVisible = false; panelKeyVisible = false;
+    exclusionBusy = false; pendingExclusionSave = null;
+    exclusionRevision = -1; excludedIds = new Set();
+    accountId = body.account_id;
+    try { preferredHome = localStorage.getItem(homePreferenceKey()) || ""; } catch (e) { preferredHome = ""; }
+    selectedHome = ""; homes = null;
+  }
+  // A GET started before a successful PATCH must not put the older set back.
+  if (body.revision < exclusionRevision) return true;
+  const previouslyVisible = selectedId && inCurrentView(selectedId);
+  excludedIds = new Set(body.excluded_ids); exclusionRevision = body.revision;
+  exclusionsLoaded = true; exclusionFailure = "";
+  if (previouslyVisible && !inCurrentView(selectedId)) closePanel();
+  return true;
+}
+function exclusionError(message) {
+  exclusionFailure = message;
+  $("exclusionErrorText").textContent = message;
+  $("exclusionError").classList.toggle("hidden", !message);
+}
+function abandonFailedExclusionSave() {
+  if (!exclusionBusy && pendingExclusionSave) {
+    pendingExclusionSave = null; exclusionError("");
+  }
+}
+function selectionIds(entries = groupedRows(computeList())) {
+  return entries.filter(entry => !entry.hidden && !entry.context).map(entry => entry.device.id);
+}
+function syncSelectionUi(ids = selectionIds()) {
+  const available = new Set(ids);
+  for (const id of bulkSelectedIds) if (!available.has(id)) bulkSelectedIds.delete(id);
+  const count = bulkSelectedIds.size, disabled = !exclusionsLoaded || exclusionBusy;
+  $("bulkActions").classList.toggle("hidden", !selectionMode);
+  $("selectionCount").textContent = `${count} selected`;
+  $("excludeSelected").classList.toggle("hidden", deviceView !== "active");
+  $("restoreSelected").classList.toggle("hidden", deviceView !== "excluded");
+  $("excludeSelected").textContent = exclusionBusy ? "Saving…" : "Exclude selected";
+  $("restoreSelected").textContent = exclusionBusy ? "Saving…" : "Restore selected";
+  for (const id of ["excludeSelected", "restoreSelected", "clearSelection"]) $(id).disabled = disabled || !count;
+  $("clearSelection").classList.toggle("hidden", !count);
+  $("selectionDoneBtn").disabled = disabled;
+  $("selectDevicesBtn").disabled = disabled || selectionMode || !ids.length;
+  $("filtersBtn").disabled = disabled;
+  $("excludedViewBtn").textContent = `Excluded devices (${excludedIds.size})`;
+  $("excludedViewBtn").classList.toggle("hidden", !excludedIds.size && deviceView !== "excluded");
+  $("excludedViewBtn").setAttribute("aria-pressed", String(deviceView === "excluded"));
+  $("excludedViewBtn").disabled = disabled;
+  const filterCount = excludedIds.size + Number(!!selectedHome);
+  const filterSummary = [excludedIds.size ? plural(excludedIds.size, "excluded device") : "",
+    selectedHome ? "1 home filter" : ""].filter(Boolean).join(", ");
+  $("filterCount").textContent = filterCount;
+  $("filterCount").classList.toggle("hidden", !filterCount);
+  $("filtersBtn").dataset.active = String(!!filterCount);
+  $("filtersBtn").setAttribute("aria-label", filterCount ? `Filter (${filterCount}): ${filterSummary}` : "Filter");
+  $("clearAllFilters").disabled = disabled || !(filterCount || filterText || preferredHome || selectionMode || deviceView !== "active");
+  $("clearAllFilters").textContent = exclusionBusy && pendingExclusionSave && pendingExclusionSave.clearFilters ? "Clearing…" : "Clear all";
+  $("viewActions").classList.toggle("hidden", deviceView !== "excluded");
+  $("backToDevicesBtn").disabled = disabled;
+  $("restoreAll").classList.toggle("hidden", deviceView !== "excluded" || !excludedIds.size);
+  $("restoreAll").disabled = disabled || !excludedIds.size;
+  $("restoreAll").textContent = selectedHome ? "Restore all (all homes)" : "Restore all";
+  $("restoreAll").title = "Restore every excluded device in this account, across all homes";
+  $("retryExclusions").disabled = exclusionBusy;
+  $("filter").disabled = !exclusionsLoaded;
+  $("csvBtn").disabled = !exclusionsLoaded;
+  $("scanBtn").disabled = !exclusionsLoaded;
+  $("homeFilter").disabled = disabled || homeOptions().length < 2;
+  const selectAll = $("selectAllDevices");
+  if (selectAll) {
+    selectAll.checked = !!ids.length && count === ids.length;
+    selectAll.indeterminate = count > 0 && count < ids.length;
+    selectAll.disabled = disabled || !ids.length;
+  }
+  for (const input of $("rows").querySelectorAll("[data-device-select]")) {
+    input.checked = bulkSelectedIds.has(input.dataset.deviceSelect);
+    input.disabled = disabled || !available.has(input.dataset.deviceSelect);
+    input.closest("tr").classList.toggle("bulk-selected", input.checked);
+    input.closest("tr").classList.toggle("selection-disabled", input.disabled);
+  }
+  $("rows").classList.toggle("selection-mode", selectionMode);
+  exclusionError(exclusionFailure);
+  positionFiltersPopover();
+}
+function setDeviceView(view, clearFilter = false) {
+  if (!exclusionsLoaded || exclusionBusy) return;
+  abandonFailedExclusionSave();
+  closeFilters();
+  deviceView = view; selectionMode = false; bulkSelectedIds.clear(); filteredCollapsedGateways.clear();
+  if (clearFilter) { filterText = ""; $("filter").value = ""; }
+  if (selectedId && !inCurrentView(selectedId)) closePanel();
+  render(); (view === "excluded" ? $("backToDevicesBtn") : $("filtersBtn")).focus();
+}
+function setSelectionMode(active) {
+  if (!exclusionsLoaded || exclusionBusy) return;
+  abandonFailedExclusionSave(); bulkSelectedIds.clear(); selectionMode = active;
+  closeFilters();
+  renderHead(); renderRows(computeList());
+  const target = active ? $("selectAllDevices") : $("filtersBtn");
+  (target && !target.disabled && target.getClientRects().length ? target : $("selectionDoneBtn")).focus();
+}
+async function refreshExclusions() {
+  if (!exclusionsLoaded || exclusionBusy) return;
+  const generation = ++exclusionLoadGeneration, session = accountGeneration, expectedAccount = accountId;
+  const result = await api("/api/device-exclusions");
+  if (generation !== exclusionLoadGeneration || session !== accountGeneration) return;
+  if (!result.ok || !validExclusions(result.body)) {
+    exclusionError("Could not refresh device exclusions. Your last saved view is still shown.");
+    return;
+  }
+  if (result.body.account_id !== expectedAccount) { loadDevices(); return; }
+  applyExclusions(result.body); render();
+}
+async function saveExclusions(exclude = [], restore = [], restoreAll = false, clearFilters = false) {
+  if (!exclusionsLoaded || exclusionBusy) return;
+  const expectedAccount = accountId, session = accountGeneration;
+  const focusWasInPanel = $("panel").contains(document.activeElement);
+  exclusionLoadGeneration++; exclusionBusy = true;
+  const affectedCount = restoreAll ? excludedIds.size : exclude.length || restore.length;
+  pendingExclusionSave = { exclude: [...exclude], restore: [...restore], restoreAll, clearFilters };
+  exclusionError(""); syncSelectionUi();
+  const result = await api("/api/device-exclusions", {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(restoreAll ? { restore_all: true, account_id: expectedAccount }
+      : { exclude, restore, account_id: expectedAccount }),
+  });
+  if (session !== accountGeneration || expectedAccount !== accountId) return;
+  exclusionBusy = false;
+  if (!result.ok || !validExclusions(result.body) || result.body.account_id !== expectedAccount) {
+    if (result.body.error === "account_changed" || (result.ok && result.body.account_id !== expectedAccount)) {
+      pendingExclusionSave = null;
+      exclusionError("Your account changed. Refresh exclusions before trying again.");
+    } else {
+      exclusionError(clearFilters ? "Could not clear all filters. Your filters and exclusions have been kept. Try again."
+        : "Could not save device exclusions. Your list and selection have been kept. Try again.");
+    }
+    syncSelectionUi(); return;
+  }
+  applyExclusions(result.body); bulkSelectedIds.clear(); pendingExclusionSave = null; selectionMode = false;
+  if (clearFilters) { resetDeviceFilters(); return; }
+  $("exclusionStatus").textContent = `${plural(affectedCount, "device")} ${exclude.length ? "excluded" : "restored"}.`;
+  render();
+  const focused = document.activeElement;
+  if (!focused || focused === document.body || !focused.isConnected || !focused.getClientRects().length) {
+    if (selectedId && focusWasInPanel) focusPanelPage();
+    else $("filter").focus();
+  }
+}
+$("excludedViewBtn").onclick = () => setDeviceView(deviceView === "active" ? "excluded" : "active");
+$("backToDevicesBtn").onclick = () => setDeviceView("active");
+$("selectDevicesBtn").onclick = () => setSelectionMode(true);
+$("selectionDoneBtn").onclick = () => setSelectionMode(false);
+$("excludeSelected").onclick = () => saveExclusions([...bulkSelectedIds]);
+$("restoreSelected").onclick = () => saveExclusions([], [...bulkSelectedIds]);
+$("restoreAll").onclick = () => saveExclusions([], [], true);
+$("clearSelection").onclick = () => {
+  abandonFailedExclusionSave(); bulkSelectedIds.clear(); syncSelectionUi(); $("selectAllDevices").focus();
+};
+function changeHomeFilter(value) {
+  abandonFailedExclusionSave(); bulkSelectedIds.clear(); filteredCollapsedGateways.clear();
+  selectedHome = value; rememberHome();
+  if (selectedId && !inCurrentView(selectedId)) closePanel();
+  render(); $("homeFilter").focus();
+}
+$("homeFilter").onchange = (e) => changeHomeFilter(e.target.value);
+function resetDeviceFilters() {
+  selectedHome = ""; rememberHome();
+  filterText = ""; $("filter").value = "";
+  deviceView = "active"; selectionMode = false; bulkSelectedIds.clear(); filteredCollapsedGateways.clear();
+  if (selectedId && !inCurrentView(selectedId)) closePanel();
+  $("exclusionStatus").textContent = "All filters cleared.";
+  render();
+  const target = $("filtersPopover").classList.contains("hidden") ? $("filtersBtn")
+    : $("homeFilter").disabled ? $("filtersClose") : $("homeFilter");
+  target.focus();
+}
+$("clearAllFilters").onclick = () => {
+  if (!exclusionsLoaded || exclusionBusy) return;
+  abandonFailedExclusionSave();
+  if (excludedIds.size) saveExclusions([], [], true, true);
+  else resetDeviceFilters();
+};
+$("filtersIcon").innerHTML = icon("filters");
+$("filtersClose").innerHTML = icon("close");
+$("homeChevron").innerHTML = icon("chevron");
+$("filtersBtn").onclick = () => {
+  if ($("filtersPopover").classList.contains("hidden")) openFilters(); else closeFilters(true);
+};
+$("filtersClose").onclick = () => closeFilters(true);
+document.addEventListener("click", (e) => {
+  if (!$("filterWrap").contains(e.target)) closeFilters();
+});
+document.addEventListener("focusin", (e) => {
+  if (!$("filterWrap").contains(e.target)) closeFilters();
+});
+window.addEventListener("resize", positionFiltersPopover);
+window.addEventListener("scroll", positionFiltersPopover, true);
+$("retryExclusions").onclick = () => {
+  if (pendingExclusionSave) saveExclusions(pendingExclusionSave.exclude, pendingExclusionSave.restore,
+    pendingExclusionSave.restoreAll, pendingExclusionSave.clearFilters);
+  else loadDevices();
+};
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !views.devices.classList.contains("hidden")) refreshExclusions();
+});
+window.addEventListener("focus", () => {
+  if (!views.devices.classList.contains("hidden")) refreshExclusions();
+});
+
 async function boot() {
   const { body } = await api("/api/state");
   if (body.logged_in) loadDevices(); else show("login");
@@ -924,6 +1357,8 @@ $("cancelBtn").onclick = () => { stopPolling(); show("login"); };
 // ---- devices ----
 // Shows the full loading screen unless inline=true is requested.
 async function loadDevices(msg, inline, refresh) {
+  const generation = ++deviceLoadGeneration;
+  exclusionLoadGeneration++;
   banner("");
   if (inline) {
     $("refreshBtn").disabled = true;
@@ -936,10 +1371,15 @@ async function loadDevices(msg, inline, refresh) {
     show("loading");
   }
   try {
-    const { ok, status, body } = await api(refresh ? "/api/devices?refresh=1" : "/api/devices");
+    const [devicesResponse, preferencesResponse] = await Promise.all([
+      api(refresh ? "/api/devices?refresh=1" : "/api/devices"), api("/api/device-exclusions"),
+    ]);
+    if (generation !== deviceLoadGeneration) return;
+    const { ok, status, body } = devicesResponse;
     if (!ok) {
       if (status === 401) {
         deviceData = [];
+        resetExclusions();
         deviceChanges = snapshotReason = null;
         resetLan();
         indexChanges();
@@ -959,7 +1399,22 @@ async function loadDevices(msg, inline, refresh) {
       }
       return;
     }
+    // Pair the snapshot with the same account's preferences before showing any
+    // rows. A login in another tab can change the account between these reads.
+    if (!preferencesResponse.ok || !validExclusions(preferencesResponse.body) ||
+        body.account_id !== preferencesResponse.body.account_id) {
+      if (accountId && body.account_id !== accountId) {
+        deviceData = []; resetExclusions(); resetLan(); closePanel();
+        deviceChanges = snapshotReason = null; stopCacheStatusTimer(); indexChanges();
+      }
+      exclusionError(exclusionsLoaded
+        ? "Could not refresh device exclusions. Your last saved view is still shown. Try again."
+        : "Could not load device exclusions. Retry to show your devices safely.");
+      render(); show("devices"); return;
+    }
+    applyExclusions(preferencesResponse.body);
     deviceData = body.devices || [];
+    loadHomes(body);
     deviceChanges = body.changes || null;
     snapshotReason = body.stale ? (body.stale_reason || "fetch_failed") : null;
     devicesCachedAt = body.cached_at || Date.now() / 1000;
@@ -967,6 +1422,7 @@ async function loadDevices(msg, inline, refresh) {
     // so a failed LAN reload cannot preserve proof for a key that has changed.
     for (const result of Object.values(lanData.results || {})) result.key_current = false;
     await loadLan();
+    if (generation !== deviceLoadGeneration) return;
     applyLan();
     indexChanges();
     indexDevices();
@@ -986,10 +1442,12 @@ async function loadDevices(msg, inline, refresh) {
       watchScan(lanData.job.kind === "scan");
     }
   } catch (err) {
+    if (generation !== deviceLoadGeneration) return;
     if (inline) refreshStatus("Refresh failed.", "error");
     banner(refresh ? "Refresh failed. Try again." : "Failed to load devices.");
     show(deviceData.length ? "devices" : "login");
   } finally {
+    if (generation !== deviceLoadGeneration) return;
     $("refreshBtn").disabled = false;
     $("refreshBtn").textContent = "Refresh";
     if (inline) renderPanel();
@@ -1058,11 +1516,14 @@ function dismissLanSummary() {
 function plural(n, noun, many) { return `${n} ${n === 1 ? noun : (many || `${noun}s`)}`; }
 function deviceLink(entry) {
   return `<button type="button" class="link-btn" data-open-device="${esc(entry.id)}">` +
-    `${esc(entry.name || entry.id)}</button>`;
+    `${esc(entry.name || entry.id)}</button>` +
+    (excludedIds.has(entry.id) ? ' <span class="badge muted">Excluded</span>' : "");
 }
 function changeItems() {
-  const c = cloudChangesShown() ? deviceChanges : {};
-  const lan = lanChangesShown() ? lanData.changes : {};
+  const visibleChanges = changes => Object.fromEntries(Object.entries(changes || {})
+    .map(([kind, entries]) => [kind, Array.isArray(entries) ? entries.filter(e => inCurrentView(e.id, e)) : entries]));
+  const c = visibleChanges(cloudChangesShown() ? deviceChanges : {});
+  const lan = visibleChanges(lanChangesShown() ? lanData.changes : {});
   const items = [];
   const links = (entries) => entries.map(deviceLink).join(", ");
   const moved = (entries) => entries.map(e =>
@@ -1127,7 +1588,8 @@ function unnamedLeft() {
 // "192.168.2.8 (Valve), 192.168.2.9 (Water Timer)": where each gateway answered,
 // and the sub-devices whose key it answered to.
 function unnamedGateways(list) {
-  return list.map(g => `<span class="mono">${esc(g.ip)}</span> (` + (g.sub_devices || []).map(id => {
+  return list.filter(g => (g.sub_devices || []).some(id => inCurrentView(id))).map(g =>
+    `<span class="mono">${esc(g.ip)}</span> (` + (g.sub_devices || []).filter(id => inCurrentView(id)).map(id => {
     const sub = deviceData.find(s => s.id === id);
     return sub ? deviceLink(sub) : esc(id);
   }).join(", ") + ")").join(", ");
@@ -1136,7 +1598,7 @@ function lanSummaryNotice() {
   const s = lanData.summary;
   const reached = s.sub_devices_reached || 0;   // only sub-devices whose gateway answered
   const offline = s.sub_devices_offline || 0;   // of those, the ones it reports offline
-  const lines = [`Found ${s.matched} of ${plural(s.devices, "device")} on the local network` +
+  const lines = [`Found ${s.matched} of ${plural(s.devices, "device")} on the local network across all account devices` +
     (reached ? `, plus ${plural(reached, "sub-device")} reached through ` +
       `${reached === 1 ? "its gateway" : "their gateways"}` : "") + "." +
     (offline ? ` ${reached === 1 ? "Its gateway reports it" : `Their gateways report ${offline} of them`} ` +
@@ -1159,7 +1621,7 @@ function lanSummaryNotice() {
       `this account.${ips(unmatched)}`);
   if (late.length)
     lines.push(`${plural(late.length, "address", "addresses")} ran out of time before every key was tried.${ips(late)}`);
-  const unnamed = unnamedLeft();
+  const unnamed = unnamedLeft().filter(g => (g.sub_devices || []).some(id => inCurrentView(id)));
   if (unnamed.length)
     lines.push(`${plural(unnamed.length, "gateway")} answered to local keys Tuya lists on sub-devices: ` +
       `${unnamedGateways(unnamed)}. Tuya doesn't say which gateway has which key, so open a gateway ` +
@@ -1174,12 +1636,13 @@ function renderNotices() {
   const parts = [];
   if (snapshotReason) parts.push(snapshotNotice());
   const cloud = cloudChangesShown(), lan = lanChangesShown();
-  if (cloud || lan) {
+  const items = changeItems();
+  if ((cloud || lan) && items.length) {
     const title = cloud && lan ? "What changed"
       : cloud ? "What changed since the previous list" : "What changed since the previous scan";
     parts.push(`<div class="notice" id="changesNotice"><div class="grow">` +
       `<span class="notice-title">${title}</span>` +
-      `<ul>${changeItems().join("")}</ul></div>` +
+      `<ul>${items.join("")}</ul></div>` +
       `<button type="button" class="icon-btn" data-dismiss-changes ` +
       `aria-label="Dismiss" title="Dismiss">${icon("close")}</button></div>`);
   }
@@ -1197,6 +1660,7 @@ $("notices").addEventListener("click", (e) => {
 });
 function icon(name) {
   const icons = {
+    filters: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M4 7h9m5 0h2M4 17h2m5 0h9"/><circle cx="15.5" cy="7" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="17" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
     eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
     eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m3 3 18 18M10.6 10.6A3 3 0 0 0 12 15a3 3 0 0 0 2.4-1.2M9.9 4.2A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a16.8 16.8 0 0 1-2.8 4.2M6.6 6.6C3.7 8.5 2 12 2 12s3.5 8 10 8a10.7 10.7 0 0 0 4.1-.8"/></svg>',
     clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 2"/></svg>',
@@ -1323,8 +1787,15 @@ function indexDevices() {
 }
 
 function computeList() {
-  let list = deviceData;
-  if (filterText) list = list.filter(d => (searchIndex.get(d) || "").includes(filterText));
+  if (!exclusionsLoaded) return [];
+  let list = deviceData.filter(d => inCurrentView(d.id));
+  if (deviceView === "excluded") {
+    const currentIds = new Set(deviceData.map(d => d.id));
+    list = list.concat([...excludedIds].filter(id => !currentIds.has(id))
+      .map(id => ({ id, name: id, _missing: true })).filter(matchesHome));
+  }
+  if (filterText) list = list.filter(d => (d._missing ? `${d.id} not in the current device list`.toLowerCase()
+    : searchIndex.get(d) || "").includes(filterText));
   return sortDevices(list);
 }
 function sortDevices(list) {
@@ -1340,7 +1811,8 @@ function sortDevices(list) {
 // Keep the export list flat. The table adds a gateway for context when only
 // its sub-devices match, then sorts gateways and each set of children separately.
 function groupedRows(list) {
-  const byId = new Map(deviceData.map(d => [d.id, d]));
+  const viewDevices = deviceData.filter(d => inCurrentView(d.id));
+  const byId = new Map(viewDevices.map(d => [d.id, d]));
   const matched = new Set(list.map(d => d.id));
   const roots = new Set(), children = new Map();
   for (const d of list) {
@@ -1355,7 +1827,8 @@ function groupedRows(list) {
   }
   const collapsed = filterText ? filteredCollapsedGateways : collapsedGateways;
   const rows = [];
-  for (const d of sortDevices(deviceData.filter(d => roots.has(d.id)))) {
+  const rootDevices = [...viewDevices, ...list.filter(d => d._missing)].filter(d => roots.has(d.id));
+  for (const d of sortDevices(rootDevices)) {
     const subs = children.get(d.id) || [];
     const expanded = !collapsed.has(d.id);
     rows.push({ device: d, children: subs, expanded, context: !matched.has(d.id) });
@@ -1380,46 +1853,73 @@ function nameCell(entry) {
 }
 
 function renderHead() {
-  $("thead").innerHTML = "<tr>" + COLUMNS.map(c => {
+  const select = selectionMode ? `<th class="select-col"><input id="selectAllDevices" type="checkbox" ` +
+    `aria-label="Select all shown devices" title="Select all shown devices"></th>` : "";
+  $("thead").innerHTML = `<tr>${select}` + COLUMNS.map(c => {
     const label = c.header ? c.header() : c.label;
-    if (!c.sortable) return `<th>${label}</th>`;
+    const cls = c.key === "name" ? " name-col" : "";
+    if (!c.sortable) return `<th${cls ? ` class="${cls.trim()}"` : ""}>${label}</th>`;
     const active = sortState.key === c.key;
     const arrow = active ? (sortState.dir === 1 ? "▲" : "▼") : "";
-    return `<th class="sortable${active ? " active" : ""}" data-key="${c.key}">${label}<span class="arrow">${arrow}</span></th>`;
-  }).join("") + `<th class="details-col"><span class="sr-only">Details</span></th></tr>`;
+    return `<th class="sortable${cls}${active ? " active" : ""}" data-key="${c.key}">${label}<span class="arrow">${arrow}</span></th>`;
+  }).join("") + (selectionMode ? "" : `<th class="details-col"><span class="sr-only">Details</span></th>`) + `</tr>`;
 }
 
 function renderRows(list) {
   const entries = groupedRows(list);
-  const online = list.filter(isOnline).length;
+  const current = list.filter(d => !d._missing), missing = list.length - current.length;
+  const online = current.filter(isOnline).length;
   const hidden = entries.filter(entry => entry.hidden).length;
   const context = entries.filter(entry => entry.context).length;
-  $("count").innerHTML = `${list.length} device${list.length===1?"":"s"} ` +
-    `<span class="muted">· ${online} online · ${list.length-online} offline` +
+  $("count").innerHTML = `${list.length} ${deviceView === "excluded" ? "excluded " : ""}device${list.length===1?"":"s"} ` +
+    `<span class="muted">· ${online} online · ${current.length-online} offline` +
+    (missing ? ` · ${missing} not in the current list` : "") +
     (hidden ? ` · ${plural(hidden, "sub-device")} hidden` : "") +
     (context ? ` · ${plural(context, "gateway")} shown for context` : "") + `</span>`;
   $("rows").innerHTML = entries.map(entry => {
     const d = entry.device;
+    const select = selectionMode ? `<td class="select-col"><input type="checkbox" data-device-select="${esc(d.id)}" ` +
+      `aria-label="Select ${esc(d.name || d.id)}"${entry.context ? " disabled" : ""}></td>` : "";
     const cells = COLUMNS.map(c => {
-      const cls = c.cls ? ` class="${c.cls}"` : "";
-      const val = c.key === "name" ? nameCell(entry) : c.render ? c.render(d) : esc(d[c.key]);
-      return `<td${cls}>${val}</td>`;
+      const cls = [c.cls, c.key === "name" ? "name-col" : ""].filter(Boolean).join(" ");
+      const val = d._missing ? c.key === "name" ? `<span class="device-name">${esc(d.id)}</span>`
+        : c.key === "id" ? esc(d.id) : c.key === "online" ? '<span class="muted">Not in the current device list</span>' : dash()
+        : c.key === "name" ? nameCell(entry) : c.render ? c.render(d) : esc(d[c.key]);
+      return `<td data-column="${c.key}"${cls ? ` class="${cls}"` : ""}>${val}</td>`;
     }).join("");
     const label = `Show details for ${esc(d.name || d.id)}`;
-    const open = `<td class="details-col"><button class="icon-btn" type="button" data-open ` +
-      `aria-label="${label}" title="Details">${icon("chevron")}</button></td>`;
-    const classes = [entry.parent ? "sub-device-row" : "", d.id === selectedId ? "selected" : ""]
+    const open = selectionMode ? "" : d._missing ? '<td class="details-col"></td>'
+      : `<td class="details-col"><button class="icon-btn" type="button" data-open ` +
+        `aria-label="${label}" title="Details">${icon("chevron")}</button></td>`;
+    const classes = [entry.parent ? "sub-device-row" : "", d.id === selectedId ? "selected" : "", d._missing ? "missing-device" : ""]
       .filter(Boolean).join(" ");
     return `<tr id="${deviceRowId(d)}" data-id="${esc(d.id)}" class="${classes}"` +
+      (d._missing ? " data-missing" : "") +
       (entry.parent ? ` data-gateway-id="${esc(entry.parent)}"` : "") +
-      (entry.hidden ? " hidden" : "") + `>${cells}${open}</tr>`;
+      (entry.hidden ? " hidden" : "") + `>${select}${cells}${open}</tr>`;
   }).join("");
+  $("tableScroll").classList.toggle("hidden", !entries.length);
+  $("emptyDevices").classList.toggle("hidden", !!entries.length);
+  $("emptyDevices").innerHTML = entries.length ? "" : emptyListMessage();
   // The footnote for the * on a key from a sub-device, while one is listed.
   $("keyMarkNote").classList.toggle("hidden", !entries.some(entry =>
     !entry.hidden && !isSubDevice(entry.device) && keySource(entry.device)));
+  syncSelectionUi(selectionIds(entries));
 }
 
-function render() { renderNotices(); renderHead(); renderRows(computeList()); renderPanel(); }
+function emptyListMessage() {
+  if (!exclusionsLoaded) return "Device exclusions must be loaded before showing your devices.";
+  if (filterText) return "No devices match your filter.";
+  const scope = selectedHome === "unknown" ? " with an unknown home" : selectedHome ? " in this home" : "";
+  if (deviceView === "excluded") return `No excluded devices${scope}.`;
+  const inHome = deviceData.filter(matchesHome);
+  if (inHome.length && inHome.every(d => excludedIds.has(d.id)))
+    return `All devices${scope} are excluded.<br><button type="button" data-view-excluded>View excluded devices</button>`;
+  if (selectedHome) return `No devices${scope}.`;
+  return "No devices in this account.";
+}
+
+function render() { renderHomeFilter(); renderNotices(); renderHead(); renderRows(computeList()); renderPanel(); }
 
 // sort on header click
 $("thead").addEventListener("click", (e) => {
@@ -1430,6 +1930,26 @@ $("thead").addEventListener("click", (e) => {
   if (sortState.key === key) sortState.dir *= -1;   // toggle direction
   else { sortState.key = key; sortState.dir = 1; }  // new column, ascending
   render();
+});
+$("thead").addEventListener("change", (e) => {
+  if (e.target.id !== "selectAllDevices" || exclusionBusy || !exclusionsLoaded || !selectionMode) return;
+  abandonFailedExclusionSave();
+  const ids = selectionIds();
+  if (e.target.checked) ids.forEach(id => bulkSelectedIds.add(id));
+  else ids.forEach(id => bulkSelectedIds.delete(id));
+  syncSelectionUi(ids);
+});
+$("rows").addEventListener("change", (e) => {
+  const input = e.target.closest("[data-device-select]");
+  if (!input || exclusionBusy || !exclusionsLoaded || !selectionMode || input.disabled) return;
+  abandonFailedExclusionSave();
+  if (input.checked) bulkSelectedIds.add(input.dataset.deviceSelect);
+  else bulkSelectedIds.delete(input.dataset.deviceSelect);
+  syncSelectionUi();
+});
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-view-excluded]")) setDeviceView("excluded", true);
+  if (e.target.closest("[data-refresh-homes]")) loadDevices("Updating device list from Tuya…", false, true);
 });
 
 // Each eye controls only its own area, without repainting the other one.
@@ -1467,6 +1987,8 @@ copyOnClick($("setupBody"));
 copyOnClick($("networkBody"));
 // Device links stay in the current view, including a gateway's setup view.
 $("panel").addEventListener("click", (e) => {
+  const restore = e.target.closest("[data-restore-device]");
+  if (restore) { saveExclusions([], [restore.dataset.restoreDevice]); return; }
   const tab = e.target.closest("[data-setup-tool]");
   if (tab) {
     setupTool = tab.dataset.setupTool;
@@ -1502,8 +2024,9 @@ function setupEditionChange(e) {
 }
 $("setupBody").addEventListener("change", setupEditionChange);
 
-// open the details panel for the clicked row
+// Rows toggle selection in selection mode and open details while browsing.
 $("rows").addEventListener("click", (e) => {
+  if (e.target.closest("[data-device-select], [data-view-excluded]")) return;
   const toggle = e.target.closest("[data-gateway-toggle]");
   if (toggle) {
     const collapsed = filterText ? filteredCollapsedGateways : collapsedGateways;
@@ -1518,6 +2041,15 @@ $("rows").addEventListener("click", (e) => {
   if (e.target.closest("[data-copy]")) return;   // copying a key isn't a row click
   const tr = e.target.closest("tr[data-id]");
   if (!tr) return;
+  if (selectionMode) {
+    const input = tr.querySelector("[data-device-select]");
+    if (input && !input.disabled) {
+      input.click();
+      input.focus({ preventScroll: true });
+    }
+    return;
+  }
+  if (tr.hasAttribute("data-missing")) return;
   panelOpener = e.target.closest("[data-open]") || tr;
   openPanel(tr.dataset.id);
 });
@@ -1709,7 +2241,10 @@ function renderPanel(capture = true) {
   for (const [view, definition] of Object.entries(PANEL_PAGES)) {
     const content = $(definition.body);
     content.classList.toggle("hidden", view !== panelView);
-    content.innerHTML = view === panelView ? page.render(d) : "";
+    const excludedNote = excludedIds.has(d.id) ? `<div class="excluded-panel-note" data-excluded-note>` +
+      `<span class="badge muted">Excluded</span> Hidden from the main device list. ` +
+      `<button type="button" class="link-btn" data-restore-device="${esc(d.id)}"${exclusionBusy ? " disabled" : ""}>Restore device</button></div>` : "";
+    content.innerHTML = view === panelView ? excludedNote + page.render(d) : "";
   }
   for (const { selector, open } of state.disclosures || []) {
     const el = body.querySelector(selector);
@@ -1754,6 +2289,10 @@ function timeValue(d, key) {
 
 function fieldValue(d, key) {
   const value = d[key];
+  if (key === "gateway_id") {
+    const gateway = deviceData.find(g => g.id === value);
+    if (gateway) return deviceLink(gateway) + `<div class="field-sub">${copyable(value, true)}</div>`;
+  }
   if (key === "local_key") {
     const source = keySource(d);
     return `<span class="key-heading">${renderLocalKey(localKeyOf(d), panelKeyVisible)}${renderLocalKeyToggle("panel")}</span>` +
@@ -1914,7 +2453,8 @@ function setupField(key, label, value, options = {}) {
   const text = available ? String(value) : "";
   const shown = !available ? `<span class="dash">${esc(options.empty || "Not available")}</span>`
     : options.device ? `<button class="link-btn" type="button" data-open-device="${esc(options.device.id)}" ` +
-      `aria-label="Set up ${esc(options.device.name || options.device.id)}">${esc(text)}</button>`
+      `aria-label="Set up ${esc(options.device.name || options.device.id)}">${esc(text)}</button>` +
+      (excludedIds.has(options.device.id) ? ' <span class="badge muted">Excluded</span>' : "")
     : options.secret ? keyDisplay(text, panelKeyVisible) : esc(text);
   return `<div class="setup-field" data-setup-field="${esc(key)}">` +
     `<div class="setup-label">${esc(label)}</div>` +
@@ -2021,13 +2561,16 @@ function setupTinyTuya(d, s) {
 
 function setupChildren(d) {
   if (!isGateway(d)) return "";
-  const subs = deviceData.filter(s => isSubDevice(s) && gatewayIdOf(s) === d.id)
+  const children = deviceData.filter(s => isSubDevice(s) && gatewayIdOf(s) === d.id);
+  const excludedCount = children.filter(s => excludedIds.has(s.id) && matchesHome(s)).length;
+  const subs = children.filter(s => inCurrentView(s.id))
     .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
   return `<div class="setup-children"><h4>Sub-devices (${subs.length})</h4>` +
     (subs.length ? `<ul>` + subs.map(s => `<li>${deviceLink(s)}` +
       `<div class="setup-child-fields">${setupField("child_device_id", "Device ID", s.id)}` +
       `${setupField("child_node_id", "Node ID", s.node_id)}</div></li>`).join("") + `</ul>`
-      : "") + `</div>`;
+      : "") + (deviceView === "active" && excludedCount
+        ? `<p class="hint"><button class="link-btn" type="button" data-view-excluded>${plural(excludedCount, "excluded sub-device")}</button></p>` : "") + `</div>`;
 }
 
 function setupSection(d) {
@@ -2284,9 +2827,13 @@ $("panelNetworkOpen").onclick = () => openNetwork($("panelNetworkOpen"));
 $("panelBack").onclick = backPanel;
 $("scrim").onclick = closePanel;
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("filtersPopover").classList.contains("hidden")) {
+    e.preventDefault(); e.stopPropagation(); closeFilters(true); return;
+  }
   // Escape in the confirmation closes only the dialog, not the panel behind it.
   if (e.key === "Escape" && !$("logoutDialog").open) {
-    backPanel();
+    if (selectionMode && !selectedId) { e.preventDefault(); setSelectionMode(false); }
+    else backPanel();
   }
 });
 
@@ -2317,7 +2864,6 @@ function layoutActions() {
   const width = (ids) => ids.reduce((sum, id) => sum + $(id).offsetWidth, 0) +
     gap * Math.max(0, ids.length - 1);
   if (width(ACTION_IDS) <= room) return;
-
   $("moreWrap").classList.remove("hidden");
   const more = $("moreWrap").offsetWidth;
   let kept = [...ACTION_IDS];
@@ -2377,7 +2923,9 @@ if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutActi
 
 // filter
 $("filter").oninput = (e) => {
+  abandonFailedExclusionSave();
   filterText = e.target.value.toLowerCase();
+  bulkSelectedIds.clear();
   filteredCollapsedGateways.clear();
   renderRows(computeList());
 };
@@ -2399,6 +2947,7 @@ $("logoutDialog").addEventListener("close", () => {
   ($("logoutBtn").closest("#moreMenu") ? $("moreBtn") : $("logoutBtn")).focus();
 });
 async function logOut() {
+  deviceLoadGeneration++; resetExclusions();
   await api("/api/logout", { method: "POST" });
   deviceData = []; resetLan(); $("usercode").value = ""; $("filter").value = ""; filterText = ""; refreshStatus(""); stopCacheStatusTimer(); show("login");
 }
@@ -2454,15 +3003,18 @@ function stopScanWatch() {
 // poll waits for the one before it, so a slow reply can't overtake a newer one.
 function watchScan(showBox) {
   stopScanWatch();
-  const watch = lanWatch;
+  const watch = lanWatch, session = accountGeneration, expectedAccount = accountId;
   if (showBox) { showScanBox(true); scanProgress(lanData.job); }
   $("scanStart").disabled = true;
   const next = () => { lanPollTimer = setTimeout(poll, 1000); };
   const poll = async () => {
     const { ok, status, body } = await api("/api/lan/scan");
-    if (watch !== lanWatch) return;   // stopped, or a newer watch took over
+    if (watch !== lanWatch || session !== accountGeneration || expectedAccount !== accountId) return;
     if (!ok && status === 401) { stopScanWatch(); return; }
     if (!ok) { next(); return; }      // a blip: ask again
+    if (expectedAccount && body.account_id !== expectedAccount) {
+      stopScanWatch(); loadDevices(); return;
+    }
     const job = body.job;
     if (!job) { stopScanWatch(); scanProgress(null); return; }
     lanData.job = job;
@@ -2524,9 +3076,15 @@ function scanFailure(body) {
   return "Couldn't start the scan. Try again.";
 }
 async function startScan(payload) {
+  const session = accountGeneration, expectedAccount = accountId;
   const { ok, body } = await api("/api/lan/scan", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, account_id: expectedAccount }),
   });
+  if (session !== accountGeneration || expectedAccount !== accountId) return { ok: false, body: { error: "account_changed" } };
+  if (body.error === "account_changed" || (ok && body.account_id !== expectedAccount)) {
+    loadDevices(); return { ok: false, body: { error: "account_changed" } };
+  }
   if (ok) lanData.job = body.job;
   return { ok, body };
 }
@@ -2537,6 +3095,7 @@ $("scanForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   scanError("");
   const { ok, body } = await startScan({ targets: $("scanTargets").value });
+  if (body.error === "account_changed") return;
   if (!ok) {
     scanError(scanFailure(body));
     if (body.error === "scan_running") watchScan(true);
@@ -2549,7 +3108,13 @@ $("scanProgress").addEventListener("click", async (e) => {
   if (!e.target.closest("#scanCancel")) return;
   // Say so straight away: the checks under way take a few seconds to finish.
   if (lanData.job) { lanData.job = { ...lanData.job, cancelling: true }; scanProgress(lanData.job); }
-  await api("/api/lan/scan", { method: "DELETE" });
+  const session = accountGeneration, expectedAccount = accountId;
+  const { ok, body } = await api("/api/lan/scan", {
+    method: "DELETE", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ account_id: expectedAccount }),
+  });
+  if (session !== accountGeneration || expectedAccount !== accountId) return;
+  if (body.error === "account_changed" || (ok && body.account_id !== expectedAccount)) { stopScanWatch(); loadDevices(); }
 });
 $("networkBody").addEventListener("submit", async (e) => {
   const form = e.target.closest("[data-lan-check]");
@@ -2575,6 +3140,7 @@ async function checkDevice(id, ip) {
   try { response = await startScan({ device_id: id, ip }); }
   catch (err) { response = { ok: false, body: {} }; }
   const { ok, body } = response;
+  if (body.error === "account_changed") return;
   if (!ok) {
     panelCheck = { id, kind: "error", text: scanFailure(body), finishedAt: Date.now() / 1000 };
     renderPanel();
@@ -2602,12 +3168,13 @@ function csvColumns() {
 
 // CSV export (client-side) — respects the current filter + sort order
 $("csvBtn").onclick = () => {
+  if (!exclusionsLoaded) return;
   const cols = csvColumns();
-  const rows = [cols.join(",")].concat(computeList().map(d =>
+  const rows = [cols.join(",")].concat(computeList().filter(d => !d._missing).map(d =>
     cols.map(c => `"${String((c === "local_key" ? localKeyOf(d) : d[c]) ?? "").replace(/"/g,'""')}"`).join(",")));
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = "tuya-local-key.csv"; a.click();
+  a.href = URL.createObjectURL(blob); a.download = deviceView === "excluded" ? "tuya-local-key-excluded.csv" : "tuya-local-key.csv"; a.click();
   URL.revokeObjectURL(a.href);
 };
 

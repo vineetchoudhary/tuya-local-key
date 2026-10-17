@@ -17,6 +17,7 @@ session.json
 devices.cache
 lan.cache
 cache.key
+device-preferences.json
 .env
 .env.*
 *.pem

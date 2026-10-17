@@ -249,11 +249,46 @@ def build_manager(session, session_path):
     )
 
 
+class Devices(list):
+    """A device list with authoritative home metadata for web consumers.
+
+    Keep metadata on the collection rather than adding attributes to SDK
+    devices, so CLI output and other callers still see the same device fields.
+    A plain list from an older source simply has no established home metadata.
+    """
+
+    def __init__(self, devices=(), *, homes=(), home_ids=None):
+        super().__init__(devices)
+        self.homes = [{"id": str(home["id"]), "name": str(home.get("name") or "")}
+                      for home in homes]
+        self.home_ids = {str(device_id): list(dict.fromkeys(str(home_id) for home_id in ids))
+                         for device_id, ids in (home_ids or {}).items()}
+
+
 def devices_from_session(session, session_path):
-    """Build a Manager from a session and return its device list."""
+    """Fetch the SDK's device list, retaining the homes it normally flattens.
+
+    This is Manager.update_device_cache()'s public repository loop, with each
+    device's home membership retained from the query that returned it. It uses
+    the same requests and token refresh behavior, without inferring membership
+    from owner_id or repeating the device/home calls.
+    """
     manager = build_manager(session, session_path)
-    manager.update_device_cache()  # refreshes the token if needed
-    return list(manager.device_map.values())
+    manager.device_map.clear()
+    homes = manager.home_repository.query_homes()
+    manager.user_homes = homes
+    home_ids = {}
+    for home in homes:
+        for device in manager.device_repository.query_devices_by_home(home.id):
+            # The SDK keeps the last record if a shared device occurs in more
+            # than one home. Retain that behavior and every reported membership.
+            manager.device_map[device.id] = device
+            membership = home_ids.setdefault(str(device.id), [])
+            home_id = str(home.id)
+            if home_id not in membership:
+                membership.append(home_id)
+    return Devices(manager.device_map.values(), homes=[
+        {"id": home.id, "name": home.name} for home in homes], home_ids=home_ids)
 
 
 def get_devices(args):
@@ -393,9 +428,12 @@ def diff_devices(previous, current):
 
     for device_id, device in before.items():
         if device_id not in after:
-            changes["removed"].append(
-                {"id": device_id, "name": device.get("name") or ""}
-            )
+            removed = {"id": device_id, "name": device.get("name") or ""}
+            # Removed records no longer exist in the current list. Keep their
+            # established home membership so filtered notices remain accurate.
+            if isinstance(device.get("home_ids"), list):
+                removed["home_ids"] = list(device["home_ids"])
+            changes["removed"].append(removed)
 
     for entries in changes.values():
         entries.sort(key=lambda e: (e["name"].lower(), e["id"]))

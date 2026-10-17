@@ -434,15 +434,82 @@ def test_build_manager_passes_session_to_sdk(monkeypatch, tmp_path):
     assert isinstance(calls[0][5], core._SessionSaver)
 
 
-def test_devices_from_session_refreshes_manager_cache(monkeypatch):
+def test_devices_from_session_fetches_homes_and_devices_once(monkeypatch):
     devices = [SimpleNamespace(id="device-1")]
+    calls = []
+    homes = [SimpleNamespace(id="home-1", name="Home")]
+
+    def query_homes():
+        calls.append("homes")
+        return homes
+
+    def query_devices(home_id):
+        calls.append(("devices", home_id))
+        return devices
+
     manager = SimpleNamespace(
-        device_map={"device-1": devices[0]},
-        update_device_cache=lambda: None,
+        device_map={"old": SimpleNamespace(id="old")},
+        home_repository=SimpleNamespace(query_homes=query_homes),
+        device_repository=SimpleNamespace(query_devices_by_home=query_devices),
     )
     monkeypatch.setattr(core, "build_manager", lambda session, path: manager)
 
-    assert core.devices_from_session({"token_info": {}}, "session.json") == devices
+    result = core.devices_from_session({"token_info": {}}, "session.json")
+
+    assert result == devices and isinstance(result, list)
+    assert result.homes == [{"id": "home-1", "name": "Home"}]
+    assert result.home_ids == {"device-1": ["home-1"]}
+    assert manager.device_map == {"device-1": devices[0]} and manager.user_homes is homes
+    assert calls == ["homes", ("devices", "home-1")]
+    assert vars(devices[0]) == {"id": "device-1"}, "home metadata does not change CLI device fields"
+
+
+def test_home_membership_is_authoritative_and_shared_devices_keep_all_homes(monkeypatch):
+    homes = [SimpleNamespace(id=101, name="First home"),
+             SimpleNamespace(id="202", name="Second home"),
+             SimpleNamespace(id="303", name="Empty home")]
+    first = SimpleNamespace(id="shared", name="First", owner_id="unrelated-owner")
+    last = SimpleNamespace(id="shared", name="Last", owner_id="wrong-home")
+    unique = SimpleNamespace(id="unique", name="Unique", owner_id="101")
+    by_home = {101: [first], "202": [unique, last, last], "303": []}
+    calls = []
+
+    def query_devices(home_id):
+        calls.append(home_id)
+        return by_home[home_id]
+
+    manager = SimpleNamespace(device_map={},
+        home_repository=SimpleNamespace(query_homes=lambda: homes),
+        device_repository=SimpleNamespace(query_devices_by_home=query_devices))
+    monkeypatch.setattr(core, "build_manager", lambda *args: manager)
+
+    result = core.devices_from_session({}, "session.json")
+
+    assert result == [last, unique], "keep SDK insertion order and last duplicate record"
+    assert result.home_ids == {"shared": ["101", "202"], "unique": ["202"]}
+    assert result.homes == [{"id": "101", "name": "First home"},
+                            {"id": "202", "name": "Second home"},
+                            {"id": "303", "name": "Empty home"}]
+    assert calls == [101, "202", "303"]
+
+
+def test_known_empty_home_metadata_is_preserved(monkeypatch):
+    manager = SimpleNamespace(device_map={},
+        home_repository=SimpleNamespace(query_homes=lambda: []),
+        device_repository=SimpleNamespace(query_devices_by_home=lambda home_id: pytest.fail("no homes to query")))
+    monkeypatch.setattr(core, "build_manager", lambda *args: manager)
+
+    result = core.devices_from_session({}, "session.json")
+
+    assert result == [] and result.homes == [] and result.home_ids == {}
+
+
+def test_device_container_normalizes_metadata_ids_without_mutating_devices():
+    device = SimpleNamespace(id="device", name="Plug")
+    result = core.Devices([device], homes=[{"id": 12, "name": "Home"}], home_ids={"device": [12, "12"]})
+    assert result.homes == [{"id": "12", "name": "Home"}]
+    assert result.home_ids == {"device": ["12"]}
+    assert core.device_dict(result[0]) == {"name": "Plug", "id": "device"}
 
 
 def test_get_devices_reuses_session_or_reauthenticates(tmp_path, monkeypatch, capsys):
@@ -638,6 +705,22 @@ def test_diff_reports_added_and_removed_devices():
     assert changes["added"] == [{"id": "b", "name": "Fresh"}]
     assert changes["removed"] == [{"id": "a", "name": "Gone"}]
     assert changes["key_changed"] == []
+
+
+def test_removed_devices_keep_prior_home_membership_for_filtered_notices():
+    previous = [dict(_dev("shared", "Gone"), home_ids=["home-a", "home-b"],
+                     home_names=["First home", "Second home"]),
+                dict(_dev("empty", "No home"), home_ids=[]), _dev("legacy", "Old cache")]
+
+    changes = core.diff_devices(previous, [])
+
+    assert changes["removed"] == [
+        {"id": "shared", "name": "Gone", "home_ids": ["home-a", "home-b"]},
+        {"id": "empty", "name": "No home", "home_ids": []},
+        {"id": "legacy", "name": "Old cache"}]
+    assert "local_key" not in json.dumps(changes) and "home_names" not in json.dumps(changes)
+    changes["removed"][0]["home_ids"].clear()
+    assert previous[0]["home_ids"] == ["home-a", "home-b"]
 
 
 def test_diff_reports_a_rename_with_the_previous_name():
