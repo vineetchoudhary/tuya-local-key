@@ -1,0 +1,139 @@
+/* Devices styles. */
+.toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
+.toolbar .grow { flex: 1 1 auto; }
+.toolbar input { min-width: 100px; }
+.list-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: 10px; flex: 1 1 340px; margin-left: auto; min-width: 0; }
+.list-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: 8px; flex: 0 1 520px; min-width: 0; }
+.list-filters input { width: auto; flex: 1 1 160px; min-width: 100px; max-width: 260px;
+  padding: 8px 10px; font-size: 14px; }
+.filter-wrap { position: relative; flex: 0 0 auto; }
+.filter-toggle { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.filter-toggle svg { display: block; width: 15px; height: 15px; }
+.filter-toggle[data-active="true"], .view-button[aria-pressed="true"] {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+}
+.filter-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px;
+  padding: 0 4px; font-size: 11px; border-radius: 999px; color: var(--accent-fg); background: var(--accent); }
+.filter-count.hidden { display: none; }
+.filter-popover { position: fixed; z-index: 30; width: 280px; max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px); overflow-y: auto; padding: 14px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+.filter-popover-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.filter-popover-title { display: flex; flex: 1; align-items: baseline; gap: 6px; min-width: 0; }
+.filter-popover-head h3 { margin: 0; font-size: 14px; }
+.filter-popover label { margin-bottom: 6px; font-weight: 600; }
+.home-select-wrap { position: relative; }
+.home-filter { appearance: none; -webkit-appearance: none; width: 100%; min-width: 0; padding: 9px 40px 9px 12px;
+  font: inherit; font-size: 14px; color: var(--fg); background: var(--card);
+  border: 1px solid var(--border); border-radius: 8px; text-overflow: ellipsis; }
+.home-select-chevron { position: absolute; right: 14px; top: 50%; width: 14px; height: 14px;
+  color: var(--muted); pointer-events: none; transform: translateY(-50%) rotate(90deg); }
+.home-select-chevron svg { display: block; width: 14px; height: 14px; }
+.filter-selection { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.filter-selection button { width: 100%; padding: 8px 10px; text-align: left; font-size: 13px; }
+.filter-reset { font-size: 12px; white-space: nowrap; color: var(--muted); }
+.view-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-left: auto; }
+.view-actions.hidden { display: none; }
+.home-hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+@media (max-width: 550px) {
+  .list-controls, .list-filters { flex-basis: 100%; }
+  .list-filters input { flex-basis: 130px; max-width: none; }
+}
+.view-button { padding: 7px 10px; font-size: 13px; }
+.bulk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px;
+  padding: 8px 10px; border-radius: 8px; background: var(--code-bg); }
+.bulk-actions.hidden { display: none; }
+.bulk-actions button { padding: 6px 10px; font-size: 13px; }
+.selection-count { font-size: 13px; font-weight: 600; margin-right: 2px; }
+#selectionDoneBtn { margin-left: auto; }
+.exclusion-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; color: var(--off); font-size: 13px; }
+.exclusion-error.hidden { display: none; }
+.exclusion-error button { padding: 5px 9px; font-size: 13px; }
+.count { font-weight:600; }
+.count .muted { color: var(--muted); font-weight: 400; }
+.updated {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--card); color: var(--muted); font-size: 12px; font-weight: 600;
+}
+.updated svg { width: 13px; height: 13px; color: var(--accent); }
+.refresh-status { color: var(--muted); font-size: 13px; font-weight: 600; }
+.refresh-status.ok { color: var(--ok); }
+.refresh-status.error { color: var(--off); }
+.table-scroll { overflow-x: auto; border:1px solid var(--border); border-radius:12px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; white-space: nowrap; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+th { position: sticky; top: 0; background: var(--card); font-weight: 600; color: var(--muted); }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--fg); }
+th.active { color: var(--fg); }
+th .arrow { font-size: 10px; margin-left: 3px; }
+tr:last-child td { border-bottom: none; }
+.protocol-note { margin-left: 5px; font-size: 12px; }
+/* A gateway key Tuya lists on a sub-device: explained in its tooltip and below the table */
+.key-mark {
+  margin-left: 2px; padding: 0 2px; color: var(--muted); font-size: 15px; font-weight: 700;
+  line-height: 1; vertical-align: top; cursor: help;
+}
+.notice .ips { display: block; margin-top: 4px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+/* Notices above the table: what changed, and whether this list is a snapshot */
+.notices { display: grid; gap: 10px; margin-bottom: 14px; }
+.notices:empty { display: none; }
+.notice {
+  display: flex; align-items: flex-start; gap: 10px; border-radius: 8px;
+  padding: 11px 13px; font-size: 13.5px; line-height: 1.55;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.notice.warn {
+  border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+}
+.notice .grow { flex: 1 1 auto; min-width: 0; }
+.notice .notice-title { display: block; font-weight: 650; margin-bottom: 3px; }
+.notice ul { margin: 0; padding: 0; list-style: none; }
+.notice li + li { margin-top: 5px; }
+.notice li.rotated { color: var(--warn); }
+.notice button.primary { flex: 0 0 auto; padding: 6px 11px; font-size: 13px; }
+.change-badge {
+  margin-left: 7px; font-size: 11px; font-weight: 700; letter-spacing: .03em;
+  padding: 1px 7px; border-radius: 999px; text-transform: uppercase;
+  color: var(--muted); background: var(--code-bg); white-space: nowrap;
+}
+.change-badge.key_changed {
+  color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+.change-badge.added {
+  color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+.change-badge.version_changed, .change-badge.local_key_failed {
+  color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+/* Rows select devices in selection mode and open details while browsing. */
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+tbody:not(.selection-mode) tr.selected, tbody tr.bulk-selected { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.device-name { display: inline-flex; align-items: center; gap: 6px; }
+.gateway-toggle, .gateway-spacer { width: 24px; flex: 0 0 24px; }
+.gateway-toggle { height: 24px; border: 0; background: none; }
+.gateway-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.gateway-count { cursor: help; }
+.sub-device-row td.name-col { padding-left: 36px; }
+th.select-col, td.select-col { width: 38px; min-width: 38px; padding: 9px 10px; }
+.select-col input { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: var(--accent); cursor: pointer; }
+.select-col input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.select-col input:disabled { cursor: default; }
+tr.missing-device { cursor: default; }
+tbody.selection-mode tr.missing-device { cursor: pointer; }
+tbody.selection-mode tr.selection-disabled { cursor: default; }
+.empty-list { white-space: normal; text-align: center; color: var(--muted); padding: 30px 12px; }
+.empty-list button { margin-top: 10px; }
+.sub-device-row .gateway-spacer::before {
+  content: ""; display: block; width: 12px; height: 10px; margin-left: 4px; margin-top: -5px;
+  border-left: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+th.details-col, td.details-col { width: 1%; padding-left: 0; }

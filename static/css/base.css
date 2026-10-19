@@ -1,0 +1,72 @@
+/* Base styles. */
+:root {
+  --bg: #f6f7f9; --card: #fff; --fg: #1c2530; --muted: #6b7684;
+  --border: #e3e7ec; --accent: #2f6fed; --accent-fg: #fff;
+  --ok: #1a9d51; --off: #b03a3a; --warn: #8a5a00; --code-bg: #f0f2f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161c; --card: #1b2129; --fg: #e6eaef; --muted: #9aa5b1;
+    --border: #2b333d; --accent: #4d86ff; --accent-fg: #fff;
+    --ok: #38c172; --off: #e06666; --warn: #e3ab4f; --code-bg: #232b34;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg); color: var(--fg);
+}
+main { max-width: 1300px; margin: 0 auto; padding: 22px 16px 60px; }
+h2 { font-size: 16px; margin: 0 0 14px; }
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+input[type=text] {
+  width: 100%; padding: 10px 12px; font-size: 15px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+}
+button {
+  font: inherit; font-weight: 600; cursor: pointer; border: 1px solid var(--border);
+  background: var(--card); color: var(--fg); padding: 9px 14px; border-radius: 8px;
+}
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button:disabled { opacity: .55; cursor: default; }
+.hint { font-size: 13px; color: var(--muted); margin-top: 14px; }
+.hint b { color: var(--fg); }
+.spinner {
+  display:inline-block; width:15px; height:15px; border:2px solid var(--border);
+  border-top-color: var(--accent); border-radius:50%; animation: spin 1s linear infinite; vertical-align:-3px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.key-heading { display: inline-flex; align-items: center; gap: 6px; }
+.key-heading .icon-btn { width: 24px; height: 24px; }
+.key, .node-id {
+  min-width: 132px; text-align: left; background: var(--code-bg); padding: 3px 7px;
+  border-radius: 6px; cursor: pointer; border: 0; font-weight: 500;
+}
+.key:hover, .key:focus-visible, .node-id:hover, .node-id:focus-visible { outline: 1px solid var(--accent); }
+.icon-btn {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border-radius: 7px; color: var(--muted);
+}
+.icon-btn:hover, .icon-btn:focus-visible { color: var(--fg); border-color: var(--accent); }
+.icon-btn svg { width: 16px; height: 16px; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+.badge.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.badge.off { color: var(--off); background: color-mix(in srgb, var(--off) 14%, transparent); }
+.badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.badge.muted { color: var(--muted); background: var(--code-bg); }
+/* LAN results carry a tag, so they can't be mistaken for the cloud's flag */
+.badge-tag {
+  margin-right: 1px; padding-right: 5px; font-size: 10px; letter-spacing: .04em;
+  border-right: 1px solid currentColor; opacity: .75;
+}
+.link-btn {
+  padding: 0; border: 0; background: none; font: inherit; font-weight: 600;
+  color: var(--accent); cursor: pointer; text-decoration: underline;
+}
+.link-btn:hover, .link-btn:focus-visible { color: var(--fg); }
+button.danger { background: var(--off); border-color: var(--off); color: #fff; }
+.banner { background: color-mix(in srgb, var(--off) 14%, transparent); color: var(--off);
+          border:1px solid var(--off); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:14px; }
+a { color: var(--accent); }
+body.panel-open .panel { transform: none; visibility: visible; }

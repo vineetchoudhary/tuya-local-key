@@ -1,0 +1,61 @@
+<!-- DEVICES -->
+<section id="devices" class="hidden">
+  <div class="notices" id="notices"></div>
+  <div class="toolbar">
+    <span class="count" id="count"></span>
+    <span class="updated hidden" id="updated"></span>
+    <span class="refresh-status hidden" id="refreshStatus" aria-live="polite"></span>
+    <div class="list-controls">
+      <div class="list-filters">
+        <div id="filterWrap" class="filter-wrap">
+          <button id="filtersBtn" class="view-button filter-toggle" type="button" aria-haspopup="dialog"
+                  aria-label="Filter" aria-expanded="false" aria-controls="filtersPopover"><span id="filtersIcon" aria-hidden="true"></span>Filter<span id="filterCount" class="filter-count hidden" aria-hidden="true"></span></button>
+          <div id="filtersPopover" class="filter-popover hidden" role="dialog" aria-labelledby="filtersTitle">
+            <div class="filter-popover-head">
+              <div class="filter-popover-title">
+                <h3 id="filtersTitle">Filters</h3>
+                <span class="filter-reset">(<button id="clearAllFilters" class="link-btn" type="button">Clear all</button>)</span>
+              </div>
+              <button id="filtersClose" class="icon-btn" type="button" aria-label="Close filters" title="Close filters"></button>
+            </div>
+            <label for="homeFilter">Home</label>
+            <div class="home-select-wrap">
+              <select id="homeFilter" class="home-filter" aria-label="Filter by home"><option value="">All homes</option></select>
+              <span id="homeChevron" class="home-select-chevron" aria-hidden="true"></span>
+            </div>
+            <p id="homeHint" class="home-hint hidden"><button class="link-btn" type="button" data-refresh-homes>Refresh</button> to load your homes.</p>
+            <div class="filter-selection">
+              <button id="selectDevicesBtn" type="button">Select devices</button>
+              <button id="excludedViewBtn" class="view-button hidden" type="button" aria-pressed="false">Excluded devices (0)</button>
+            </div>
+          </div>
+        </div>
+        <input id="filter" type="text" aria-label="Search devices" placeholder="Search devices…" autocomplete="off">
+      </div>
+      <div id="viewActions" class="view-actions hidden">
+        <button id="backToDevicesBtn" class="link-btn" type="button">Back to devices</button>
+        <button id="restoreAll" class="view-button hidden" type="button">Restore all</button>
+      </div>
+    </div>
+  </div>
+  <div id="bulkActions" class="bulk-actions hidden" aria-label="Selected devices">
+    <span id="selectionCount" class="selection-count"></span>
+    <button id="excludeSelected" class="primary" type="button">Exclude selected</button>
+    <button id="restoreSelected" class="primary hidden" type="button">Restore selected</button>
+    <button id="clearSelection" type="button">Clear selection</button>
+    <button id="selectionDoneBtn" type="button">Done</button>
+  </div>
+  <div id="exclusionError" class="exclusion-error hidden" role="alert">
+    <span id="exclusionErrorText"></span><button id="retryExclusions" type="button">Retry</button>
+  </div>
+  <span id="exclusionStatus" class="sr-only" role="status" aria-live="polite"></span>
+  {% include "partials/scan.html" %}
+  <div id="emptyDevices" class="empty-list hidden" role="status"></div>
+  <div id="tableScroll" class="table-scroll">
+    <table id="table">
+      <thead id="thead"></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p id="keyMarkNote" class="hint hidden">* Tuya lists this key on the gateway's sub-devices, not on the gateway.</p>
+</section>

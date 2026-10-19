@@ -1,0 +1,43 @@
+/* Network styles. */
+/* Scan network */
+.scan-box {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 14px;
+}
+.scan-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.scan-row input { flex: 1 1 260px; min-width: 0; }
+.scan-box .hint { margin-top: 10px; }
+.scan-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; font-size: 14px; }
+.scan-progress .grow { flex: 1 1 auto; }
+.scan-error { margin-top: 10px; color: var(--off); font-size: 13.5px; }
+/* The details panel's single-device check */
+.lan-check { display: flex; gap: 8px; margin-top: 10px; }
+.lan-check input { flex: 1 1 auto; min-width: 0; padding: 7px 10px; font-size: 14px; }
+.lan-check button { padding: 7px 12px; font-size: 13.5px; }
+.lan-quick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.lan-quick button { padding: 7px 12px; font-size: 13.5px; }
+.lan-note { margin-top: 8px; font-size: 13px; color: var(--muted); }
+.network-body { padding-top: 16px; }
+.network-card { border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.network-summary { display: flex; align-items: flex-start; gap: 10px; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.network-symbol {
+  display: grid; place-items: center; flex: 0 0 auto; width: 32px; height: 32px;
+  border-radius: 50%; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.network-symbol svg { width: 18px; height: 18px; }
+.network-summary[data-tone=ready] .network-symbol { color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.network-summary[data-tone=attention] .network-symbol { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.network-summary h3 { font-size: 15px; font-weight: 650; margin: 0 0 3px; }
+.network-summary p { color: var(--muted); font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+.network-card h4, .network-check-label { display: block; font-size: 12px; font-weight: 600; margin: 16px 0 6px; }
+.network-child-status { margin: 12px 0; padding: 10px 12px; border-radius: 7px; background: var(--bg); font-size: 13px; }
+.network-child-status[data-state=attention] { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.network-child-status p { margin: 0; }
+.network-child-status .muted { display: block; margin-top: 3px; font-size: 12px; }
+.network-gateways { margin: 0; padding-left: 18px; font-size: 13px; }
+.network-gateways li + li { margin-top: 6px; }
+.network-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 14px; margin-top: 16px; border-top: 1px solid var(--border); }
+.network-actions button { flex: 1 1 140px; min-width: 0; padding: 9px 10px; font-size: 13px; }
+.network-actions button:focus-visible, #panelNetworkOpen:focus-visible, .setup-note-actions button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}

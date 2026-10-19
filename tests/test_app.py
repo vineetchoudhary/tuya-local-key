@@ -1,13 +1,19 @@
 import importlib
 import json
 import os
+import re
 import sys
 import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from html.parser import HTMLParser
+from urllib.parse import urljoin
 
 import pytest
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
+from werkzeug.test import Client
+from werkzeug.wrappers import Response
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +56,93 @@ def test_app_icon_uses_ingress_relative_urls(webapp):
     assert 'src="icon.png"' in response.text
     assert 'href="/icon.png"' not in response.text
     assert 'src="/icon.png"' not in response.text
+
+
+class _FrontendDocument(HTMLParser):
+    def __init__(self, markup):
+        super().__init__()
+        self.assets = []
+        self.config = ""
+        self.reading_config = False
+        self.inline_code = False
+        self.inline_styles = False
+        self.feed(markup)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        self.inline_styles |= "style" in attrs or tag == "style"
+        if tag == "link" and attrs.get("rel") == "stylesheet":
+            self.assets.append(attrs["href"])
+        if tag == "script":
+            self.reading_config = attrs.get("id") == "app-config" and attrs.get("type") == "application/json"
+            if "src" in attrs:
+                assert attrs.get("type") == "module"
+                self.assets.append(attrs["src"])
+            elif not self.reading_config:
+                self.inline_code = True
+
+    def handle_data(self, data):
+        if self.reading_config:
+            self.config += data
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self.reading_config = False
+
+
+@pytest.mark.parametrize("prefix", ["", "/api/hassio_ingress/frontend-test"])
+def test_frontend_asset_graph_loads_at_root_and_through_ingress(webapp, prefix):
+    mounted = DispatcherMiddleware(webapp.app, {prefix: webapp.app}) if prefix else webapp.app
+    client = Client(mounted, Response)
+    headers = {"X-Ingress-Path": prefix} if prefix else {}
+    response = client.get(prefix + "/", headers=headers)
+    assert response.status_code == 200
+    document = _FrontendDocument(response.text)
+    assert not document.inline_code
+    assert not document.inline_styles
+    assert json.loads(document.config)["gatewayCategories"] == sorted(webapp.lan_scan.GATEWAY_CATEGORIES)
+    assert document.assets
+    assert all(not asset.startswith(("/", "http:", "https:")) for asset in document.assets)
+    pending = [urljoin(prefix + "/", asset) for asset in document.assets]
+    visited = set()
+    while pending:
+        asset = pending.pop()
+        if asset in visited:
+            continue
+        visited.add(asset)
+        assert asset.startswith(prefix + "/static/")
+        loaded = client.get(asset, headers=headers)
+        assert loaded.status_code == 200, asset
+        assert "{{" not in loaded.text, asset
+        if asset.endswith(".css"):
+            assert loaded.mimetype == "text/css"
+        else:
+            assert loaded.mimetype in ("text/javascript", "application/javascript")
+            imports = re.findall(r'''(?m)^import\s+[^;]+?\s+from\s+["']([^"']+)["']''', loaded.text)
+            assert all(module.startswith(("./", "../")) for module in imports)
+            pending.extend(urljoin(asset, module) for module in imports)
+    assert any(asset.endswith(".css") for asset in visited)
+    assert any("/shared/" in asset for asset in visited)
+
+
+def test_frontend_configuration_is_serialized_as_inert_json(webapp, monkeypatch):
+    categories = {"bridge", "gateway</script><script>alert(1)</script>"}
+    monkeypatch.setattr(webapp.lan_scan, "GATEWAY_CATEGORIES", categories)
+    response = webapp.app.test_client().get("/")
+    document = _FrontendDocument(response.text)
+    assert json.loads(document.config) == {"gatewayCategories": sorted(categories)}
+    assert not document.inline_code
+    assert "gateway</script>" not in response.text
+
+
+@pytest.mark.parametrize("path", ["/", "/static/css/base.css", "/static/js/app.js", "/static/js/shared/model.js"])
+def test_frontend_assets_follow_direct_and_ingress_authentication(tmp_path, monkeypatch, path):
+    module = _reload_app(monkeypatch, tmp_path, AUTH_USERNAME="admin", AUTH_PASSWORD="secret")
+    client = module.app.test_client()
+    assert client.get(path).status_code == 401
+    assert client.get(path, auth=("admin", "wrong")).status_code == 401
+    assert client.get(path, auth=("admin", "secret")).status_code == 200
+    assert client.get(path, headers={"X-Ingress-Path": "/api/hassio_ingress/test"}).status_code == 200
 
 
 def test_qr_scheme_defaults_to_smartlife(tmp_path, monkeypatch):

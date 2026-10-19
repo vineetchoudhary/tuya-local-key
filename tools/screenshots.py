@@ -269,7 +269,10 @@ def shot_scan(page, fx):
     page.fill("#scanTargets", demo_fleet.LAN_SUBNET)
     page.click("#scanStart")
     page.wait_for_selector("#lanSummaryNotice")
-    page.wait_for_function("!lanPollTimer")
+    page.wait_for_function("""async () => {
+        const { isWatchingScan } = await import(new URL('static/js/features/network.js', document.baseURI).href);
+        return !isWatchingScan();
+    }""")
     height = page.evaluate(
         "n => Math.round(document.querySelectorAll('#rows tr')[n - 1]"
         ".getBoundingClientRect().bottom)", SCAN_ROWS)

@@ -70,6 +70,8 @@ def test_dockerfile_has_home_assistant_labels_and_runtime_contract():
     assert "device_cache.py" in dockerfile
     assert "device_preferences.py" in dockerfile
     assert "lan_scan.py" in dockerfile
+    assert "COPY templates ./templates" in dockerfile
+    assert "COPY static ./static" in dockerfile
     assert 'VOLUME ["/data"]' in dockerfile
     assert "waitress-serve --listen=0.0.0.0:${PORT:-8000}" in dockerfile
 

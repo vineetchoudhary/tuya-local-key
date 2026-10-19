@@ -1,0 +1,52 @@
+/* Auth styles. */
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 22px; margin: 0 auto; max-width: 540px;
+}
+.qr-wrap { text-align: center; }
+.qr-wrap img { width: 260px; height: 260px; image-rendering: pixelated; border-radius: 8px; background:#fff; padding:8px; }
+/* Big centered spinner for the loading screen */
+.big-spinner {
+  width: 44px; height: 44px; border: 3px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 1s linear infinite; margin: 6px auto 0;
+}
+/* Numbered step-by-step guide */
+.steps-title { font-size: 15px; font-weight: 650; margin: 22px 0 12px; }
+ol.steps { list-style: none; counter-reset: step; margin: 0; padding: 0; }
+ol.steps li {
+  counter-increment: step; position: relative; padding: 9px 0 9px 44px;
+  font-size: 15px; line-height: 1.55;
+}
+ol.steps li + li { border-top: 1px solid var(--border); }
+ol.steps li::before {
+  content: counter(step); position: absolute; left: 0; top: 8px;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-fg);
+  font-size: 14px; font-weight: 700; display: grid; place-items: center;
+}
+ol.steps b { color: var(--fg); font-weight: 650; }
+/* Info callout (e.g. the "Home Assistant" heads-up on the QR screen) */
+.note {
+  margin-top: 16px; padding: 11px 13px; border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  font-size: 13.5px; line-height: 1.55; color: var(--muted);
+}
+.note b { color: var(--fg); font-weight: 650; }
+/* Log out confirmation */
+dialog.confirm {
+  width: min(420px, calc(100% - 32px)); padding: 22px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--card); color: var(--fg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+}
+dialog.confirm::backdrop { background: rgba(0, 0, 0, .45); }
+dialog.confirm h2 { margin: 0 0 8px; }
+dialog.confirm p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.login-actions { margin-top: 14px; }
+.qr-waiting { text-align: center; margin-top: 18px; }
+.qr-cancel { text-align: center; margin-top: 8px; }
+#loading { text-align: center; }
+.loading-message { font-size: 16px; font-weight: 600; margin: 18px 0 4px; }
+#loading .hint { margin-top: 0; }

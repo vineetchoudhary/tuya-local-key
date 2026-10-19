@@ -1,4 +1,4 @@
-"""Browser smoke tests for templates/index.html — the behaviour Python can't reach.
+"""Browser smoke tests for the frontend — the behaviour Python can't reach.
 
 Needs playwright and a Chromium-family browser:
 
@@ -15,11 +15,13 @@ import html
 import importlib
 import json
 import os
+import re
 import shutil
 import sys
 import threading
 import types
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -28,6 +30,7 @@ pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 from playwright.sync_api import Error as PlaywrightError  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
+from werkzeug.middleware.dispatcher import DispatcherMiddleware  # noqa: E402
 from werkzeug.serving import make_server  # noqa: E402
 
 import demo_devices  # noqa: E402
@@ -39,6 +42,7 @@ PLUG = DEVICES[demo_devices.PLUG]
 BROWSER_CHANNELS = (None, "msedge", "chrome")   # None = playwright's own Chromium
 MASK = "•"
 APP = None      # the reloaded app module the server runs, for tests that vary it
+INGRESS_PREFIX = "/api/hassio_ingress/frontend-test"
 
 # Every test leaves a screenshot behind, gathered into a gallery you can open.
 # Local convenience only: CI runners set CI, and skip the whole thing.
@@ -67,7 +71,12 @@ def server(tmp_path_factory):
         app = importlib.reload(app)
         APP = app
         mp.setattr(app.core, "devices_from_session", lambda session, path: DEVICES)
-        httpd = make_server("127.0.0.1", 0, app.app, threaded=True)
+        def ingress(environ, start_response):
+            environ["HTTP_X_INGRESS_PATH"] = INGRESS_PREFIX
+            return app.app(environ, start_response)
+
+        mounted = DispatcherMiddleware(app.app, {INGRESS_PREFIX: ingress})
+        httpd = make_server("127.0.0.1", 0, mounted, threaded=True)
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
         try:
@@ -137,8 +146,8 @@ def gallery(request):
         f'<figure class="{"failed" if s["status"] == "fail" else ""}">'
         f'<figcaption><span class="badge {s["status"]}">{s["status"]}</span>'
         f'<span class="name">{html.escape(s["name"])}</span></figcaption>'
-        f'<a class="shot" href="{s["file"]}" target="_blank">'
-        f'<img src="{s["file"]}" alt="{html.escape(s["name"])}" loading="lazy"></a>'
+        f'<a class="shot" href="{quote(s["file"], safe="")}" target="_blank">'
+        f'<img src="{quote(s["file"], safe="")}" alt="{html.escape(s["name"])}" loading="lazy"></a>'
         f"</figure>"
         for s in shots
     )
@@ -185,7 +194,9 @@ def record_shot(page, gallery, node):
     """Screenshot the page as the test leaves it, pass or fail."""
     report = getattr(node, "rep_call", None)
     status = "fail" if report is None or report.failed else "pass"
-    name = f"{len(gallery) + 1:02d}-{status}-{node.name}.png"
+    # Parameter IDs can contain API paths. Keep each screenshot in one file.
+    filename = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", node.name)
+    name = f"{len(gallery) + 1:02d}-{status}-{filename}.png"
     try:
         # A fixed drawer belongs to the viewport. A full-page capture places it
         # partway down a scrolled mobile page instead of showing the visible UI.
@@ -221,6 +232,109 @@ def field_value(page, key):
 
 def clipboard(page):
     return page.evaluate("navigator.clipboard.readText()")
+
+
+def frontend_state(page, field):
+    return page.evaluate("""async field => {
+        const { appState } = await import(new URL('static/js/shared/state.js', document.baseURI).href);
+        return appState[field];
+    }""", field)
+
+
+def repaint(page):
+    page.evaluate("""async () => {
+        const { render } = await import(new URL('static/js/app.js', document.baseURI).href);
+        render();
+    }""")
+
+
+def wait_scan_idle(page):
+    page.wait_for_function("""async () => {
+        const { isWatchingScan } = await import(new URL('static/js/features/network.js', document.baseURI).href);
+        return !isWatchingScan();
+    }""")
+
+
+@pytest.mark.parametrize("ingress,width,theme", [
+    (False, 1440, "light"), (False, 390, "dark"),
+    (True, 1440, "dark"), (True, 390, "light"),
+])
+def test_modular_frontend_starts_and_navigates_at_root_and_ingress(browser, server, tmp_path, ingress, width, theme):
+    target = server + (INGRESS_PREFIX.lstrip("/") + "/" if ingress else "")
+    context = browser.new_context(viewport={"width": width, "height": 1000}, color_scheme=theme)
+    loaded = context.new_page()
+    errors, failed_assets, requests = [], [], []
+    loaded.on("pageerror", lambda error: errors.append(str(error)))
+    loaded.on("request", lambda request: requests.append(request.url))
+    loaded.on("requestfailed", lambda request: failed_assets.append((request.url, request.failure)))
+
+    def check_asset(response):
+        if response.request.resource_type in ("script", "stylesheet") and not response.ok:
+            failed_assets.append((response.url, response.status))
+
+    loaded.on("response", check_asset)
+    try:
+        loaded.goto(target, wait_until="networkidle")
+        loaded.wait_for_selector("#rows tr")
+        expected_background = "rgb(246, 247, 249)" if theme == "light" else "rgb(18, 22, 28)"
+        assert loaded.evaluate("getComputedStyle(document.body).backgroundColor") == expected_background
+        # Reinitialization must not bind duplicate actions or restart boot requests.
+        loaded.evaluate("""async () => {
+            const { initApp } = await import(new URL('static/js/app.js', document.baseURI).href);
+            initApp(); initApp();
+        }""")
+        open_panel(loaded, PLUG.name)
+        loaded.locator("#panelSetupOpen").click()
+        expect(loaded.locator(".setup-card")).to_be_visible()
+        loaded.locator("[data-setup-action='network']").click()
+        expect(loaded.locator(".network-card")).to_be_visible()
+        loaded.locator("#panelBack").click()
+        expect(loaded.locator(".setup-card")).to_be_visible()
+        assert loaded.evaluate("document.documentElement.scrollWidth") <= width
+        assert requests.count(target + "api/state") == 1
+        assert all(url.startswith(target) for url in requests)
+        assert any("/static/css/" in url for url in requests)
+        assert any("/static/js/shared/" in url for url in requests)
+        assert errors == []
+        assert failed_assets == []
+        loaded.screenshot(path=tmp_path / f"frontend-{ingress}-{width}-{theme}.png")
+    finally:
+        context.close()
+
+
+@pytest.mark.parametrize("ingress", [False, True])
+def test_modular_login_confirms_qr_and_loads_devices(browser, server, ingress):
+    target = server + (INGRESS_PREFIX.lstrip("/") + "/" if ingress else "")
+    context = browser.new_context()
+    loaded = context.new_page()
+    starts, polls, errors = [], [], []
+    loaded.on("pageerror", lambda error: errors.append(str(error)))
+    loaded.route("**/api/state", lambda route: route.fulfill(json={"logged_in": False}))
+
+    def start_login(route):
+        starts.append(route.request.post_data_json)
+        route.fulfill(json={"token": "frontend-test", "qr": (
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC"
+            "AAAAC0lEQVR42mP8/x8AAwMCAO+a/ngAAAAASUVORK5CYII=")})
+
+    def confirm_login(route):
+        polls.append(route.request.post_data_json)
+        route.fulfill(json={"status": "confirmed"})
+
+    loaded.route("**/api/login/start", start_login)
+    loaded.route("**/api/login/poll", confirm_login)
+    try:
+        loaded.goto(target, wait_until="networkidle")
+        loaded.locator("#usercode").fill("demo-user-code")
+        loaded.locator("#startBtn").click()
+        expect(loaded.locator("#qr")).to_be_visible()
+        loaded.wait_for_selector("#rows tr")
+        assert starts == [{"user_code": "demo-user-code"}]
+        assert polls == [{"token": "frontend-test"}]
+        assert loaded.locator("#qr").is_hidden()
+        assert errors == []
+    finally:
+        context.close()
 
 
 def test_table_shows_the_scan_columns_only(page):
@@ -539,9 +653,12 @@ def test_added_removed_and_renamed_devices_are_listed(page, running_app, monkeyp
 
 
 def test_an_unchanged_refresh_shows_no_notice(page, running_app):
-    before = page.evaluate("devicesCachedAt")
+    before = frontend_state(page, "devicesCachedAt")
     page.click("#refreshBtn")
-    page.wait_for_function("(prev) => devicesCachedAt !== prev", arg=before)
+    page.wait_for_function("""async prev => {
+        const { appState } = await import(new URL('static/js/shared/state.js', document.baseURI).href);
+        return appState.devicesCachedAt !== prev;
+    }""", arg=before)
 
     assert page.locator("#changesNotice").count() == 0
     assert page.locator(".notice").count() == 0
@@ -703,10 +820,16 @@ def scanned(page, targets="192.168.1.0/24"):
         assert started.value.status == 202
     outcome = results.value.json()
     assert outcome["job"]["id"] == started.value.json()["job"]["id"]
-    page.wait_for_function("""expected =>
-        !lanPollTimer && lanData.job && lanData.job.id === expected.job.id &&
-        lanData.job.state === 'done' &&
-        JSON.stringify(lanData.summary) === JSON.stringify(expected.summary)
+    page.wait_for_function("""async expected => {
+        const [{ appState }, { isWatchingScan }] = await Promise.all([
+            import(new URL('static/js/shared/state.js', document.baseURI).href),
+            import(new URL('static/js/features/network.js', document.baseURI).href),
+        ]);
+        const { lanData } = appState;
+        return !isWatchingScan() && lanData.job && lanData.job.id === expected.job.id &&
+            lanData.job.state === 'done' &&
+            JSON.stringify(lanData.summary) === JSON.stringify(expected.summary);
+    }
     """, arg=outcome)
     page.wait_for_selector("#lanSummaryNotice")
 
@@ -845,7 +968,13 @@ def test_a_sub_device_reads_as_its_gateway_reports_it(page, running_app, monkeyp
     assert cls in badge.get_attribute("class").split()
     state = "online" if online else "offline"
     assert f"Its gateway reports it {state}." in badge.get_attribute("title")
-    assert page.evaluate(f"isOnline(deviceData.find(d => d.id === {SENSOR.id!r}))") is online
+    assert page.evaluate("""async id => {
+        const [{ appState }, { isOnline }] = await Promise.all([
+            import(new URL('static/js/shared/state.js', document.baseURI).href),
+            import(new URL('static/js/shared/model.js', document.baseURI).href),
+        ]);
+        return isOnline(appState.deviceData.find(d => d.id === id));
+    }""", SENSOR.id) is online
     notice = page.locator("#lanSummaryNotice").inner_text()
     assert ("Its gateway reports it offline." in notice) is not online
     open_network(page, SENSOR.name)
@@ -856,7 +985,7 @@ def test_an_ip_being_typed_survives_a_repaint(page):
     open_network(page, LAMP.name)
     page.fill("#networkBody [data-lan-check] input", "192.168.1.5")
 
-    page.evaluate("render()")   # what a finished scan or the key toggle does
+    repaint(page)   # what a finished scan or the key toggle does
 
     assert page.locator("#networkBody [data-lan-check] input").input_value() == "192.168.1.5"
     assert page.evaluate("document.activeElement.name") == "ip", "and it keeps the focus"
@@ -890,7 +1019,7 @@ def test_a_refresh_during_a_scan_keeps_a_closed_scan_box_closed(page, running_ap
         assert page.locator("#scanBox").is_hidden()
     finally:
         release.set()
-    page.wait_for_function("!lanPollTimer")
+    wait_scan_idle(page)
 
 
 def test_one_device_can_be_checked_from_the_panel(page, running_app, monkeypatch):
@@ -1430,6 +1559,80 @@ ACTIONS = ["csvBtn", "scanBtn", "refreshBtn", "logoutBtn"]
 
 def in_menu(page):
     return [a for a in ACTIONS if page.locator(f"#moreMenu #{a}").count()]
+
+
+@pytest.mark.parametrize("target", [".app-icon", "h1"])
+@pytest.mark.parametrize("width", [1440, 390])
+def test_brand_leaves_home_search_and_selection_unchanged(page, target, width):
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.fill("#filter", "plug")
+    select_devices(page, PLUG)
+    table = page.locator("#table").element_handle()
+    cached_at, url = frontend_state(page, "devicesCachedAt"), page.url
+
+    page.locator(f"#homeLink {target}").click()
+
+    assert page.url == url
+    assert table.evaluate("el => el.isConnected"), "Home clicks do not reload or redraw the list"
+    assert frontend_state(page, "devicesCachedAt") == cached_at
+    assert frontend_state(page, "deviceView") == "active"
+    expect(page.locator("#filter")).to_have_value("plug")
+    expect(device_checkbox(page, PLUG)).to_be_checked()
+    expect(page.locator("#selectionCount")).to_have_text("1 selected")
+
+
+@pytest.mark.parametrize("target", [".app-icon", "h1"])
+def test_brand_closes_each_device_panel_page_on_home(page, target):
+    page.fill("#filter", "plug")
+    cached_at, url = frontend_state(page, "devicesCachedAt"), page.url
+    for view in ("details", "setup", "network"):
+        open_panel(page, PLUG.name)
+        if view != "details":
+            page.locator("#panelSetupOpen" if view == "setup" else "#panelNetworkOpen").click()
+        page.locator(f"#homeLink {target}").click()
+
+        expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
+        expect(page.locator("#homeLink")).to_be_focused()
+        expect(page.locator("#filter")).to_have_value("plug")
+        assert page.url == url
+        assert frontend_state(page, "devicesCachedAt") == cached_at
+        assert frontend_state(page, "selectedId") is None
+        assert frontend_state(page, "panelHistory") == []
+
+
+@pytest.mark.parametrize("target", [".app-icon", "h1"])
+@pytest.mark.parametrize("width", [1440, 390])
+def test_brand_returns_from_excluded_without_restoring_devices(page, target, width):
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.fill("#filter", "plug")
+    select_devices(page, PLUG)
+    saved = save_selection(page)
+    switch_device_view(page)
+    expect(row(page, PLUG)).to_be_visible()
+    if width == 1440:
+        open_panel(page, PLUG.name)
+    cached_at, url = frontend_state(page, "devicesCachedAt"), page.url
+
+    page.locator(f"#homeLink {target}").click()
+
+    assert page.url == url
+    assert frontend_state(page, "deviceView") == "active"
+    assert frontend_state(page, "devicesCachedAt") == cached_at
+    expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
+    expect(page.locator("#homeLink")).to_be_focused()
+    expect(page.locator("#backToDevicesBtn")).to_be_hidden()
+    expect(page.locator("#filter")).to_have_value("plug")
+    expect(row(page, PLUG)).to_have_count(0)
+    assert page.request.get(page.url + "api/device-exclusions").json() == saved
+
+
+def test_brand_home_action_supports_keyboard_activation(page):
+    open_panel(page, PLUG.name)
+    home = page.get_by_role("link", name="Tuya Local Key home")
+    home.focus()
+    home.press("Enter")
+    expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
+    expect(home).to_be_focused()
 
 
 def test_every_action_fits_in_a_wide_header(page):
@@ -2312,7 +2515,8 @@ def test_network_a_new_successful_scan_supersedes_a_failed_manual_check(page, ru
     open_network(page, PLUG.name)
     page.fill("#networkBody [data-lan-check] input", "192.168.2.61")
     page.click("#networkBody [data-lan-check] button")
-    page.wait_for_function("panelCheck && panelCheck.kind === 'error' && !lanPollTimer")
+    page.wait_for_selector("#networkBody .lan-note.scan-error")
+    wait_scan_idle(page)
     assert page.locator("#networkBody .lan-note.scan-error").is_visible()
     later_success[PLUG.id] = _lan("ok", "192.168.2.61", "3.4", checked_at=page.evaluate("Date.now() / 1000"))
 
@@ -2394,7 +2598,7 @@ def test_network_draft_ip_and_focus_survive_repaint_and_back_navigation(page):
     open_network(page, LAMP.name)
     ip_input = page.locator("#networkBody [data-lan-check] input")
     ip_input.fill("192.168.2.200")
-    page.evaluate("render()")
+    repaint(page)
     assert ip_input.input_value() == "192.168.2.200"
     expect(ip_input).to_be_focused()
     page.locator("#panelBack").click()
@@ -2417,7 +2621,7 @@ def test_network_pristine_discovered_ip_keeps_its_selection_on_repaint_and_accep
     assert ip_input.evaluate("el => el.value === el.defaultValue")
     ip_input.evaluate("el => { el.focus(); el.setSelectionRange(2, 9); }")
 
-    page.evaluate("render()")
+    repaint(page)
 
     expect(ip_input).to_be_focused()
     assert ip_input.evaluate("el => [el.selectionStart, el.selectionEnd]") == [2, 9]
@@ -2584,13 +2788,17 @@ def test_setup_history_supports_a_registered_extra_page_without_another_back_han
     page.set_viewport_size({"width": 390, "height": 640})
     open_setup(page, PLUG.name)
     setup_tool(page, "tinytuya")
-    page.evaluate("""() => {
+    page.evaluate("""async () => {
+        const [{ registerPanelPage, navigatePanel }, { appState }] = await Promise.all([
+            import(new URL('static/js/features/panel.js', document.baseURI).href),
+            import(new URL('static/js/shared/state.js', document.baseURI).href),
+        ]);
         const body = document.createElement('div');
         body.id = 'panelExtraTestBody';
         body.className = 'panel-body hidden';
         body.tabIndex = -1;
         document.getElementById('panel').append(body);
-        PANEL_PAGES.extra_test = {
+        registerPanelPage('extra_test', {
             body: body.id,
             backLabel: 'Back to additional setup',
             title: d => `Additional setup for “${d.name}”`,
@@ -2598,11 +2806,11 @@ def test_setup_history_supports_a_registered_extra_page_without_another_back_han
                 '<div style="height:900px">Extra preferences</div></details>' +
                 '<button type="button" data-setup-action="network">Local network</button>',
             focus: 'summary',
-        };
+        });
         const opener = document.querySelector('#setupBody [data-setup-action="network"]');
         opener.addEventListener('click', event => {
             event.stopPropagation();
-            navigatePanel(selectedId, 'extra_test', opener);
+            navigatePanel(appState.selectedId, 'extra_test', opener);
         }, { once: true });
     }""")
 
@@ -3042,7 +3250,7 @@ def test_exclusions_late_older_read_cannot_undo_a_successful_save(page):
 
     expect(row(page, PLUG)).to_have_count(0)
     expect(page.locator("#excludedViewBtn")).to_contain_text("1")
-    assert page.evaluate("exclusionRevision") == saved["revision"]
+    assert frontend_state(page, "exclusionRevision") == saved["revision"]
     assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == [PLUG.id]
 
 

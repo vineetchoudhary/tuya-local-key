@@ -72,6 +72,7 @@ Follow the QR login prompts. See the [CLI guide](docs/cli.md) for options.
 - [CLI](docs/cli.md) — Terminal setup, commands, and flags.
 - [Troubleshooting](docs/troubleshooting.md) — Common login, key, and connection issues.
 - [Screenshots](docs/screenshots.md) — Light and dark previews.
+- [Frontend structure](docs/frontend-structure.md): Templates, stylesheets, JavaScript modules, and development checks.
 
 ## License
 

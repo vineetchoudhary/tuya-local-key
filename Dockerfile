@@ -25,6 +25,7 @@ RUN pip install -r requirements-web.txt
 COPY tuya_devices.py app.py device_cache.py device_preferences.py lan_scan.py ./
 COPY LICENSE NOTICE ./
 COPY templates ./templates
+COPY static ./static
 COPY tuya_local_key/icon.png ./tuya_local_key/icon.png
 
 # Home Assistant mounts /data at runtime
