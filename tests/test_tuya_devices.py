@@ -512,6 +512,90 @@ def test_device_container_normalizes_metadata_ids_without_mutating_devices():
     assert core.device_dict(result[0]) == {"name": "Plug", "id": "device"}
 
 
+def test_rooms_are_fetched_once_per_unique_device_and_failures_do_not_discard_devices(monkeypatch):
+    devices = [SimpleNamespace(id=device_id) for device_id in ("shared", "unassigned", "failed", "bad")]
+    calls = []
+
+    def query_room(device_id):
+        calls.append(device_id)
+        if device_id == "failed":
+            raise RuntimeError("room service unavailable")
+        if device_id == "bad":
+            return SimpleNamespace(id=None, name="Invalid room")
+        if device_id == "unassigned":
+            return None
+        return SimpleNamespace(id=123, name="Kitchen", display_order=2)
+
+    manager = SimpleNamespace(device_map={},
+        home_repository=SimpleNamespace(query_homes=lambda: [
+            SimpleNamespace(id="one", name="First"), SimpleNamespace(id="two", name="Second")]),
+        device_repository=SimpleNamespace(query_devices_by_home=lambda home_id: devices),
+        query_room_by_device=query_room)
+    monkeypatch.setattr(core, "build_manager", lambda *args: manager)
+
+    result = core.devices_from_session({}, "session.json")
+
+    assert result == devices
+    assert calls == [device.id for device in devices], "shared devices need only one room lookup"
+    assert result.device_rooms == {"shared": {"id": "123", "name": "Kitchen", "display_order": 2},
+                                   "unassigned": None}
+    assert all(vars(device) == {"id": device.id} for device in result)
+
+
+def test_optional_room_lookups_can_be_skipped_without_changing_the_device_list(monkeypatch):
+    device = SimpleNamespace(id="device")
+    manager = SimpleNamespace(device_map={},
+        home_repository=SimpleNamespace(query_homes=lambda: [SimpleNamespace(id="one", name="Home")]),
+        device_repository=SimpleNamespace(query_devices_by_home=lambda home_id: [device]),
+        query_room_by_device=lambda device_id: pytest.fail("CLI must not fetch rooms"))
+    monkeypatch.setattr(core, "build_manager", lambda *args: manager)
+
+    result = core.devices_from_session({}, "session.json", include_rooms=False)
+
+    assert result == [device] and result.device_rooms is None
+    assert result.home_ids == {"device": ["one"]}
+
+
+@pytest.mark.parametrize("failure", ["Timeout", "ConnectionError"])
+def test_room_transport_outage_stops_optional_requests_and_preserves_the_full_list(monkeypatch, failure):
+    import requests.exceptions
+
+    devices = [SimpleNamespace(id=device_id) for device_id in ("known", "failed", "remaining")]
+    calls = []
+
+    def query_room(device_id):
+        calls.append(device_id)
+        if device_id == "failed":
+            raise getattr(requests.exceptions, failure)("room service offline")
+        return SimpleNamespace(id="kitchen", name="Kitchen")
+
+    manager = SimpleNamespace(device_map={},
+        home_repository=SimpleNamespace(query_homes=lambda: [SimpleNamespace(id="one", name="Home")]),
+        device_repository=SimpleNamespace(query_devices_by_home=lambda home_id: devices),
+        query_room_by_device=query_room)
+    monkeypatch.setattr(core, "build_manager", lambda *args: manager)
+
+    result = core.devices_from_session({}, "session.json")
+
+    assert result == devices and calls == ["known", "failed"]
+    assert result.device_rooms == {"known": {"id": "kitchen", "name": "Kitchen", "display_order": 0}}
+
+
+def test_removed_device_notices_keep_room_scope_without_exposing_keys():
+    before = [{"id": "assigned", "name": "Plug", "local_key": "secret-key",
+               "home_ids": ["home"], "room_status": "assigned", "room_id": "123",
+               "room_name": "Kitchen", "room_display_order": 2},
+              {"id": "unassigned", "room_status": "unassigned", "room_id": None},
+              {"id": "unknown", "room_status": "unknown"}, {"id": "legacy"}]
+
+    removed = {device["id"]: device for device in core.diff_devices(before, [])["removed"]}
+
+    assert removed["assigned"] == {key: value for key, value in before[0].items() if key != "local_key"}
+    assert removed["unassigned"]["room_id"] is None
+    assert removed["unknown"]["room_status"] == "unknown"
+    assert "room_status" not in removed["legacy"] and "secret-key" not in json.dumps(removed)
+
+
 def test_get_devices_reuses_session_or_reauthenticates(tmp_path, monkeypatch, capsys):
     session_path = tmp_path / "session.json"
     cached_session = {"token_info": {"access_token": "cached"}}
@@ -519,7 +603,8 @@ def test_get_devices_reuses_session_or_reauthenticates(tmp_path, monkeypatch, ca
     devices = [SimpleNamespace(id="device-1")]
     calls = []
 
-    def fake_devices_from_session(session, path):
+    def fake_devices_from_session(session, path, *, include_rooms):
+        assert include_rooms is False, "CLI must not make optional room requests"
         calls.append((session, path))
         if session == cached_session and len(calls) == 2:
             raise RuntimeError("expired")

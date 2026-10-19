@@ -8,7 +8,7 @@ import { gatewayIdOf, isGateway, isSubDevice, networkState, setupConnection } fr
 import { appState } from "../shared/state.js";
 
 // Cross-feature actions are connected by app.js.
-let inCurrentView, matchesHome, renderPanel;
+let inCurrentView, matchesFilters, renderPanel;
 
 function setupTabKeydown(e) {
   const tab = e.target.closest("[data-setup-tool]");
@@ -151,7 +151,7 @@ function setupTinyTuya(d, s) {
 function setupChildren(d) {
   if (!isGateway(d)) return "";
   const children = appState.deviceData.filter(s => isSubDevice(s) && gatewayIdOf(s) === d.id);
-  const excludedCount = children.filter(s => appState.excludedIds.has(s.id) && matchesHome(s)).length;
+  const excludedCount = children.filter(s => appState.excludedIds.has(s.id) && matchesFilters(s)).length;
   const subs = children.filter(s => inCurrentView(s.id))
     .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
   return `<div class="setup-children"><h4>Sub-devices (${subs.length})</h4>` +
@@ -230,7 +230,7 @@ let initialized = false;
 function initSetup(actions = {}) {
   if (initialized) return;
   initialized = true;
-  ({ inCurrentView, matchesHome, renderPanel } = actions);
+  ({ inCurrentView, matchesFilters, renderPanel } = actions);
   $("setupBody").addEventListener("keydown", setupTabKeydown);
   $("setupBody").addEventListener("change", setupEditionChange);
 }

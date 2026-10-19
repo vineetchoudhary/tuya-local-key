@@ -2372,3 +2372,70 @@ def test_known_empty_homes_are_distinct_from_unavailable_home_metadata(webapp, m
     monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: webapp.core.Devices([]))
     refreshed = client.get("/api/devices?refresh=1").json
     assert refreshed["devices"] == [] and refreshed["homes"] == []
+
+
+def _devices_with_rooms(webapp):
+    fetched = _devices_with_homes(webapp)
+    return webapp.core.Devices(list(fetched) + [{"id": "sensor", "name": "Sensor"}],
+        homes=fetched.homes, home_ids=fetched.home_ids,
+        device_rooms={"plug": {"id": 123, "name": "Kitchen", "display_order": 2}, "lamp": None})
+
+
+def test_rooms_distinguish_assigned_unassigned_and_failed_lookups_without_mutating_source(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    fetched = _devices_with_rooms(webapp)
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: fetched)
+
+    body = client.get("/api/devices").json
+
+    assert body["rooms_loaded"] is True
+    plug, lamp, sensor = body["devices"]
+    assert (plug["room_status"], plug["room_id"], plug["room_name"], plug["room_display_order"]) == (
+        "assigned", "123", "Kitchen", 2)
+    assert lamp["room_status"] == "unassigned" and lamp["room_id"] is None
+    assert sensor["room_status"] == "unknown" and "room_id" not in sensor
+    assert all("room_status" not in device for device in fetched)
+    assert client.patch("/api/device-exclusions", json={"exclude": ["plug"]}).status_code == 200
+    assert len(client.get("/api/devices").json["devices"]) == 3
+    assert len(webapp._session_devices(PREFERENCE_SESSION)) == 3, "room filters cannot change scan inputs"
+
+
+def test_rooms_survive_cache_hits_restart_and_failed_refresh_without_new_lookups(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    calls = []
+
+    def fetch(*args):
+        calls.append(1)
+        return _devices_with_rooms(webapp)
+
+    monkeypatch.setattr(webapp.core, "devices_from_session", fetch)
+    first = client.get("/api/devices").json
+    assert client.get("/api/devices").json == first
+    restarted = _restart(webapp)
+    assert restarted.app.test_client().get("/api/devices").json == first
+    assert calls == [1]
+
+    def fail(*args):
+        raise RuntimeError("Tuya offline")
+
+    monkeypatch.setattr(restarted.core, "devices_from_session", fail)
+    snapshot = restarted.app.test_client().get("/api/devices?refresh=1").json
+    assert snapshot["stale"] is True and snapshot["refresh_failed"] is True
+    assert snapshot["rooms_loaded"] is True and snapshot["devices"] == first["devices"]
+
+
+def test_legacy_home_cache_needs_explicit_refresh_for_rooms_without_inventing_changes(webapp, monkeypatch):
+    client = _exclusion_logged_in(webapp, monkeypatch, load_devices=False)
+    fetched = _devices_with_homes(webapp)
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: fetched)
+    first = client.get("/api/devices").json
+    assert "rooms_loaded" not in first and all("room_status" not in device for device in first["devices"])
+    enriched = webapp.core.Devices(fetched, homes=fetched.homes, home_ids=fetched.home_ids,
+        device_rooms={"plug": {"id": "123", "name": "Kitchen"}, "lamp": None})
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *args: enriched)
+    assert client.get("/api/devices").json == first
+
+    refreshed = client.get("/api/devices?refresh=1").json
+
+    assert refreshed["rooms_loaded"] is True
+    assert "changes" not in refreshed, "room enrichment alone must not report key/device changes"

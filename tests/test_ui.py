@@ -3934,3 +3934,293 @@ def test_homes_removed_device_notices_use_prior_membership_and_legacy_removals_s
         expect(page.locator("#changesNotice")).to_contain_text("2 devices removed")
         assert BARE.name in page.locator("#changesNotice").inner_text()
         assert LAMP.name in page.locator("#changesNotice").inner_text()
+
+
+# --------------------------------------------------------------------------- #
+# Room filtering uses SDK room metadata, including confirmed empty assignments.
+# --------------------------------------------------------------------------- #
+DEVICE_ROOMS = {
+    PLUG.id: {"id": "kitchen", "name": "Kitchen", "display_order": 1},
+    LAMP.id: {"id": "living", "name": "Living room", "display_order": 2},
+    BARE.id: None,
+    # SENSOR deliberately has an unavailable room, not a confirmed No room.
+}
+
+
+def serves_rooms(page, app, monkeypatch, *, rooms=DEVICE_ROOMS, devices=DEVICES,
+                 homes=HOMES, membership=HOME_MEMBERSHIP):
+    _serves(app, monkeypatch, app.core.Devices(devices, homes=homes,
+        home_ids=membership, device_rooms=rooms))
+    refreshed(page, "#filtersBtn")
+
+
+def select_room(page, room_id=""):
+    open_filters(page)
+    value = room_id if room_id in ("none", "unknown") else f"room:{room_id}" if room_id else ""
+    page.locator("#roomFilter").select_option(value)
+
+
+@pytest.mark.parametrize("width,theme", [(1440, "light"), (1440, "dark"), (390, "light"), (390, "dark")])
+def test_rooms_home_scoped_dropdown_keyboard_and_layout(page, running_app, monkeypatch, width, theme):
+    serves_rooms(page, running_app, monkeypatch)
+    page.set_viewport_size({"width": width, "height": 800})
+    page.emulate_media(color_scheme=theme)
+    select_home(page, "home-b")
+    expect(page.locator("#roomFilter")).to_have_accessible_name("Filter by room")
+    assert page.locator("#roomFilter option").all_inner_texts() == ["All rooms", "Kitchen", "Living room"]
+    page.locator("#homeFilter").press("Tab")
+    expect(page.locator("#roomFilter")).to_be_focused()
+    select_room(page, "living")
+    assert listed_ids(page) == [LAMP.id]
+    expect(page.locator("#count")).to_contain_text("1 device")
+    expect(page.locator("#filterCount")).to_have_text("2")
+    expect(page.locator("#filtersBtn")).to_have_accessible_name("Filter (2): 1 home filter, 1 room filter")
+    box = page.locator("#roomFilter").bounding_box()
+    arrow = page.locator("#roomChevron").bounding_box()
+    assert box["x"] + box["width"] - arrow["x"] - arrow["width"] >= 12
+    popover = page.locator("#filtersPopover").bounding_box()
+    assert popover["x"] >= 16 and popover["x"] + popover["width"] <= width - 16
+    assert popover["y"] >= 16 and popover["y"] + popover["height"] <= 800 - 16
+    assert page.evaluate("document.documentElement.scrollWidth") <= width
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"rooms-filter-{width}-{theme}.png", full_page=True)
+    page.keyboard.press("Escape")
+    expect(page.locator("#filtersBtn")).to_be_focused()
+
+
+def test_rooms_home_changes_reset_only_incompatible_room_choices(page, running_app, monkeypatch):
+    serves_rooms(page, running_app, monkeypatch)
+    select_room(page, "living")
+    select_home(page, "home-a")
+    expect(page.locator("#roomFilter")).to_have_value("")
+    assert set(listed_ids(page)) == {PLUG.id, BARE.id}
+    assert page.locator("#roomFilter option").all_inner_texts() == ["All rooms", "Kitchen", "No room"]
+    select_room(page, "kitchen")
+    select_home(page, "home-b")
+    expect(page.locator("#roomFilter")).to_have_value("room:kitchen")
+    assert listed_ids(page) == [PLUG.id], "a shared device remains visible in either reported home"
+    select_home(page, "home-empty")
+    expect(page.locator("#roomFilter")).to_have_value("")
+    expect(page.locator("#roomFilter")).to_be_disabled()
+    assert listed_ids(page) == []
+
+
+def test_rooms_unassigned_and_unknown_are_distinct_and_missing_exclusions_can_be_restored(
+        page, running_app, monkeypatch):
+    serves_rooms(page, running_app, monkeypatch)
+    select_room(page, "none")
+    assert listed_ids(page) == [BARE.id]
+    select_room(page, "unknown")
+    assert listed_ids(page) == [SENSOR.id]
+    expect(page.locator("#roomHint")).to_contain_text("Some rooms could not be loaded")
+    select_room(page)
+    select_devices(page, PLUG)
+    save_selection(page)
+    serves_rooms(page, running_app, monkeypatch, devices=[LAMP, SENSOR, BARE])
+    select_room(page, "unknown")
+    switch_device_view(page)
+    assert listed_ids(page) == [PLUG.id]
+    enter_selection(page)
+    page.locator(f"#rows tr[data-id='{PLUG.id}'] td.name-col").click()
+    expect(device_checkbox(page, PLUG)).to_be_checked()
+    save_selection(page, restore=True)
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+
+
+def test_rooms_duplicate_names_are_unambiguous_and_names_are_escaped(page, running_app, monkeypatch):
+    rooms = {**DEVICE_ROOMS, PLUG.id: {"id": "first", "name": "Bedroom"},
+             LAMP.id: {"id": "second", "name": "Bedroom"},
+             BARE.id: {"id": "special", "name": '<img src=x onerror="window.badRoom=true">'}}
+    serves_rooms(page, running_app, monkeypatch, rooms=rooms)
+    open_filters(page)
+    assert page.locator("#roomFilter option[value='room:first']").inner_text() == "Bedroom (first)"
+    assert page.locator("#roomFilter option[value='room:second']").inner_text() == "Bedroom (second)"
+    select_room(page, "special")
+    assert listed_ids(page) == [BARE.id]
+    assert page.locator("#roomFilter img").count() == 0
+    assert page.evaluate("window.badRoom === undefined")
+
+
+def test_rooms_choice_survives_reload_and_is_scoped_to_the_account(page, restores_session, monkeypatch):
+    serves_rooms(page, restores_session, monkeypatch)
+    select_home(page, "home-b")
+    select_room(page, "living")
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#roomFilter")).to_have_value("room:living")
+    assert listed_ids(page) == [LAMP.id]
+    original = restores_session.core.load_session(restores_session.SESSION_FILE)
+    restores_session.core.save_session(restores_session.SESSION_FILE, dict(original, user_code="room-account-b"))
+    refreshed(page, "#filtersBtn")
+    expect(page.locator("#homeFilter")).to_have_value("")
+    expect(page.locator("#roomFilter")).to_have_value("")
+    select_room(page, "none")
+    restores_session.core.save_session(restores_session.SESSION_FILE, original)
+    refreshed(page, "#filtersBtn")
+    expect(page.locator("#homeFilter")).to_have_value("home:home-b")
+    expect(page.locator("#roomFilter")).to_have_value("room:living")
+
+
+def test_rooms_old_snapshot_requires_explicit_refresh_and_preserves_remembered_room(
+        page, running_app, monkeypatch):
+    serves_rooms(page, running_app, monkeypatch)
+    select_room(page, "living")
+    serves_homes(page, running_app, monkeypatch)
+    expect(page.locator("#roomFilter")).to_have_value("")
+    open_filters(page)
+    expect(page.locator("#roomFilter")).to_be_disabled()
+    expect(page.locator("#roomHint")).to_contain_text("Room information is not in this saved list")
+    requests = []
+    page.on("request", lambda request: requests.append(request.url) if "refresh=1" in request.url else None)
+    _serves(running_app, monkeypatch, running_app.core.Devices(DEVICES, homes=HOMES,
+        home_ids=HOME_MEMBERSHIP, device_rooms=DEVICE_ROOMS))
+    page.reload(wait_until="networkidle")
+    assert requests == []
+    open_filters(page)
+    with page.expect_response(lambda response: response.url.endswith("/api/devices?refresh=1")):
+        page.locator("#roomHint [data-refresh-rooms]").click()
+    expect(page.locator("#roomFilter")).to_have_value("room:living")
+    assert listed_ids(page) == [LAMP.id]
+    assert len(requests) == 1
+
+
+def test_rooms_partial_refresh_keeps_preference_and_recovers_on_retry(page, running_app, monkeypatch):
+    serves_rooms(page, running_app, monkeypatch)
+    select_room(page, "living")
+    serves_rooms(page, running_app, monkeypatch, rooms={PLUG.id: DEVICE_ROOMS[PLUG.id], BARE.id: None})
+    expect(page.locator("#roomFilter")).to_have_value("")
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    page.reload(wait_until="networkidle")
+    serves_rooms(page, running_app, monkeypatch)
+    expect(page.locator("#roomFilter")).to_have_value("room:living")
+    assert listed_ids(page) == [LAMP.id]
+
+
+def test_rooms_bulk_selection_exclusions_badge_and_clear_all_are_scoped_correctly(page, running_app, monkeypatch):
+    serves_rooms(page, running_app, monkeypatch)
+    select_devices(page, PLUG, LAMP)
+    save_selection(page)
+    select_home(page, "home-b")
+    select_room(page, "living")
+    expect(page.locator("#filterCount")).to_have_text("4")
+    expect(page.locator("#filtersBtn")).to_have_accessible_name(
+        "Filter (4): 2 excluded devices, 1 home filter, 1 room filter")
+    switch_device_view(page)
+    assert listed_ids(page) == [LAMP.id]
+    open_filters(page)
+    with page.expect_response(lambda response: response.request.method == "PATCH") as response:
+        page.locator("#clearAllFilters").click()
+    assert response.value.request.post_data_json["restore_all"] is True
+    expect(page.locator("#roomFilter")).to_have_value("")
+    expect(page.locator("#homeFilter")).to_have_value("")
+    expect(page.locator("#filterCount")).to_be_hidden()
+    expect(page.locator("#clearAllFilters")).to_be_disabled()
+    assert set(listed_ids(page)) == {device.id for device in DEVICES}
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#roomFilter")).to_have_value("")
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+
+
+def test_rooms_changing_room_clears_selection_and_closes_out_of_scope_details(page, running_app, monkeypatch):
+    serves_rooms(page, running_app, monkeypatch)
+    open_panel(page, LAMP.name)
+    select_room(page, "kitchen")
+    expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
+    enter_selection(page)
+    page.locator(f"#rows tr[data-id='{PLUG.id}'] td.name-col").click()
+    expect(device_checkbox(page, PLUG)).to_be_checked()
+    select_room(page, "living")
+    expect(page.locator("#selectionCount")).to_have_text("0 selected")
+    assert listed_ids(page) == [LAMP.id]
+    page.locator(f"#rows tr[data-id='{LAMP.id}'] td.name-col").click()
+    expect(device_checkbox(page, LAMP)).to_be_checked()
+    expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
+    save_selection(page)
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == [LAMP.id]
+
+
+def test_rooms_notices_and_csv_follow_room_scope_including_removed_devices(page, running_app, monkeypatch, tmp_path):
+    rooms = {**DEVICE_ROOMS, BARE.id: DEVICE_ROOMS[PLUG.id]}
+    serves_rooms(page, running_app, monkeypatch, rooms=rooms)
+    changed = copy.deepcopy(DEVICES)
+    changed[demo_devices.LAMP].name = "Renamed in the living room"
+    changed[demo_devices.LAMP].local_key = "ROTATED-ROOM-KEY"
+    serves_rooms(page, running_app, monkeypatch, rooms=rooms,
+                 devices=[d for d in changed if d.id != BARE.id])
+    select_room(page, "kitchen")
+    expect(page.locator("#changesNotice")).to_contain_text("1 device removed")
+    assert BARE.name in page.locator("#changesNotice").inner_text()
+    assert "Renamed in the living room" not in page.locator("#changesNotice").inner_text()
+    assert [device["id"] for device in export_rows(page, tmp_path, "tuya-local-key.csv")] == [PLUG.id]
+    select_room(page, "living")
+    expect(page.locator("#changesNotice")).to_contain_text("1 local key changed")
+    assert BARE.name not in page.locator("#changesNotice").inner_text()
+    assert [device["id"] for device in export_rows(page, tmp_path, "tuya-local-key.csv")] == [LAMP.id]
+
+
+def test_rooms_clear_all_failed_write_preserves_room_then_retry_resets_it(page, running_app, monkeypatch):
+    serves_rooms(page, running_app, monkeypatch)
+    select_devices(page, PLUG)
+    save_selection(page)
+    select_home(page, "home-b")
+    select_room(page, "living")
+
+    def fail_write(route):
+        if route.request.method == "PATCH":
+            route.fulfill(status=503, json={"error": "storage_unavailable"})
+        else:
+            route.continue_()
+
+    page.route("**/api/device-exclusions", fail_write)
+    page.locator("#clearAllFilters").click()
+    expect(page.locator("#exclusionError")).to_contain_text("Could not clear all filters")
+    expect(page.locator("#roomFilter")).to_have_value("room:living")
+    expect(page.locator("#filterCount")).to_have_text("3")
+    page.unroute("**/api/device-exclusions", fail_write)
+    page.locator("#retryExclusions").click()
+    expect(page.locator("#roomFilter")).to_have_value("")
+    expect(page.locator("#filterCount")).to_be_hidden()
+
+
+def test_rooms_keep_gateway_setup_and_scan_evidence_outside_the_selected_room(page, running_app, monkeypatch):
+    child = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    serves_rooms(page, running_app, monkeypatch,
+        devices=list(DEVICES) + [ZIGBEE_GATEWAY, child],
+        membership={**HOME_MEMBERSHIP, ZIGBEE_GATEWAY.id: ["home-b"], child.id: ["home-b"]},
+        rooms={**DEVICE_ROOMS, ZIGBEE_GATEWAY.id: DEVICE_ROOMS[PLUG.id], child.id: DEVICE_ROOMS[LAMP.id]})
+    fetches = []
+    page.on("request", lambda request: fetches.append(request.url) if "/api/devices" in request.url else None)
+    select_home(page, "home-b")
+    select_room(page, "living")
+    page.fill("#filter", child.name)
+    assert listed_ids(page) == [child.id], "a gateway in another room must not return as a context row"
+    calls = _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=child.id),
+        child.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+    assert {device.id for device in DEVICES} | {ZIGBEE_GATEWAY.id, child.id} == set(calls[0]["devices"])
+    open_setup(page, child.name)
+    assert setup_value(page, "device_id") == ZIGBEE_GATEWAY.id
+    assert setup_value(page, "host") == "192.168.2.8"
+    assert setup_field(page, "local_key").locator("button.setup-copy").get_attribute("data-copy") == child.local_key
+    assert listed_ids(page) == [child.id]
+    assert fetches == [], "changing room filters and using setup must not refetch Tuya devices or rooms"
+
+
+@pytest.mark.parametrize("width,hint", [(1440, "rooms"), (390, "rooms"), (1440, "homes")])
+def test_filters_stay_anchored_after_first_metadata_refresh(page, running_app, monkeypatch, width, hint):
+    page.set_viewport_size({"width": width, "height": 800})
+    open_filters(page)
+    _serves(running_app, monkeypatch, running_app.core.Devices(DEVICES, homes=HOMES,
+        home_ids=HOME_MEMBERSHIP, device_rooms=DEVICE_ROOMS))
+    with page.expect_response(lambda response: response.url.endswith("/api/devices?refresh=1")):
+        page.locator(f"[data-refresh-{hint}]").click()
+    expect(page.locator("#devices")).to_be_visible()
+    expect(page.locator("#filtersPopover")).to_be_visible()
+    anchor = page.locator("#filtersBtn").bounding_box()
+    popover = page.locator("#filtersPopover").bounding_box()
+    assert popover["y"] == pytest.approx(anchor["y"] + anchor["height"] + 8, abs=1)
+    expected_left = max(16, min(anchor["x"] + anchor["width"] - popover["width"], width - popover["width"] - 16))
+    assert popover["x"] == pytest.approx(expected_left, abs=1)
+    select_room(page, "kitchen")
+    assert listed_ids(page) == [PLUG.id]

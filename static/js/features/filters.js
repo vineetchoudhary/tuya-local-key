@@ -20,15 +20,70 @@ function matchesHome(d) {
   return appState.selectedHome === "unknown" ? !ids.length : ids.includes(appState.selectedHome.slice(5));
 }
 
+function roomStatus(d) {
+  if (d && d.room_status === "assigned" && typeof d.room_id === "string" && d.room_id) return "assigned";
+  return d && d.room_status === "unassigned" ? "unassigned" : "unknown";
+}
+
+function matchesRoom(d) {
+  if (!appState.selectedRoom) return true;
+  const status = roomStatus(d);
+  if (appState.selectedRoom === "none") return status === "unassigned";
+  if (appState.selectedRoom === "unknown") return status === "unknown";
+  return status === "assigned" && d.room_id === appState.selectedRoom.slice(5);
+}
+
+function matchesFilters(d) { return matchesHome(d) && matchesRoom(d); }
+
 function inCurrentView(id, fallback) {
-  return appState.excludedIds.has(id) === (appState.deviceView === "excluded") && matchesHome(appState.deviceData.find(d => d.id === id) || fallback);
+  return appState.excludedIds.has(id) === (appState.deviceView === "excluded") && matchesFilters(appState.deviceData.find(d => d.id === id) || fallback);
 }
 
 function homePreferenceKey() { return `tuya-local-key.home.${appState.accountId}`; }
+function roomPreferenceKey() { return `tuya-local-key.room.${appState.accountId}`; }
 
 function rememberHome() {
   appState.preferredHome = appState.selectedHome;
   try { localStorage.setItem(homePreferenceKey(), appState.selectedHome); } catch (e) {}
+}
+
+function rememberRoom() {
+  appState.preferredRoom = appState.selectedRoom;
+  try { localStorage.setItem(roomPreferenceKey(), appState.selectedRoom); } catch (e) {}
+}
+
+function roomOptions() {
+  const options = [{ value: "", label: "All rooms" }];
+  if (!appState.roomsLoaded) return options;
+  // Build choices from the full home scope, independent of search/exclusions.
+  const devices = appState.deviceData.filter(matchesHome), rooms = new Map();
+  for (const d of devices) {
+    if (roomStatus(d) === "assigned" && !rooms.has(d.room_id)) rooms.set(d.room_id, {
+      id: d.room_id, name: typeof d.room_name === "string" && d.room_name.trim() ? d.room_name : `Room ${d.room_id}`,
+      order: Number.isFinite(Number(d.room_display_order)) ? Number(d.room_display_order) : 0,
+    });
+  }
+  const names = new Map();
+  rooms.forEach(room => names.set(room.name, (names.get(room.name) || 0) + 1));
+  for (const room of [...rooms.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)))
+    options.push({ value: `room:${room.id}`, label: names.get(room.name) > 1 ? `${room.name} (${room.id})` : room.name });
+  if (devices.some(d => roomStatus(d) === "unassigned")) options.push({ value: "none", label: "No room" });
+  if (devices.some(d => roomStatus(d) === "unknown") || [...appState.excludedIds].some(id =>
+    !appState.deviceData.some(d => d.id === id) && matchesHome(null)))
+    options.push({ value: "unknown", label: "Unknown room" });
+  return options;
+}
+
+function loadRooms(body) {
+  appState.roomsLoaded = body.rooms_loaded === true;
+  const previousRoom = appState.selectedRoom;
+  appState.selectedRoom = roomOptions().some(option => option.value === appState.preferredRoom) ? appState.preferredRoom : "";
+  if (appState.selectedRoom !== previousRoom) {
+    abandonFailedExclusionSave(); appState.bulkSelectedIds.clear(); appState.filteredCollapsedGateways.clear();
+  }
+  // Old/partial snapshots cannot disprove a remembered room assignment.
+  if (appState.roomsLoaded && !appState.deviceData.filter(matchesHome).some(d => roomStatus(d) === "unknown") &&
+      appState.selectedRoom !== appState.preferredRoom) rememberRoom();
 }
 
 function unknownHomeNeeded() {
@@ -61,6 +116,7 @@ function loadHomes(body) {
   // An older cache cannot disprove the saved preference. Keep it until a fresh
   // home list arrives, without pretending its device memberships are known.
   if (appState.homes !== null && appState.selectedHome !== appState.preferredHome) rememberHome();
+  loadRooms(body);
 }
 
 function renderHomeFilter() {
@@ -75,12 +131,33 @@ function renderHomeFilter() {
   const refresh = $("homeHint").querySelector("[data-refresh-homes]");
   refresh.disabled = $("refreshBtn").disabled;
   refresh.textContent = refresh.disabled ? "Refreshing…" : "Refresh";
+  renderRoomFilter();
+}
+
+function renderRoomFilter() {
+  const options = roomOptions();
+  if (!options.some(option => option.value === appState.selectedRoom)) {
+    abandonFailedExclusionSave(); appState.bulkSelectedIds.clear(); appState.selectedRoom = ""; rememberRoom();
+  }
+  $("roomFilter").innerHTML = options.map(option => `<option value="${esc(option.value)}">${esc(option.label)}</option>`).join("");
+  $("roomFilter").value = appState.selectedRoom;
+  $("roomFilter").disabled = !appState.exclusionsLoaded || appState.exclusionBusy || options.length < 2;
+  const unknown = appState.deviceData.filter(matchesHome).some(d => roomStatus(d) === "unknown");
+  const showHint = appState.exclusionsLoaded && appState.deviceData.length && (!appState.roomsLoaded || unknown);
+  $("roomHint").classList.toggle("hidden", !showHint);
+  $("roomHintText").textContent = appState.roomsLoaded ? "Some rooms could not be loaded." : "Room information is not in this saved list.";
+  const refresh = $("roomHint").querySelector("[data-refresh-rooms]");
+  refresh.disabled = $("refreshBtn").disabled;
+  refresh.textContent = refresh.disabled ? "Refreshing…" : "Refresh";
 }
 
 function positionFiltersPopover() {
   const popover = $("filtersPopover");
-  if (popover.classList.contains("hidden")) return;
-  const anchor = $("filtersBtn").getBoundingClientRect();
+  const button = $("filtersBtn");
+  // Refresh temporarily hides the device view. Measuring its hidden anchor
+  // would place the popover at the viewport origin until the next interaction.
+  if (popover.classList.contains("hidden") || !button.getClientRects().length) return;
+  const anchor = button.getBoundingClientRect();
   const { width, height } = popover.getBoundingClientRect();
   const left = Math.max(16, Math.min(anchor.right - width, innerWidth - width - 16));
   let top = anchor.bottom + 8;
@@ -100,8 +177,8 @@ function openFilters() {
   $("filtersPopover").classList.remove("hidden");
   $("filtersBtn").setAttribute("aria-expanded", "true");
   positionFiltersPopover();
-  const home = $("homeFilter"), select = $("selectDevicesBtn");
-  (!home.disabled ? home : !select.disabled ? select : $("filtersClose")).focus();
+  const target = [$("homeFilter"), $("roomFilter"), $("selectDevicesBtn")].find(control => !control.disabled);
+  (target || $("filtersClose")).focus();
 }
 
 function validExclusions(body) {
@@ -115,6 +192,7 @@ function resetExclusions() {
   appState.accountGeneration++; appState.exclusionLoadGeneration++;
   appState.excludedIds = new Set(); appState.bulkSelectedIds.clear(); appState.deviceView = "active";
   appState.selectionMode = false; appState.homes = null; appState.selectedHome = appState.preferredHome = "";
+  appState.roomsLoaded = false; appState.selectedRoom = appState.preferredRoom = "";
   appState.exclusionsLoaded = false; appState.exclusionRevision = -1; appState.accountId = null;
   appState.exclusionBusy = false; appState.exclusionFailure = ""; appState.pendingExclusionSave = null;
 }
@@ -132,7 +210,9 @@ function applyExclusions(body) {
     appState.exclusionRevision = -1; appState.excludedIds = new Set();
     appState.accountId = body.account_id;
     try { appState.preferredHome = localStorage.getItem(homePreferenceKey()) || ""; } catch (e) { appState.preferredHome = ""; }
+    try { appState.preferredRoom = localStorage.getItem(roomPreferenceKey()) || ""; } catch (e) { appState.preferredRoom = ""; }
     appState.selectedHome = ""; appState.homes = null;
+    appState.selectedRoom = ""; appState.roomsLoaded = false;
   }
   // A GET started before a successful PATCH must not put the older set back.
   if (body.revision < appState.exclusionRevision) return true;
@@ -178,26 +258,27 @@ function syncSelectionUi(ids = selectionIds()) {
   $("excludedViewBtn").classList.toggle("hidden", !appState.excludedIds.size && appState.deviceView !== "excluded");
   $("excludedViewBtn").setAttribute("aria-pressed", String(appState.deviceView === "excluded"));
   $("excludedViewBtn").disabled = disabled;
-  const filterCount = appState.excludedIds.size + Number(!!appState.selectedHome);
+  const filterCount = appState.excludedIds.size + Number(!!appState.selectedHome) + Number(!!appState.selectedRoom);
   const filterSummary = [appState.excludedIds.size ? plural(appState.excludedIds.size, "excluded device") : "",
-    appState.selectedHome ? "1 home filter" : ""].filter(Boolean).join(", ");
+    appState.selectedHome ? "1 home filter" : "", appState.selectedRoom ? "1 room filter" : ""].filter(Boolean).join(", ");
   $("filterCount").textContent = filterCount;
   $("filterCount").classList.toggle("hidden", !filterCount);
   $("filtersBtn").dataset.active = String(!!filterCount);
   $("filtersBtn").setAttribute("aria-label", filterCount ? `Filter (${filterCount}): ${filterSummary}` : "Filter");
-  $("clearAllFilters").disabled = disabled || !(filterCount || appState.filterText || appState.preferredHome || appState.selectionMode || appState.deviceView !== "active");
+  $("clearAllFilters").disabled = disabled || !(filterCount || appState.filterText || appState.preferredHome || appState.preferredRoom || appState.selectionMode || appState.deviceView !== "active");
   $("clearAllFilters").textContent = appState.exclusionBusy && appState.pendingExclusionSave && appState.pendingExclusionSave.clearFilters ? "Clearing…" : "Clear all";
   $("viewActions").classList.toggle("hidden", appState.deviceView !== "excluded");
   $("backToDevicesBtn").disabled = disabled;
   $("restoreAll").classList.toggle("hidden", appState.deviceView !== "excluded" || !appState.excludedIds.size);
   $("restoreAll").disabled = disabled || !appState.excludedIds.size;
-  $("restoreAll").textContent = appState.selectedHome ? "Restore all (all homes)" : "Restore all";
+  $("restoreAll").textContent = appState.selectedHome ? "Restore all (all homes)" : appState.selectedRoom ? "Restore all (all rooms)" : "Restore all";
   $("restoreAll").title = "Restore every excluded device in this account, across all homes";
   $("retryExclusions").disabled = appState.exclusionBusy;
   $("filter").disabled = !appState.exclusionsLoaded;
   $("csvBtn").disabled = !appState.exclusionsLoaded;
   $("scanBtn").disabled = !appState.exclusionsLoaded;
   $("homeFilter").disabled = disabled || homeOptions().length < 2;
+  $("roomFilter").disabled = disabled || roomOptions().length < 2;
   syncTableSelection(ids, disabled);
   exclusionError(appState.exclusionFailure);
   positionFiltersPopover();
@@ -274,12 +355,22 @@ async function saveExclusions(exclude = [], restore = [], restoreAll = false, cl
 function changeHomeFilter(value) {
   abandonFailedExclusionSave(); appState.bulkSelectedIds.clear(); appState.filteredCollapsedGateways.clear();
   appState.selectedHome = value; rememberHome();
+  if (!roomOptions().some(option => option.value === appState.selectedRoom)) appState.selectedRoom = "";
+  rememberRoom();
   if (appState.selectedId && !inCurrentView(appState.selectedId)) closePanel();
   render(); $("homeFilter").focus();
 }
 
+function changeRoomFilter(value) {
+  abandonFailedExclusionSave(); appState.bulkSelectedIds.clear(); appState.filteredCollapsedGateways.clear();
+  appState.selectedRoom = value; rememberRoom();
+  if (appState.selectedId && !inCurrentView(appState.selectedId)) closePanel();
+  render(); $("roomFilter").focus();
+}
+
 function resetDeviceFilters() {
   appState.selectedHome = ""; rememberHome();
+  appState.selectedRoom = ""; rememberRoom();
   appState.filterText = ""; $("filter").value = "";
   appState.deviceView = "active"; appState.selectionMode = false; appState.bulkSelectedIds.clear(); appState.filteredCollapsedGateways.clear();
   if (appState.selectedId && !inCurrentView(appState.selectedId)) closePanel();
@@ -323,6 +414,7 @@ function initFilters(actions = {}) {
     abandonFailedExclusionSave(); appState.bulkSelectedIds.clear(); syncSelectionUi(); $("selectAllDevices").focus();
   };
   $("homeFilter").onchange = (e) => changeHomeFilter(e.target.value);
+  $("roomFilter").onchange = (e) => changeRoomFilter(e.target.value);
   $("clearAllFilters").onclick = () => {
     if (!appState.exclusionsLoaded || appState.exclusionBusy) return;
     abandonFailedExclusionSave();
@@ -332,6 +424,7 @@ function initFilters(actions = {}) {
   $("filtersIcon").innerHTML = icon("filters");
   $("filtersClose").innerHTML = icon("close");
   $("homeChevron").innerHTML = icon("chevron");
+  $("roomChevron").innerHTML = icon("chevron");
   $("filtersBtn").onclick = () => {
     if ($("filtersPopover").classList.contains("hidden")) openFilters(); else closeFilters(true);
   };
@@ -357,7 +450,7 @@ function initFilters(actions = {}) {
   });
   document.addEventListener("click", (e) => {
     if (e.target.closest("[data-view-excluded]")) setDeviceView("excluded", true);
-    if (e.target.closest("[data-refresh-homes]")) loadDevices("Updating device list from Tuya…", false, true);
+    if (e.target.closest("[data-refresh-homes], [data-refresh-rooms]")) loadDevices("Updating device list from Tuya…", false, true);
   });
   // filter
   $("filter").oninput = (e) => {
@@ -376,7 +469,9 @@ export {
   inCurrentView,
   initFilters,
   loadHomes,
+  matchesFilters,
   matchesHome,
+  positionFiltersPopover,
   renderHomeFilter,
   resetExclusions,
   saveExclusions,

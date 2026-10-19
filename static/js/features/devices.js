@@ -23,7 +23,7 @@ import {
 import { appState } from "../shared/state.js";
 
 // Cross-feature actions are connected by app.js.
-let applyExclusions, banner, changeBadge, closePanel, exclusionError, inCurrentView, indexChanges, isWatchingScan, loadHomes, loadLan, matchesHome, openPanel, render, renderPanel, resetExclusions, resetLan, selectAllDevices, selectionIds, setDeviceSelected, show, syncSelectionUi, validExclusions, watchScan;
+let applyExclusions, banner, changeBadge, closePanel, exclusionError, inCurrentView, indexChanges, isWatchingScan, loadHomes, loadLan, matchesFilters, openPanel, render, renderPanel, resetExclusions, resetLan, selectAllDevices, selectionIds, setDeviceSelected, show, syncSelectionUi, validExclusions, watchScan;
 
 let cacheStatusTimer = null;
 
@@ -214,7 +214,7 @@ function computeList() {
   if (appState.deviceView === "excluded") {
     const currentIds = new Set(appState.deviceData.map(d => d.id));
     list = list.concat([...appState.excludedIds].filter(id => !currentIds.has(id))
-      .map(id => ({ id, name: id, _missing: true })).filter(matchesHome));
+      .map(id => ({ id, name: id, _missing: true })).filter(matchesFilters));
   }
   if (appState.filterText) list = list.filter(d => (d._missing ? `${d.id} not in the current device list`.toLowerCase()
     : searchIndex.get(d) || "").includes(appState.filterText));
@@ -335,11 +335,14 @@ function emptyListMessage() {
   if (!appState.exclusionsLoaded) return "Device exclusions must be loaded before showing your devices.";
   if (appState.filterText) return "No devices match your filter.";
   const scope = appState.selectedHome === "unknown" ? " with an unknown home" : appState.selectedHome ? " in this home" : "";
-  if (appState.deviceView === "excluded") return `No excluded devices${scope}.`;
-  const inHome = appState.deviceData.filter(matchesHome);
-  if (inHome.length && inHome.every(d => appState.excludedIds.has(d.id)))
-    return `All devices${scope} are excluded.<br><button type="button" data-view-excluded>View excluded devices</button>`;
-  if (appState.selectedHome) return `No devices${scope}.`;
+  const roomScope = appState.selectedRoom === "none" ? " without a room" : appState.selectedRoom === "unknown"
+    ? " with an unknown room" : appState.selectedRoom ? " in this room" : "";
+  const location = scope + roomScope;
+  if (appState.deviceView === "excluded") return `No excluded devices${location}.`;
+  const inScope = appState.deviceData.filter(matchesFilters);
+  if (inScope.length && inScope.every(d => appState.excludedIds.has(d.id)))
+    return `All devices${location} are excluded.<br><button type="button" data-view-excluded>View excluded devices</button>`;
+  if (appState.selectedHome || appState.selectedRoom) return `No devices${location}.`;
   return "No devices in this account.";
 }
 
@@ -378,7 +381,7 @@ let initialized = false;
 function initDevices(actions = {}) {
   if (initialized) return;
   initialized = true;
-  ({ applyExclusions, banner, changeBadge, closePanel, exclusionError, inCurrentView, indexChanges, isWatchingScan, loadHomes, loadLan, matchesHome, openPanel, render, renderPanel, resetExclusions, resetLan, selectAllDevices, selectionIds, setDeviceSelected, show, syncSelectionUi, validExclusions, watchScan } = actions);
+  ({ applyExclusions, banner, changeBadge, closePanel, exclusionError, inCurrentView, indexChanges, isWatchingScan, loadHomes, loadLan, matchesFilters, openPanel, render, renderPanel, resetExclusions, resetLan, selectAllDevices, selectionIds, setDeviceSelected, show, syncSelectionUi, validExclusions, watchScan } = actions);
   // sort on header click
   $("thead").addEventListener("click", (e) => {
     if (e.target.closest("[data-key-toggle]")) return;   // handled by the toggle listener

@@ -393,11 +393,23 @@ def devices():
         }
         if isinstance(devs, core.Devices):
             body["homes"] = devs.homes
+            if devs.device_rooms is not None:
+                body["rooms_loaded"] = True
             home_names = {home["id"]: home["name"] for home in devs.homes}
             for device in listed:
-                ids = devs.home_ids.get(str(device.get("id")), [])
+                device_id = str(device.get("id"))
+                ids = devs.home_ids.get(device_id, [])
                 device["home_ids"] = list(ids)
                 device["home_names"] = [home_names.get(home_id, "") for home_id in ids]
+                if devs.device_rooms is not None:
+                    device["room_status"] = "unknown"
+                    if device_id in devs.device_rooms:
+                        room = devs.device_rooms[device_id]
+                        device["room_status"] = "assigned" if room is not None else "unassigned"
+                        device["room_id"] = room["id"] if room is not None else None
+                        if room is not None:
+                            device["room_name"] = room["name"]
+                            device["room_display_order"] = room["display_order"]
         if previous:
             changes = core.diff_devices(previous["body"].get("devices", []), listed)
             if any(changes.values()):

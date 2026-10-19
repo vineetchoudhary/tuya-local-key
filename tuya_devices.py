@@ -250,28 +250,37 @@ def build_manager(session, session_path):
 
 
 class Devices(list):
-    """A device list with authoritative home metadata for web consumers.
+    """A device list with authoritative home and room metadata for the web.
 
     Keep metadata on the collection rather than adding attributes to SDK
     devices, so CLI output and other callers still see the same device fields.
     A plain list from an older source simply has no established home metadata.
     """
 
-    def __init__(self, devices=(), *, homes=(), home_ids=None):
+    def __init__(self, devices=(), *, homes=(), home_ids=None, device_rooms=None):
         super().__init__(devices)
         self.homes = [{"id": str(home["id"]), "name": str(home.get("name") or "")}
                       for home in homes]
         self.home_ids = {str(device_id): list(dict.fromkeys(str(home_id) for home_id in ids))
                          for device_id, ids in (home_ids or {}).items()}
+        # None means room lookups were not attempted (e.g. CLI/older data).
+        # A missing ID means its lookup failed; an explicit None is no room.
+        self.device_rooms = None if device_rooms is None else {
+            str(device_id): None if room is None else {
+                "id": str(room["id"]), "name": str(room.get("name") or ""),
+                "display_order": room.get("display_order", 0),
+            } for device_id, room in device_rooms.items()
+        }
 
 
-def devices_from_session(session, session_path):
+def devices_from_session(session, session_path, *, include_rooms=True):
     """Fetch the SDK's device list, retaining the homes it normally flattens.
 
     This is Manager.update_device_cache()'s public repository loop, with each
     device's home membership retained from the query that returned it. It uses
     the same requests and token refresh behavior, without inferring membership
-    from owner_id or repeating the device/home calls.
+    from owner_id or repeating the device/home calls. Web fetches also query
+    each unique device's room. CLI callers skip that optional enrichment.
     """
     manager = build_manager(session, session_path)
     manager.device_map.clear()
@@ -287,8 +296,31 @@ def devices_from_session(session, session_path):
             home_id = str(home.id)
             if home_id not in membership:
                 membership.append(home_id)
+    device_rooms = {} if include_rooms else None
+    if include_rooms:
+        from requests.exceptions import ConnectionError as RequestsConnectionError, Timeout
+
+        for device_id in manager.device_map:
+            try:
+                room = manager.query_room_by_device(device_id)
+                if room is None:
+                    device_rooms[str(device_id)] = None
+                elif room.id is not None and str(room.id):
+                    device_rooms[str(device_id)] = {
+                        "id": room.id, "name": room.name,
+                        "display_order": getattr(room, "display_order", 0),
+                    }
+            except (RequestsConnectionError, Timeout):
+                # The device list is already usable. A transport outage should
+                # not incur the same timeout for every remaining room lookup.
+                break
+            except Exception:
+                # A failed optional lookup must not discard device keys or
+                # label a device as unassigned. Leave its room unknown.
+                continue
     return Devices(manager.device_map.values(), homes=[
-        {"id": home.id, "name": home.name} for home in homes], home_ids=home_ids)
+        {"id": home.id, "name": home.name} for home in homes],
+        home_ids=home_ids, device_rooms=device_rooms)
 
 
 def get_devices(args):
@@ -297,13 +329,13 @@ def get_devices(args):
 
     if session:
         try:
-            return devices_from_session(session, args.session)
+            return devices_from_session(session, args.session, include_rooms=False)
         except Exception as e:
             print(f"Saved session unusable ({e}). Re-authenticating…\n")
 
     session = qr_login(args.user_code, args.scheme, args.qr_png)
     save_session(args.session, session)
-    return devices_from_session(session, args.session)
+    return devices_from_session(session, args.session, include_rooms=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -433,6 +465,9 @@ def diff_devices(previous, current):
             # established home membership so filtered notices remain accurate.
             if isinstance(device.get("home_ids"), list):
                 removed["home_ids"] = list(device["home_ids"])
+            for field in ("room_status", "room_id", "room_name", "room_display_order"):
+                if field in device:
+                    removed[field] = device[field]
             changes["removed"].append(removed)
 
     for entries in changes.values():

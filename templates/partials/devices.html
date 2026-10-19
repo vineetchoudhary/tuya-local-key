@@ -24,6 +24,12 @@
               <span id="homeChevron" class="home-select-chevron" aria-hidden="true"></span>
             </div>
             <p id="homeHint" class="home-hint hidden"><button class="link-btn" type="button" data-refresh-homes>Refresh</button> to load your homes.</p>
+            <label for="roomFilter" class="room-filter-label">Room</label>
+            <div class="home-select-wrap">
+              <select id="roomFilter" class="home-filter" aria-label="Filter by room" aria-describedby="roomHint"><option value="">All rooms</option></select>
+              <span id="roomChevron" class="home-select-chevron" aria-hidden="true"></span>
+            </div>
+            <p id="roomHint" class="home-hint hidden"><span id="roomHintText"></span> <button class="link-btn" type="button" data-refresh-rooms>Refresh</button> to try again.</p>
             <div class="filter-selection">
               <button id="selectDevicesBtn" type="button">Select devices</button>
               <button id="excludedViewBtn" class="view-button hidden" type="button" aria-pressed="false">Excluded devices (0)</button>

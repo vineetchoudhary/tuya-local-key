@@ -62,6 +62,7 @@ export function initApp() {
   shell.initShell({
     closePanel: panel.closePanel,
     layoutActions: header.layoutActions,
+    positionFiltersPopover: filters.positionFiltersPopover,
   });
   auth.initAuth({
     banner: shell.banner,
@@ -83,7 +84,7 @@ export function initApp() {
     isWatchingScan: network.isWatchingScan,
     loadHomes: filters.loadHomes,
     loadLan: network.loadLan,
-    matchesHome: filters.matchesHome,
+    matchesFilters: filters.matchesFilters,
     openPanel: panel.openPanel,
     render,
     renderPanel: panel.renderPanel,
@@ -123,7 +124,7 @@ export function initApp() {
   });
   setup.initSetup({
     inCurrentView: filters.inCurrentView,
-    matchesHome: filters.matchesHome,
+    matchesFilters: filters.matchesFilters,
     renderPanel: panel.renderPanel,
   });
   network.initNetwork({

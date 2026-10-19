@@ -26,6 +26,7 @@
 .filter-popover-title { display: flex; flex: 1; align-items: baseline; gap: 6px; min-width: 0; }
 .filter-popover-head h3 { margin: 0; font-size: 14px; }
 .filter-popover label { margin-bottom: 6px; font-weight: 600; }
+.filter-popover .room-filter-label { margin-top: 12px; }
 .home-select-wrap { position: relative; }
 .home-filter { appearance: none; -webkit-appearance: none; width: 100%; min-width: 0; padding: 9px 40px 9px 12px;
   font: inherit; font-size: 14px; color: var(--fg); background: var(--card);
