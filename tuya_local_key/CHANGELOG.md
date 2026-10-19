@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.4
+- Added home filtering and a **Clear all** action.
+- Added saved device exclusions with bulk selection and restoration.
+- UI improvements, code modernization, and test fixes.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v3.3...v3.4
+
 ## 3.3
 - Added **Set up in…** with copyable values for `tuya-local`, `localtuya` and `tinytuya`.
 - Setup now highlights missing values and unsupported protocols, with actions to scan the network, enter an IP manually, or refresh devices.
