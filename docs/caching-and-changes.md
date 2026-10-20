@@ -32,7 +32,7 @@ The file contains excluded device IDs and a hashed account identity, with no loc
 
 The account identity uses the login's client ID, user code, and region endpoint, so a new QR login or token renewal preserves exclusions. A different user code or region has a separate preference set. The preferences are shared by browsers connected to the same installation.
 
-The [home filter](usage.md#filtering-by-home) uses home names and device membership stored with the encrypted device list. Its selected value is a separate browser preference, scoped to the account. An older saved list remains usable without home metadata; Refresh fetches it from Tuya.
+The [home filter](usage.md#filtering-by-home) and [room filter](usage.md#filtering-by-room) use metadata stored with the encrypted device list. Their selected values are separate browser preferences, scoped to the account. An older saved list remains usable without home or room metadata; Refresh fetches it from Tuya. Room lookups happen once per unique device on a fresh fetch, with failed lookups marked unknown rather than unassigned. Cached loads and filter changes do not query rooms again.
 
 ## Change Detection
 

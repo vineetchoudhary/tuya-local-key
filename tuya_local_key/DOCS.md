@@ -8,10 +8,10 @@ Retrieve Smart Life / Tuya device local keys using QR-code login. No Tuya IoT de
 2. Enter your Smart Life user code from **Me > Settings > Account and Security > User Code**.
 3. In Smart Life, tap **+ > Scan**, scan the QR code, and confirm login.
 4. View, copy, filter, or export your devices. Select a row for device details and local integration setup.
+5. Use **Scan network** with your IoT subnet (for example `192.168.2.0/24`) to find local IP addresses and protocol versions.
+6. Use **Filter** to narrow the list by home, room, status, or device category. Use **Clear all** to reset filters and search.
 
-The device list is cached for 3 days and kept across restarts. Click **Refresh** to fetch the latest list from Tuya.
-
-Use **Scan network** with your IoT subnet (for example `192.168.2.0/24`) to find local IP addresses and protocol versions.
+**Note:** The device list is cached for 3 days and kept across restarts. Click **Refresh** to fetch the latest list from Tuya.
 
 ## Configuration
 

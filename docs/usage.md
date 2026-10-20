@@ -26,19 +26,37 @@ The web UI caches the device list for 3 days and keeps it across restarts. Click
 
 ## Filtering by Home
 
-Choose **Filter**, before the search field, then choose a **Home** to show only that home's devices, or choose **All homes**. Home names and device membership come from the same Tuya SDK requests that fetch the device list. If Tuya lists a device under more than one home, it appears in each matching view. The Filter badge adds the number of excluded devices and one for an active home filter: two exclusions plus a selected home shows **3**. Choose **All homes** to remove just the home filter.
+- Choose **Filter > Home** to show only that home's devices. Home names and device membership come from the same Tuya SDK requests that fetch the device list. If Tuya lists a device under more than one home, it appears in each matching view.
 
-Choose **Clear all** beside the **Filters** title to reset the home and search, restore all account exclusions, and return to the main device list. If restoring exclusions fails, the existing filters and selection stay in place and you can retry.
+- Select **Clear all** in filter view to reset all filters including excluded devices.
 
-The home filter combines with search and the active or excluded view. Counts, device-specific change notices, and CSV export follow those choices. Your home choice is remembered in this browser for the current account. Devices without known membership remain available through **All homes** and the unknown-home option when shown.
+- The home filter combines with search and the active or excluded view. Home filter is remembered in this browser for the current account. Devices without known membership remain available through **All homes** and the unknown-home option when shown.
 
-Older saved lists do not contain home information. Click **Refresh** once to fetch the home names and membership. A failed refresh keeps the previous saved list.
+- Older saved lists do not contain home information. Click **Refresh** once to fetch the home names and membership. A failed refresh keeps the previous saved list.
+
+## Filtering by Room
+
+- Choose **Filter > Room** to show devices assigned to a room in Smart Life or Tuya. The choices follow the selected Home and combine with search and the active or excluded view. Changing Home resets a room choice that no longer applies. Room choices are remembered in this browser for the current account.
+
+- **No room** shows devices Tuya confirms are unassigned. **Unknown room** shows devices whose room information could not be loaded, including excluded devices missing from the current list. A failed room lookup does not hide devices from All rooms or prevent the device list from loading.
+
+- The SDK queries each device's room during a fresh device fetch. Room information is stored with the encrypted device cache. Switching filters or reloading a valid cache makes no additional room requests. Click **Refresh** to pick up room changes or upgrade an older saved list. Only rooms containing accessible devices can be discovered. 
+
+- **Room groups** are not supported. Tuya's SDK returns only the room name for each device, so this tool cannot show a room hierarchy or list all rooms in a group.
+
+## Filtering by Status and Device Category
+
+- Choose **Filter > Status** for cloud online, offline, or unknown status, or a LAN result from the latest saved network scan or device check. Cloud and LAN are separate choices, a device can be cloud-offline while reachable on your network. LAN choices include reachable, busy, key mismatch, unreachable, not found, via gateway, offline as reported by a gateway, gateway not found, check needed, and not checked. A missing gateway does not establish that its sub-devices are offline. Choosing a LAN filter does not start a scan. Use **Scan network** or a device's **Check** action to update the results.
+
+- Choose **Filter > Device category** for a category reported by Tuya. Common codes have readable names, such as **Socket (cz)** and **Light (dj)**, using [Tuya's category definitions](https://developer.tuya.com/en/docs/iot/standarddescription?id=K9i5ql6waswzq). Other codes remain individually selectable. **Unknown category** covers missing category information, including excluded devices absent from the current list. Category choices use the full account list so changing another filter does not remove them. A selected category stays selected if a refresh leaves no matching devices.
+
+- Both filter choices are remembered per account in this browser and combine with Home, Room, search, exclusions, counts, change notices, and CSV export.
 
 ## Excluding Devices
 
 Open **Filter > Select devices** when you want to exclude individual devices. Checkboxes appear only in selection mode. Click or tap a device row or its checkbox to select or deselect it; rows do not open device details in this mode. Copy buttons and gateway expand/collapse controls keep their own actions. Choose **Exclude selected** to save, or **Done** to leave selection mode without making changes. The header checkbox selects only the matching rows currently shown, including expanded sub-devices. It leaves collapsed sub-devices and gateways shown only for search context unselected. Selecting a gateway does not select its children.
 
-After a device is excluded, choose **Filter > Excluded devices (N)** to review the excluded list. Enter selection mode through Filter and choose **Restore selected**, or restore all account exclusions. Search, home filtering, and sorting work in either view. Changing the search, home, or view clears the selection. Devices Tuya no longer lists remain in the excluded view by ID, so their preference can still be cleared. After all exclusions are restored, returning to the main list hides the Excluded devices option. The Filter badge always counts all account exclusions, independently of search or the selected home.
+After a device is excluded, choose **Filter > Excluded devices (N)** to review the excluded list. Enter selection mode through Filter and choose **Restore selected**, or restore all account exclusions. Search, all four filters, and sorting work in either view. Changing the search, a filter, or the view clears the selection. Devices Tuya no longer lists remain in the excluded view by ID, so their preference can still be cleared. After all exclusions are restored, returning to the main list hides the Excluded devices option. The Filter badge always counts all account exclusions, independently of search or the other selected filters.
 
 CSV export follows the current view, search, and sort order. The excluded view downloads `tuya-local-key-excluded.csv`. Entries absent from the current device list are omitted because their device data is unavailable.
 
