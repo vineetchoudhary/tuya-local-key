@@ -25,10 +25,11 @@ export function render() {
 function goHome() {
   if ($("devices").classList.contains("hidden")) return;
   const excluded = appState.deviceView === "excluded";
-  if (!excluded && !appState.selectedId) return;
-  if (excluded && (!appState.exclusionsLoaded || appState.exclusionBusy)) return;
+  if (!excluded && !appState.selectedId && !appState.selectionMode) return;
+  if ((excluded || appState.selectionMode) && (!appState.exclusionsLoaded || appState.exclusionBusy)) return;
   panel.closePanel();
   if (excluded) filters.setDeviceView("active");
+  else if (appState.selectionMode) filters.setSelectionMode(false);
   $("homeLink").focus({ preventScroll: true });
 }
 

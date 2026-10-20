@@ -1563,22 +1563,32 @@ def in_menu(page):
 
 @pytest.mark.parametrize("target", [".app-icon", "h1"])
 @pytest.mark.parametrize("width", [1440, 390])
-def test_brand_leaves_home_search_and_selection_unchanged(page, target, width):
+@pytest.mark.parametrize("selected", [False, True])
+def test_brand_exits_selection_without_changing_home_search_or_exclusions(page, target, width, selected):
     page.set_viewport_size({"width": width, "height": 1000})
     page.fill("#filter", "plug")
-    select_devices(page, PLUG)
+    if selected:
+        select_devices(page, PLUG)
+    else:
+        enter_selection(page)
     table = page.locator("#table").element_handle()
     cached_at, url = frontend_state(page, "devicesCachedAt"), page.url
+    saved = page.request.get(page.url + "api/device-exclusions").json()
 
     page.locator(f"#homeLink {target}").click()
 
     assert page.url == url
-    assert table.evaluate("el => el.isConnected"), "Home clicks do not reload or redraw the list"
+    assert table.evaluate("el => el.isConnected"), "Home clicks keep the existing table"
     assert frontend_state(page, "devicesCachedAt") == cached_at
     assert frontend_state(page, "deviceView") == "active"
     expect(page.locator("#filter")).to_have_value("plug")
-    expect(device_checkbox(page, PLUG)).to_be_checked()
-    expect(page.locator("#selectionCount")).to_have_text("1 selected")
+    assert frontend_state(page, "selectionMode") is False
+    expect(page.locator("#bulkActions")).to_be_hidden()
+    expect(page.locator("#rows [data-device-select], #selectAllDevices")).to_have_count(0)
+    expect(page.locator("#selectionCount")).to_have_text("0 selected")
+    expect(page.locator("#homeLink")).to_be_focused()
+    expect(row(page, PLUG)).to_be_visible()
+    assert page.request.get(page.url + "api/device-exclusions").json() == saved
 
 
 @pytest.mark.parametrize("target", [".app-icon", "h1"])
@@ -1611,6 +1621,7 @@ def test_brand_returns_from_excluded_without_restoring_devices(page, target, wid
     expect(row(page, PLUG)).to_be_visible()
     if width == 1440:
         open_panel(page, PLUG.name)
+    select_devices(page, PLUG)
     cached_at, url = frontend_state(page, "devicesCachedAt"), page.url
 
     page.locator(f"#homeLink {target}").click()
@@ -1621,6 +1632,9 @@ def test_brand_returns_from_excluded_without_restoring_devices(page, target, wid
     expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
     expect(page.locator("#homeLink")).to_be_focused()
     expect(page.locator("#backToDevicesBtn")).to_be_hidden()
+    expect(page.locator("#bulkActions")).to_be_hidden()
+    expect(page.locator("#rows [data-device-select], #selectAllDevices")).to_have_count(0)
+    assert frontend_state(page, "selectionMode") is False
     expect(page.locator("#filter")).to_have_value("plug")
     expect(row(page, PLUG)).to_have_count(0)
     assert page.request.get(page.url + "api/device-exclusions").json() == saved
@@ -1632,6 +1646,12 @@ def test_brand_home_action_supports_keyboard_activation(page):
     home.focus()
     home.press("Enter")
     expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
+    expect(home).to_be_focused()
+    select_devices(page, PLUG)
+    home.focus()
+    home.press("Enter")
+    expect(page.locator("#bulkActions")).to_be_hidden()
+    expect(page.locator("#rows [data-device-select], #selectAllDevices")).to_have_count(0)
     expect(home).to_be_focused()
 
 

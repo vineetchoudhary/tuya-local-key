@@ -22,6 +22,7 @@ tuya-local-key = "tuya_devices:main"
 tuya-devices = "tuya_devices:main"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
     "ui: browser smoke tests; need playwright and a Chromium-family browser",
 ]
