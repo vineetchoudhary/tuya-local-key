@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.5
+- Added **Room** filters for the selected home, including **No room** for unassigned devices and **Unknown room** when room information is unavailable.
+- Added **Status** filters for cloud status and saved LAN results.
+- Added **Device category** filters with readable names for common categories.
+- Filter choices are saved in your browser for each account.
+- The new filters apply to device selection, change notices, and CSV export. The Filter badge also include them.
+- Fixed the Filter menu shifting out of position after a refresh.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v3.4...v3.5
+
 ## 3.4
 - Added home filtering and a **Clear all** action.
 - Added saved device exclusions with bulk selection and restoration.
