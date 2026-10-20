@@ -30,6 +30,17 @@
               <span id="roomChevron" class="home-select-chevron" aria-hidden="true"></span>
             </div>
             <p id="roomHint" class="home-hint hidden"><span id="roomHintText"></span> <button class="link-btn" type="button" data-refresh-rooms>Refresh</button> to try again.</p>
+            <label for="statusFilter" class="filter-field-label">Status</label>
+            <div class="home-select-wrap">
+              <select id="statusFilter" class="home-filter" aria-label="Filter by status" aria-describedby="statusHint"><option value="">All statuses</option></select>
+              <span id="statusChevron" class="home-select-chevron" aria-hidden="true"></span>
+            </div>
+            <p id="statusHint" class="home-hint">LAN uses the latest saved scan or device check.</p>
+            <label for="categoryFilter" class="filter-field-label">Device category</label>
+            <div class="home-select-wrap">
+              <select id="categoryFilter" class="home-filter" aria-label="Filter by device category"><option value="">All categories</option></select>
+              <span id="categoryChevron" class="home-select-chevron" aria-hidden="true"></span>
+            </div>
             <div class="filter-selection">
               <button id="selectDevicesBtn" type="button">Select devices</button>
               <button id="excludedViewBtn" class="view-button hidden" type="button" aria-pressed="false">Excluded devices (0)</button>

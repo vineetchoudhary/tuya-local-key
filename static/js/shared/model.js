@@ -8,6 +8,15 @@ function lanStatus(d) {
   return LAN_BADGES[d.lan_status] ? d.lan_status : null;
 }
 
+// Filter on the same local evidence as the badge. A missing gateway is not
+// proof that a child is offline, and a gateway reply is not a child reply.
+function lanFilterStatus(d) {
+  const status = lanStatus(d);
+  if (!status) return needsCheck(d) ? "check_needed" : "not_checked";
+  if (gatewayMissed(d)) return "gateway_not_found";
+  return subOffline(d) ? "offline" : status;
+}
+
 // A sub-device whose gateway the scan didn't find: it says nothing about the
 // sub-device itself, so it reads greyed out and sorts with "not found".
 function gatewayMissed(d) {
@@ -242,6 +251,7 @@ export {
   keySource,
   lanBadgeText,
   lanExplain,
+  lanFilterStatus,
   lanStatus,
   localKeyOf,
   needsCheck,

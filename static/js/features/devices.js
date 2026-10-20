@@ -342,6 +342,7 @@ function emptyListMessage() {
   const inScope = appState.deviceData.filter(matchesFilters);
   if (inScope.length && inScope.every(d => appState.excludedIds.has(d.id)))
     return `All devices${location} are excluded.<br><button type="button" data-view-excluded>View excluded devices</button>`;
+  if (appState.selectedStatus || appState.selectedCategory) return "No devices match your filters.";
   if (appState.selectedHome || appState.selectedRoom) return `No devices${location}.`;
   return "No devices in this account.";
 }

@@ -19,6 +19,8 @@ const appState = {
   roomsLoaded: false,
   selectedRoom: "",
   preferredRoom: "",
+  selectedStatus: "",
+  selectedCategory: "",
   exclusionsLoaded: false,
   exclusionRevision: -1,
   accountId: null,

@@ -4224,3 +4224,313 @@ def test_filters_stay_anchored_after_first_metadata_refresh(page, running_app, m
     assert popover["x"] == pytest.approx(expected_left, abs=1)
     select_room(page, "kitchen")
     assert listed_ids(page) == [PLUG.id]
+
+
+# Status and category choices share the existing view, selection, and export scope.
+def select_status(page, value=""):
+    open_filters(page)
+    page.locator("#statusFilter").select_option(value)
+
+
+def select_category(page, code=""):
+    open_filters(page)
+    page.locator("#categoryFilter").select_option("unknown" if code == "unknown" else f"category:{code}" if code else "")
+
+
+def test_device_filters_cloud_status_is_independent_of_the_last_lan_result(page, running_app, monkeypatch):
+    devices = copy.deepcopy(DEVICES)
+    devices[demo_devices.PLUG].online = False
+    serves_rooms(page, running_app, monkeypatch, devices=devices)
+    _scans(running_app, monkeypatch, FIRST_SCAN)
+    scanned(page)
+    select_status(page, "cloud:online")
+    assert set(listed_ids(page)) == {d.id for d in devices if d.online is True}
+    select_status(page, "cloud:offline")
+    assert set(listed_ids(page)) == {d.id for d in devices if d.online is False}
+    select_status(page, "cloud:unknown")
+    assert listed_ids(page) == []
+    select_status(page, "lan:ok")
+    assert listed_ids(page) == [PLUG.id], "a cloud-offline device can still be locally reachable"
+    expect(page.locator("#filtersBtn")).to_have_accessible_name("Filter (1): 1 status filter")
+
+
+def test_device_filters_cover_lan_outcomes_and_gateway_reports(page, running_app, monkeypatch):
+    cases = {
+        "ok": _lan("ok", "192.168.1.2", "3.4"),
+        "busy": _lan("busy", "192.168.1.3", "3.4"),
+        "key_mismatch": _lan("key_mismatch", "192.168.1.4", "3.4"),
+        "unreachable": _lan("unreachable", "192.168.1.5"),
+        "not_found": _lan("not_found"),
+        "via_gateway": _lan("via_gateway", "192.168.1.6", "3.4", sub_online=True),
+        "offline": _lan("via_gateway", "192.168.1.6", "3.4", sub_online=False),
+        "gateway_not_found": _lan("via_gateway"),
+        "not_checked": None,
+    }
+    devices, results = [], {}
+    for status, result in cases.items():
+        device = copy.deepcopy(PLUG)
+        device.id, device.name = f"status-{status}", f"Device {status}"
+        devices.append(device)
+        if result:
+            results[device.id] = result
+    serves_rooms(page, running_app, monkeypatch, devices=devices, rooms={}, membership={})
+    _scans(running_app, monkeypatch, results)
+    scanned(page)
+    for status in cases:
+        select_status(page, f"lan:{status}")
+        assert listed_ids(page) == [f"status-{status}"], status
+    select_status(page, "lan:check_needed")
+    expect(page.locator("#emptyDevices")).to_have_text("No devices match your filters.")
+    select_status(page)
+    assert set(listed_ids(page)) == {d.id for d in devices}
+
+
+def test_device_filters_check_needed_does_not_claim_an_unnamed_gateway_is_unscanned(
+        page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, VALVE, WATER_TIMER)
+    _scans(running_app, monkeypatch, {
+        VALVE.id: _lan("via_gateway", "192.168.2.8", "3.4"),
+    }, unnamed_gateways=[{"ip": "192.168.2.8", "version": "3.4", "sub_devices": [VALVE.id]}])
+    scanned(page)
+    select_status(page, "lan:check_needed")
+    assert set(listed_ids(page)) == {ZIGBEE_GATEWAY.id, BLE_GATEWAY.id}
+    select_status(page, "lan:not_checked")
+    assert not {ZIGBEE_GATEWAY.id, BLE_GATEWAY.id} & set(listed_ids(page))
+
+
+def test_device_filters_update_after_scanning_and_keep_all_devices_as_scan_targets(
+        page, running_app, monkeypatch):
+    calls = _scans(running_app, monkeypatch, FIRST_SCAN, {
+        PLUG.id: _lan("unreachable", "192.168.1.61"),
+        LAMP.id: _lan("ok", "192.168.1.42", "3.3"),
+    })
+    select_status(page, "lan:ok")
+    assert listed_ids(page) == []
+    scanned(page)
+    assert listed_ids(page) == [PLUG.id]
+    select_devices(page, PLUG)
+    scanned(page)
+    assert listed_ids(page) == [LAMP.id]
+    assert_no_selection(page)
+    assert all(set(call["devices"]) == {d.id for d in DEVICES} for call in calls)
+
+
+def test_device_filters_category_labels_codes_and_missing_values_are_safe_and_stable(
+        page, running_app, monkeypatch):
+    devices = copy.deepcopy(DEVICES)
+    devices[demo_devices.BARE].category = ""
+    devices[demo_devices.SENSOR].category = '<custom & "category">'
+    serves_rooms(page, running_app, monkeypatch, devices=devices)
+    open_filters(page)
+    labels = page.locator("#categoryFilter option").all_inner_texts()
+    assert "Socket (cz)" in labels and "Light (dj)" in labels
+    assert '<custom & "category">' in labels and "Unknown category" in labels
+    assert page.locator("#categoryFilter custom").count() == 0
+    select_category(page, "cz")
+    assert listed_ids(page) == [PLUG.id]
+    choices = page.locator("#categoryFilter option").all_inner_texts()
+    select_home(page, "home-b")
+    page.locator("#filtersClose").click()
+    page.fill("#filter", "no matching device")
+    assert page.locator("#categoryFilter option").all_inner_texts() == choices
+    page.fill("#filter", "")
+    select_home(page)
+    select_category(page, '<custom & "category">')
+    assert listed_ids(page) == [SENSOR.id]
+    select_category(page, "unknown")
+    assert listed_ids(page) == [BARE.id]
+
+
+def test_device_filters_empty_category_scope_stays_selected_until_cleared(page, running_app, monkeypatch):
+    select_category(page, "cz")
+    serves_rooms(page, running_app, monkeypatch, devices=[LAMP])
+    expect(page.locator("#categoryFilter")).to_have_value("category:cz")
+    expect(page.locator("#emptyDevices")).to_have_text("No devices match your filters.")
+    select_category(page)
+    assert listed_ids(page) == [LAMP.id]
+
+
+def test_device_filters_persist_per_account_and_survive_cached_reload(page, restores_session, monkeypatch):
+    select_status(page, "cloud:online")
+    select_category(page, "dj")
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#statusFilter")).to_have_value("cloud:online")
+    expect(page.locator("#categoryFilter")).to_have_value("category:dj")
+    assert listed_ids(page) == [LAMP.id]
+    original = restores_session.core.load_session(restores_session.SESSION_FILE)
+    restores_session.core.save_session(restores_session.SESSION_FILE, dict(original, user_code="filter-account-b"))
+    refreshed(page, "#filtersBtn")
+    expect(page.locator("#statusFilter")).to_have_value("")
+    expect(page.locator("#categoryFilter")).to_have_value("")
+    select_status(page, "cloud:offline")
+    select_category(page, "mcs")
+    restores_session.core.save_session(restores_session.SESSION_FILE, original)
+    refreshed(page, "#filtersBtn")
+    expect(page.locator("#statusFilter")).to_have_value("cloud:online")
+    expect(page.locator("#categoryFilter")).to_have_value("category:dj")
+
+
+@pytest.mark.parametrize("storage", ["blocked", "invalid", "malformed-values"])
+def test_device_filters_work_with_unavailable_or_invalid_saved_preferences(page, storage):
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    if storage == "blocked":
+        page.add_init_script("""for (const method of ['getItem', 'setItem']) {
+            Storage.prototype[method] = () => { throw new Error('Storage unavailable'); };
+        }""")
+    else:
+        account = frontend_state(page, "accountId")
+        page.evaluate("([key, value]) => localStorage.setItem(key, value)", [
+            f"tuya-local-key.filters.{account}", "{" if storage == "invalid" else '{"status":"bogus","category":false}',
+        ])
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#statusFilter")).to_have_value("")
+    expect(page.locator("#categoryFilter")).to_have_value("")
+    select_status(page, "cloud:online")
+    select_category(page, "dj")
+    assert listed_ids(page) == [LAMP.id] and not errors
+
+
+def test_device_filters_combine_with_location_search_exclusions_csv_and_clear_all_retry(
+        page, running_app, monkeypatch, tmp_path):
+    serves_rooms(page, running_app, monkeypatch)
+    select_devices(page, PLUG)
+    save_selection(page)
+    select_home(page, "home-b")
+    select_room(page, "living")
+    select_status(page, "cloud:online")
+    select_category(page, "dj")
+    expect(page.locator("#filtersBtn")).to_have_accessible_name(
+        "Filter (5): 1 excluded device, 1 home filter, 1 room filter, 1 status filter, 1 category filter")
+    assert listed_ids(page) == [LAMP.id]
+    assert [d["id"] for d in export_rows(page, tmp_path, "tuya-local-key.csv")] == [LAMP.id]
+    page.fill("#filter", LAMP.name)
+    select_devices(page, LAMP)
+    open_filters(page)
+
+    def fail_write(route):
+        if route.request.method == "PATCH":
+            route.fulfill(status=503, json={"error": "storage_unavailable"})
+        else:
+            route.continue_()
+
+    page.route("**/api/device-exclusions", fail_write)
+    page.locator("#clearAllFilters").click()
+    expect(page.locator("#exclusionError")).to_contain_text("Could not clear all filters")
+    expect(page.locator("#statusFilter")).to_have_value("cloud:online")
+    expect(page.locator("#categoryFilter")).to_have_value("category:dj")
+    expect(device_checkbox(page, LAMP)).to_be_checked()
+    page.unroute("**/api/device-exclusions", fail_write)
+    page.locator("#retryExclusions").click()
+    for control in ("homeFilter", "roomFilter", "statusFilter", "categoryFilter", "filter"):
+        expect(page.locator(f"#{control}")).to_have_value("")
+    expect(page.locator("#filterCount")).to_be_hidden()
+    assert set(listed_ids(page)) == {d.id for d in DEVICES}
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#statusFilter")).to_have_value("")
+    expect(page.locator("#categoryFilter")).to_have_value("")
+
+
+@pytest.mark.parametrize("kind,value", [("status", "cloud:offline"), ("category", "dj")])
+def test_device_filters_changing_scope_clears_selection_and_closes_details(
+        page, kind, value):
+    open_panel(page, PLUG.name)
+    (select_status if kind == "status" else select_category)(page, value)
+    expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
+    (select_status if kind == "status" else select_category)(page)
+    select_devices(page, PLUG)
+    (select_status if kind == "status" else select_category)(page, value)
+    assert_no_selection(page)
+
+
+def test_device_filters_missing_exclusions_have_unknown_category_and_cloud_status(
+        page, running_app, monkeypatch):
+    select_devices(page, PLUG)
+    save_selection(page)
+    serves_rooms(page, running_app, monkeypatch, devices=[LAMP, SENSOR, BARE])
+    switch_device_view(page)
+    select_category(page, "unknown")
+    select_status(page, "cloud:unknown")
+    assert listed_ids(page) == [PLUG.id]
+    select_devices(page, PLUG)
+    assert save_selection(page, restore=True)["excluded_ids"] == []
+
+
+def test_device_filters_excluded_export_and_restore_all_keep_their_account_scope(
+        page, running_app, monkeypatch, tmp_path):
+    select_devices(page, PLUG, LAMP)
+    save_selection(page)
+    select_category(page, "dj")
+    select_status(page, "cloud:online")
+    switch_device_view(page)
+    assert listed_ids(page) == [LAMP.id]
+    assert [d["id"] for d in export_rows(page, tmp_path, "tuya-local-key-excluded.csv")] == [LAMP.id]
+    expect(page.locator("#restoreAll")).to_have_text("Restore all (all filters)")
+    page.locator("#restoreAll").click()
+    expect(page.locator("#restoreAll")).to_be_hidden()
+    assert page.request.get(page.url + "api/device-exclusions").json()["excluded_ids"] == []
+    switch_device_view(page)
+    assert listed_ids(page) == [LAMP.id], "restoring exclusions preserves the selected status and category"
+
+
+def test_device_filters_removed_notices_keep_prior_category_and_cloud_status(page, running_app, monkeypatch):
+    serves_rooms(page, running_app, monkeypatch)
+    select_category(page, "cz")
+    select_status(page, "cloud:online")
+    serves_rooms(page, running_app, monkeypatch, devices=[LAMP, SENSOR, BARE])
+    expect(page.locator("#changesNotice")).to_contain_text("1 device removed")
+    assert PLUG.name in page.locator("#changesNotice").inner_text()
+    assert LAMP.name not in page.locator("#changesNotice").inner_text()
+    select_status(page, "cloud:offline")
+    assert page.locator("#changesNotice").count() == 0
+    select_status(page, "cloud:online")
+    select_category(page, "dj")
+    assert page.locator("#changesNotice").count() == 0
+
+
+def test_device_filters_keep_gateway_setup_evidence_outside_the_selected_category(
+        page, running_app, monkeypatch):
+    child = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    serves_rooms(page, running_app, monkeypatch, devices=list(DEVICES) + [ZIGBEE_GATEWAY, child])
+    cloud_requests = []
+    page.on("request", lambda request: cloud_requests.append(request.url) if "/api/devices" in request.url else None)
+    select_category(page, child.category)
+    calls = _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=child.id),
+        child.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+    select_status(page, "lan:via_gateway")
+    assert listed_ids(page) == [child.id]
+    assert {ZIGBEE_GATEWAY.id, child.id} <= set(calls[0]["devices"])
+    open_setup(page, child.name)
+    assert setup_value(page, "device_id") == ZIGBEE_GATEWAY.id
+    assert setup_value(page, "host") == "192.168.2.8"
+    assert setup_field(page, "local_key").locator("button.setup-copy").get_attribute("data-copy") == child.local_key
+    assert not cloud_requests
+
+
+@pytest.mark.parametrize("width,theme,height", [(1440, "light", 800), (1440, "dark", 800),
+                                              (390, "light", 640), (390, "dark", 640)])
+def test_device_filters_layout_keyboard_and_chevron_spacing(page, running_app, monkeypatch, width, theme, height):
+    serves_rooms(page, running_app, monkeypatch)
+    page.set_viewport_size({"width": width, "height": height})
+    page.emulate_media(color_scheme=theme)
+    select_home(page, "home-b")
+    expect(page.locator("#statusFilter")).to_have_accessible_name("Filter by status")
+    expect(page.locator("#categoryFilter")).to_have_accessible_name("Filter by device category")
+    page.locator("#roomFilter").press("Tab")
+    expect(page.locator("#statusFilter")).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.locator("#categoryFilter")).to_be_focused()
+    for control, arrow_id in (("statusFilter", "statusChevron"), ("categoryFilter", "categoryChevron")):
+        box, arrow = page.locator(f"#{control}").bounding_box(), page.locator(f"#{arrow_id}").bounding_box()
+        assert box["x"] + box["width"] - arrow["x"] - arrow["width"] >= 12
+    popover = page.locator("#filtersPopover").bounding_box()
+    assert popover["x"] >= 16 and popover["x"] + popover["width"] <= width - 16
+    assert popover["y"] >= 16 and popover["y"] + popover["height"] <= height - 16
+    assert page.evaluate("document.documentElement.scrollWidth") <= width
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"device-filters-{width}-{theme}.png", full_page=False)
+    page.keyboard.press("Escape")
+    expect(page.locator("#filtersBtn")).to_be_focused()

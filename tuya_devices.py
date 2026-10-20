@@ -462,10 +462,10 @@ def diff_devices(previous, current):
         if device_id not in after:
             removed = {"id": device_id, "name": device.get("name") or ""}
             # Removed records no longer exist in the current list. Keep their
-            # established home membership so filtered notices remain accurate.
+            # established filter metadata so removed notices remain in scope.
             if isinstance(device.get("home_ids"), list):
                 removed["home_ids"] = list(device["home_ids"])
-            for field in ("room_status", "room_id", "room_name", "room_display_order"):
+            for field in ("room_status", "room_id", "room_name", "room_display_order", "category", "online"):
                 if field in device:
                     removed[field] = device[field]
             changes["removed"].append(removed)

@@ -1,9 +1,11 @@
 // Filters.
 import { api } from "../shared/api.js";
+import { categoryLabel, categoryOf } from "../shared/categories.js";
 import { $, views } from "../shared/dom.js";
 import { plural } from "../shared/format.js";
 import { esc } from "../shared/html.js";
 import { icon } from "../shared/icons.js";
+import { lanFilterStatus } from "../shared/model.js";
 import { appState } from "../shared/state.js";
 
 // Cross-feature actions are connected by app.js.
@@ -33,7 +35,44 @@ function matchesRoom(d) {
   return status === "assigned" && d.room_id === appState.selectedRoom.slice(5);
 }
 
-function matchesFilters(d) { return matchesHome(d) && matchesRoom(d); }
+const STATUS_GROUPS = [
+  { label: "Cloud", options: [
+    { value: "cloud:online", label: "Online" },
+    { value: "cloud:offline", label: "Offline" },
+    { value: "cloud:unknown", label: "Unknown" },
+  ] },
+  { label: "LAN", options: [
+    { value: "lan:ok", label: "Reachable" },
+    { value: "lan:via_gateway", label: "Via gateway" },
+    { value: "lan:offline", label: "Offline (via gateway)" },
+    { value: "lan:busy", label: "Busy" },
+    { value: "lan:key_mismatch", label: "Key mismatch" },
+    { value: "lan:unreachable", label: "Unreachable" },
+    { value: "lan:not_found", label: "Not found" },
+    { value: "lan:gateway_not_found", label: "Gateway not found" },
+    { value: "lan:check_needed", label: "Check needed" },
+    { value: "lan:not_checked", label: "Not checked" },
+  ] },
+];
+const STATUS_VALUES = new Set(["", ...STATUS_GROUPS.flatMap(group => group.options.map(option => option.value))]);
+
+function matchesStatus(d) {
+  if (!appState.selectedStatus) return true;
+  const device = d || {};
+  if (appState.selectedStatus.startsWith("cloud:")) {
+    const status = device.online === true ? "online" : device.online === false ? "offline" : "unknown";
+    return appState.selectedStatus === `cloud:${status}`;
+  }
+  return appState.selectedStatus === `lan:${lanFilterStatus(device)}`;
+}
+
+function matchesCategory(d) {
+  if (!appState.selectedCategory) return true;
+  const code = categoryOf(d);
+  return appState.selectedCategory === "unknown" ? !code : appState.selectedCategory === `category:${code}`;
+}
+
+function matchesFilters(d) { return matchesHome(d) && matchesRoom(d) && matchesStatus(d) && matchesCategory(d); }
 
 function inCurrentView(id, fallback) {
   return appState.excludedIds.has(id) === (appState.deviceView === "excluded") && matchesFilters(appState.deviceData.find(d => d.id === id) || fallback);
@@ -41,6 +80,25 @@ function inCurrentView(id, fallback) {
 
 function homePreferenceKey() { return `tuya-local-key.home.${appState.accountId}`; }
 function roomPreferenceKey() { return `tuya-local-key.room.${appState.accountId}`; }
+function deviceFiltersPreferenceKey() { return `tuya-local-key.filters.${appState.accountId}`; }
+
+function rememberDeviceFilters() {
+  try { localStorage.setItem(deviceFiltersPreferenceKey(), JSON.stringify({
+    status: appState.selectedStatus, category: appState.selectedCategory,
+  })); } catch (e) {}
+}
+
+function loadDeviceFilters() {
+  appState.selectedStatus = appState.selectedCategory = "";
+  try {
+    const saved = JSON.parse(localStorage.getItem(deviceFiltersPreferenceKey()));
+    if (!saved || typeof saved !== "object") return;
+    if (STATUS_VALUES.has(saved.status)) appState.selectedStatus = saved.status;
+    if (typeof saved.category === "string" && (saved.category === "unknown" ||
+        (saved.category.startsWith("category:") && saved.category.slice(9).trim())))
+      appState.selectedCategory = saved.category;
+  } catch (e) {}
+}
 
 function rememberHome() {
   appState.preferredHome = appState.selectedHome;
@@ -132,6 +190,31 @@ function renderHomeFilter() {
   refresh.disabled = $("refreshBtn").disabled;
   refresh.textContent = refresh.disabled ? "Refreshing…" : "Refresh";
   renderRoomFilter();
+  renderDeviceFilters();
+}
+
+function categoryOptions() {
+  // Keep choices stable when another filter/search or an exclusion hides a row.
+  const codes = new Set(appState.deviceData.map(categoryOf).filter(Boolean));
+  if (appState.selectedCategory.startsWith("category:")) codes.add(appState.selectedCategory.slice(9));
+  const options = [...codes].map(code => ({ value: `category:${code}`, label: categoryLabel(code) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  if (appState.selectedCategory === "unknown" || appState.deviceData.some(d => !categoryOf(d)) ||
+      [...appState.excludedIds].some(id => !appState.deviceData.some(d => d.id === id)))
+    options.push({ value: "unknown", label: "Unknown category" });
+  return [{ value: "", label: "All categories" }, ...options];
+}
+
+function optionMarkup(option) {
+  return `<option value="${esc(option.value)}">${esc(option.label)}</option>`;
+}
+
+function renderDeviceFilters() {
+  $("statusFilter").innerHTML = '<option value="">All statuses</option>' + STATUS_GROUPS.map(group =>
+    `<optgroup label="${esc(group.label)}">${group.options.map(optionMarkup).join("")}</optgroup>`).join("");
+  $("statusFilter").value = appState.selectedStatus;
+  $("categoryFilter").innerHTML = categoryOptions().map(optionMarkup).join("");
+  $("categoryFilter").value = appState.selectedCategory;
 }
 
 function renderRoomFilter() {
@@ -177,7 +260,7 @@ function openFilters() {
   $("filtersPopover").classList.remove("hidden");
   $("filtersBtn").setAttribute("aria-expanded", "true");
   positionFiltersPopover();
-  const target = [$("homeFilter"), $("roomFilter"), $("selectDevicesBtn")].find(control => !control.disabled);
+  const target = [$("homeFilter"), $("roomFilter"), $("statusFilter"), $("categoryFilter"), $("selectDevicesBtn")].find(control => !control.disabled);
   (target || $("filtersClose")).focus();
 }
 
@@ -193,6 +276,7 @@ function resetExclusions() {
   appState.excludedIds = new Set(); appState.bulkSelectedIds.clear(); appState.deviceView = "active";
   appState.selectionMode = false; appState.homes = null; appState.selectedHome = appState.preferredHome = "";
   appState.roomsLoaded = false; appState.selectedRoom = appState.preferredRoom = "";
+  appState.selectedStatus = appState.selectedCategory = "";
   appState.exclusionsLoaded = false; appState.exclusionRevision = -1; appState.accountId = null;
   appState.exclusionBusy = false; appState.exclusionFailure = ""; appState.pendingExclusionSave = null;
 }
@@ -209,6 +293,7 @@ function applyExclusions(body) {
     appState.exclusionBusy = false; appState.pendingExclusionSave = null;
     appState.exclusionRevision = -1; appState.excludedIds = new Set();
     appState.accountId = body.account_id;
+    loadDeviceFilters();
     try { appState.preferredHome = localStorage.getItem(homePreferenceKey()) || ""; } catch (e) { appState.preferredHome = ""; }
     try { appState.preferredRoom = localStorage.getItem(roomPreferenceKey()) || ""; } catch (e) { appState.preferredRoom = ""; }
     appState.selectedHome = ""; appState.homes = null;
@@ -258,9 +343,11 @@ function syncSelectionUi(ids = selectionIds()) {
   $("excludedViewBtn").classList.toggle("hidden", !appState.excludedIds.size && appState.deviceView !== "excluded");
   $("excludedViewBtn").setAttribute("aria-pressed", String(appState.deviceView === "excluded"));
   $("excludedViewBtn").disabled = disabled;
-  const filterCount = appState.excludedIds.size + Number(!!appState.selectedHome) + Number(!!appState.selectedRoom);
+  const filterCount = appState.excludedIds.size + Number(!!appState.selectedHome) + Number(!!appState.selectedRoom) +
+    Number(!!appState.selectedStatus) + Number(!!appState.selectedCategory);
   const filterSummary = [appState.excludedIds.size ? plural(appState.excludedIds.size, "excluded device") : "",
-    appState.selectedHome ? "1 home filter" : "", appState.selectedRoom ? "1 room filter" : ""].filter(Boolean).join(", ");
+    appState.selectedHome ? "1 home filter" : "", appState.selectedRoom ? "1 room filter" : "",
+    appState.selectedStatus ? "1 status filter" : "", appState.selectedCategory ? "1 category filter" : ""].filter(Boolean).join(", ");
   $("filterCount").textContent = filterCount;
   $("filterCount").classList.toggle("hidden", !filterCount);
   $("filtersBtn").dataset.active = String(!!filterCount);
@@ -271,14 +358,17 @@ function syncSelectionUi(ids = selectionIds()) {
   $("backToDevicesBtn").disabled = disabled;
   $("restoreAll").classList.toggle("hidden", appState.deviceView !== "excluded" || !appState.excludedIds.size);
   $("restoreAll").disabled = disabled || !appState.excludedIds.size;
-  $("restoreAll").textContent = appState.selectedHome ? "Restore all (all homes)" : appState.selectedRoom ? "Restore all (all rooms)" : "Restore all";
-  $("restoreAll").title = "Restore every excluded device in this account, across all homes";
+  $("restoreAll").textContent = appState.selectedHome ? "Restore all (all homes)" : appState.selectedRoom ? "Restore all (all rooms)"
+    : appState.selectedStatus || appState.selectedCategory ? "Restore all (all filters)" : "Restore all";
+  $("restoreAll").title = "Restore every excluded device in this account, across all filters";
   $("retryExclusions").disabled = appState.exclusionBusy;
   $("filter").disabled = !appState.exclusionsLoaded;
   $("csvBtn").disabled = !appState.exclusionsLoaded;
   $("scanBtn").disabled = !appState.exclusionsLoaded;
   $("homeFilter").disabled = disabled || homeOptions().length < 2;
   $("roomFilter").disabled = disabled || roomOptions().length < 2;
+  $("statusFilter").disabled = disabled;
+  $("categoryFilter").disabled = disabled || categoryOptions().length < 2;
   syncTableSelection(ids, disabled);
   exclusionError(appState.exclusionFailure);
   positionFiltersPopover();
@@ -368,9 +458,17 @@ function changeRoomFilter(value) {
   render(); $("roomFilter").focus();
 }
 
+function changeDeviceFilter(field, control, value) {
+  abandonFailedExclusionSave(); appState.bulkSelectedIds.clear(); appState.filteredCollapsedGateways.clear();
+  appState[field] = value; rememberDeviceFilters();
+  if (appState.selectedId && !inCurrentView(appState.selectedId)) closePanel();
+  render(); $(control).focus();
+}
+
 function resetDeviceFilters() {
   appState.selectedHome = ""; rememberHome();
   appState.selectedRoom = ""; rememberRoom();
+  appState.selectedStatus = appState.selectedCategory = ""; rememberDeviceFilters();
   appState.filterText = ""; $("filter").value = "";
   appState.deviceView = "active"; appState.selectionMode = false; appState.bulkSelectedIds.clear(); appState.filteredCollapsedGateways.clear();
   if (appState.selectedId && !inCurrentView(appState.selectedId)) closePanel();
@@ -415,6 +513,8 @@ function initFilters(actions = {}) {
   };
   $("homeFilter").onchange = (e) => changeHomeFilter(e.target.value);
   $("roomFilter").onchange = (e) => changeRoomFilter(e.target.value);
+  $("statusFilter").onchange = (e) => changeDeviceFilter("selectedStatus", "statusFilter", e.target.value);
+  $("categoryFilter").onchange = (e) => changeDeviceFilter("selectedCategory", "categoryFilter", e.target.value);
   $("clearAllFilters").onclick = () => {
     if (!appState.exclusionsLoaded || appState.exclusionBusy) return;
     abandonFailedExclusionSave();
@@ -425,6 +525,8 @@ function initFilters(actions = {}) {
   $("filtersClose").innerHTML = icon("close");
   $("homeChevron").innerHTML = icon("chevron");
   $("roomChevron").innerHTML = icon("chevron");
+  $("statusChevron").innerHTML = icon("chevron");
+  $("categoryChevron").innerHTML = icon("chevron");
   $("filtersBtn").onclick = () => {
     if ($("filtersPopover").classList.contains("hidden")) openFilters(); else closeFilters(true);
   };

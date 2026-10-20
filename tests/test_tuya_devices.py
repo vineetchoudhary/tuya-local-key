@@ -808,6 +808,17 @@ def test_removed_devices_keep_prior_home_membership_for_filtered_notices():
     assert previous[0]["home_ids"] == ["home-a", "home-b"]
 
 
+def test_removed_devices_keep_category_and_cloud_status_for_filtered_notices():
+    previous = [{"id": "plug", "name": "Plug", "category": "cz", "online": False,
+                 "local_key": "private-key", "status": {"switch": True}},
+                {"id": "legacy", "name": "Legacy"}]
+
+    assert core.diff_devices(previous, [])["removed"] == [
+        {"id": "legacy", "name": "Legacy"},
+        {"id": "plug", "name": "Plug", "category": "cz", "online": False},
+    ]
+
+
 def test_diff_reports_a_rename_with_the_previous_name():
     changes = core.diff_devices([_dev("a", "Lamp")], [_dev("a", "Bedroom Lamp")])
 
