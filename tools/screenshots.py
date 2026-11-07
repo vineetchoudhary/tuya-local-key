@@ -76,6 +76,7 @@ class Fixture:
     def __init__(self, tmp):
         self.session_file = os.path.join(tmp, "session.json")
         os.environ.update(SESSION_FILE=self.session_file,
+                          CHECK_FOR_UPDATES="true",
                           HASS_OPTIONS_FILE=os.path.join(tmp, "no-options.json"))
         for name in ("AUTH_USERNAME", "AUTH_PASSWORD"):
             os.environ.pop(name, None)

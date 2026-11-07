@@ -9,6 +9,7 @@ IMAGE_NAME="${IMAGE_NAME:-tuya-local-key}"
 CONTAINER_NAME="${CONTAINER_NAME:-tuya-local-key}"
 HOST_PORT="${HOST_PORT:-8000}"
 QR_SCHEME="${QR_SCHEME:-smartlife}"
+CHECK_FOR_UPDATES="${CHECK_FOR_UPDATES:-true}"
 SESSION_VOLUME="${SESSION_VOLUME:-tuya-session}"
 APP_URL="http://localhost:${HOST_PORT}"
 
@@ -17,19 +18,21 @@ AUTH_PASSWORD="${AUTH_PASSWORD:-tuya-local-key}"
 
 usage() {
   cat <<'EOF'
-Usage: ./tests/test.sh [--skip-tests] [--auth]
+Usage: ./tests/test.sh [--skip-tests] [--auth] [--no-update-check]
 
 Run tests, then build and start the local Docker image.
 
 Options:
-  --skip-tests  Skip local dependency installation and tests; build and run Docker directly.
-  --auth        Enable Basic Auth using AUTH_USERNAME and AUTH_PASSWORD.
-  -h, --help    Show this help message.
+  --skip-tests       Skip local dependency installation and tests; build and run Docker directly.
+  --auth             Enable Basic Auth using AUTH_USERNAME and AUTH_PASSWORD.
+  --no-update-check  Disable all update checks in the Docker container.
+  -h, --help         Show this help message.
 
 Examples:
   ./tests/test.sh
   ./tests/test.sh --skip-tests
   ./tests/test.sh --skip-tests --auth
+  ./tests/test.sh --skip-tests --auth --no-update-check
 EOF
 }
 
@@ -46,6 +49,9 @@ for arg in "$@"; do
       AUTH_ENABLED=1
       DOCKER_AUTH_ARGS=(-e "AUTH_USERNAME=${AUTH_USERNAME}" -e "AUTH_PASSWORD=${AUTH_PASSWORD}")
       CURL_AUTH_ARGS=(-u "${AUTH_USERNAME}:${AUTH_PASSWORD}")
+      ;;
+    --no-update-check)
+      CHECK_FOR_UPDATES=false
       ;;
     -h|--help)
       usage
@@ -140,6 +146,7 @@ run docker run -d \
   -p "${HOST_PORT}:8000" \
   -v "${SESSION_VOLUME}:/data" \
   -e "QR_SCHEME=${QR_SCHEME}" \
+  -e "CHECK_FOR_UPDATES=${CHECK_FOR_UPDATES}" \
   ${DOCKER_AUTH_ARGS[@]+"${DOCKER_AUTH_ARGS[@]}"} \
   "$IMAGE_NAME"
 

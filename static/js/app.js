@@ -176,7 +176,7 @@ export function initApp() {
     watchScan: network.watchScan,
   });
   header.initHeader({ goHome });
-  updates.initUpdates({ layoutActions: header.layoutActions });
+  if (config.checkForUpdates !== false) updates.initUpdates({ layoutActions: header.layoutActions });
   // Each eye controls only its own area, without repainting the other one.
   document.addEventListener("click", (e) => {
     const toggle = e.target.closest("[data-key-toggle]");

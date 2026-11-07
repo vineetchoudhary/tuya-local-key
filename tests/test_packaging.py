@@ -26,8 +26,10 @@ def test_home_assistant_metadata_matches_release_image():
     assert config["environment"]["PORT"] == "8000"
     assert config["options"]["QR_SCHEME"] == "smartlife"
     assert config["options"]["DEVICE_CACHE"] == "on"
+    assert config["options"]["CHECK_FOR_UPDATES"] is True
     assert config["schema"]["QR_SCHEME"] == "list(smartlife|tuyaSmart)"
     assert config["schema"]["DEVICE_CACHE"] == "list(on|off)"
+    assert config["schema"]["CHECK_FOR_UPDATES"] == "bool"
     assert config["schema"]["AUTH_USERNAME"] == "str?"
     assert config["schema"]["AUTH_PASSWORD"] == "password?"
     assert config["schema"]["LAN_SUBNET"] == "str?"

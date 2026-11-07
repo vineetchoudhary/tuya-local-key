@@ -70,6 +70,7 @@ def server(tmp_path_factory):
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("SESSION_FILE", str(session))
         mp.setenv("HASS_OPTIONS_FILE", str(tmp / "missing-options.json"))
+        mp.setenv("CHECK_FOR_UPDATES", "true")
         mp.delenv("AUTH_USERNAME", raising=False)
         mp.delenv("AUTH_PASSWORD", raising=False)
         import app
@@ -5406,6 +5407,74 @@ def reset_update_check(page):
             if (key.startsWith('tuya-local-key:update-check:')) localStorage.removeItem(key);
         }
     }""")
+
+
+def seed_cached_update(page):
+    page.evaluate("""([version, latest, url]) => {
+        const key = `tuya-local-key:update-check:v1:${new URL('.', document.baseURI).pathname}`;
+        const value = JSON.stringify({ nextAutomaticAt: Date.now() + 2 * 86400000, result: {
+            available: true, current_version: version, latest_version: latest,
+            update_url: url, installation: 'standalone'
+        }});
+        localStorage.setItem(key, value);
+        window.dispatchEvent(new StorageEvent('storage', { key, newValue: value }));
+    }""", [CURRENT_VERSION, NEXT_VERSION, NEXT_RELEASE_URL])
+
+
+@pytest.mark.parametrize("width", [1440, 320])
+def test_disabled_update_checks_hide_cached_badges_and_make_no_requests(page, running_app, monkeypatch, width):
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.emulate_media(color_scheme="dark" if width == 320 else "light")
+    seed_cached_update(page)
+    monkeypatch.setattr(running_app, "CHECK_FOR_UPDATES", False)
+    calls, errors = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.route("**/api/updates*", lambda route: calls.append(route.request) or route.fulfill(
+        json={"enabled": False, "available": False, "status": "disabled"}))
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#footerCheckUpdates, #updateBadge, #footerUpdateBadge, #updateDialog")).to_have_count(0)
+    expect(page.locator(".footer-version")).to_be_visible()
+    page.locator("#filter").fill("plug")
+    open_panel(page, PLUG.name)
+    page.locator("#panelValuesOpen").click()
+    expect(page.locator("#valuesBody")).to_be_visible()
+    page.keyboard.press("Escape")
+    seed_cached_update(page)
+    page.evaluate("""() => {
+        window.dispatchEvent(new Event('pageshow'));
+        document.dispatchEvent(new Event('visibilitychange'));
+    }""")
+    page.wait_for_load_state("networkidle")
+    assert calls == [] and errors == []
+    expect(page.locator("#updateBadge, #footerUpdateBadge")).to_have_count(0)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+@pytest.mark.parametrize("method", ["manual", "automatic"])
+def test_an_open_tab_stops_checks_when_the_server_disables_updates(page, running_app, monkeypatch, method):
+    if method == "automatic":
+        seed_cached_update(page)
+        expect(page.locator("#updateBadge")).to_be_visible()
+    monkeypatch.setattr(running_app, "CHECK_FOR_UPDATES", False)
+    requests = []
+    page.on("request", lambda request: requests.append(request) if "/api/updates" in request.url else None)
+    if method == "automatic":
+        page.evaluate("Date.now = () => 1900000000000")
+        page.locator("#count").click()
+    else:
+        page.locator("#footerCheckUpdates").click()
+    expect(page.locator("#footerCheckUpdates")).to_be_hidden()
+    expect(page.locator("#updateBadge")).to_be_hidden()
+    expect(page.locator("#footerUpdateBadge")).to_be_hidden()
+    expect(page.locator("#updateDialog")).to_be_hidden()
+    page.evaluate("Date.now = () => 1900000000000")
+    page.locator("#filter").fill("lamp")
+    seed_cached_update(page)
+    page.evaluate("window.dispatchEvent(new Event('pageshow'))")
+    page.wait_for_load_state("networkidle")
+    assert [request.method for request in requests] == ["POST" if method == "manual" else "GET"]
+    expect(page.locator("#updateBadge")).to_be_hidden()
+    expect(page.locator("#footerUpdateBadge")).to_be_hidden()
 
 
 @pytest.mark.parametrize("width,scheme", [(1440, "light"), (1440, "dark"), (1024, "light"),

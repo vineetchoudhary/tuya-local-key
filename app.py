@@ -63,14 +63,17 @@ _OPTS = _options()
 
 def _setting(name, default=""):
     """HA's options.json (if present) wins over the env var."""
-    value = _OPTS.get(name) or _OPTS.get(name.lower())
-    return str(value).strip() if value else os.environ.get(name, default)
+    value = _OPTS.get(name)
+    if value is None or value == "":
+        value = _OPTS.get(name.lower())
+    return str(value).strip() if value is not None and value != "" else os.environ.get(name, default)
 
 
 QR_SCHEME = _setting("QR_SCHEME", "smartlife")
 LAN_SUBNET = _setting("LAN_SUBNET")
 AUTH_USERNAME = _setting("AUTH_USERNAME")
 AUTH_PASSWORD = _setting("AUTH_PASSWORD")
+CHECK_FOR_UPDATES = _setting("CHECK_FOR_UPDATES", "true").strip().lower() not in {"off", "0", "false", "no"}
 
 DEVICE_CACHE_TTL_SECONDS = 3 * 24 * 60 * 60
 
@@ -129,7 +132,7 @@ _lan_job = None
 _lan_lock = threading.Lock()
 # A manual value read and a scan must never compete for a local socket.
 _lan_read_lock = threading.Lock()
-_update_checker = updates.UpdateChecker(UPDATE_CACHE_FILE)
+_update_checker = updates.UpdateChecker(UPDATE_CACHE_FILE) if CHECK_FOR_UPDATES else None
 
 
 def _cleanup_pending(now=None):
@@ -255,7 +258,8 @@ def index():
     version = support_report.app_version()
     release_version = re.sub(r"^(\d+\.\d+)\.0$", r"\1", version)
     return render_template("index.html", gateway_categories=sorted(lan_scan.GATEWAY_CATEGORIES),
-                           app_version=version, app_release_tag="v" + release_version)
+                           app_version=version, app_release_tag="v" + release_version,
+                           check_for_updates=CHECK_FOR_UPDATES)
 
 
 @app.get("/icon.png")
@@ -274,6 +278,8 @@ def check_updates_manually():
 
 
 def _update_status(manual):
+    if not CHECK_FOR_UPDATES:
+        return jsonify({"enabled": False, "available": False, "status": "disabled"})
     token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASSIO_TOKEN")
     home_assistant = bool(token or request.headers.get("X-Ingress-Path"))
     return jsonify(_update_checker.status(support_report.app_version(), home_assistant=home_assistant,

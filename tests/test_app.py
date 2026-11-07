@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture()
 def webapp(tmp_path, monkeypatch):
     monkeypatch.setenv("SESSION_FILE", str(tmp_path / "session.json"))
+    monkeypatch.setenv("CHECK_FOR_UPDATES", "true")
     import app
 
     app = importlib.reload(app)
@@ -90,6 +91,68 @@ def test_manual_update_endpoint_explicitly_bypasses_the_daily_cooldown(webapp, m
     response = webapp.app.test_client().post("/api/updates/check")
     assert response.status_code == 200 and response.headers["Cache-Control"] == "no-store"
     assert calls[0]["manual"] is True
+
+
+def test_update_checks_are_enabled_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("CHECK_FOR_UPDATES", raising=False)
+    module = _reload_app(monkeypatch, tmp_path)
+    assert module.CHECK_FOR_UPDATES is True
+    response = module.app.test_client().get("/")
+    assert json.loads(_FrontendDocument(response.text).config)["checkForUpdates"] is True
+    assert 'id="footerCheckUpdates"' in response.text
+
+
+@pytest.mark.parametrize("value,enabled", [
+    ("false", False), ("OFF", False), ("0", False), ("no", False), (" FaLsE ", False),
+    ("true", True), ("on", True), ("1", True), ("yes", True), ("", True),
+])
+def test_update_check_environment_setting(tmp_path, monkeypatch, value, enabled):
+    module = _reload_app(monkeypatch, tmp_path, CHECK_FOR_UPDATES=value)
+    assert module.CHECK_FOR_UPDATES is enabled
+
+
+@pytest.mark.parametrize("key,value,environment,enabled", [
+    ("CHECK_FOR_UPDATES", False, "true", False),
+    ("CHECK_FOR_UPDATES", True, "false", True),
+    ("check_for_updates", False, "true", False),
+    ("check_for_updates", True, "false", True),
+])
+def test_home_assistant_update_toggle_overrides_the_environment(tmp_path, monkeypatch, key, value, environment, enabled):
+    options = tmp_path / "options.json"
+    options.write_text(json.dumps({key: value}))
+    module = _reload_app(monkeypatch, tmp_path, CHECK_FOR_UPDATES=environment, HASS_OPTIONS_FILE=str(options))
+    assert module.CHECK_FOR_UPDATES is enabled
+
+
+@pytest.mark.parametrize("authentication", [False, True])
+def test_disabled_updates_skip_the_checker_and_block_both_routes(tmp_path, monkeypatch, authentication):
+    import updates
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Disabled update checks must not create a checker or contact a service")
+
+    monkeypatch.setattr(updates, "UpdateChecker", forbidden)
+    monkeypatch.setattr(updates, "_get_json", forbidden)
+    options = {"CHECK_FOR_UPDATES": "false", "SUPERVISOR_TOKEN": "private-supervisor-token"}
+    if authentication:
+        options.update(AUTH_USERNAME="admin", AUTH_PASSWORD="secret")
+    module = _reload_app(monkeypatch, tmp_path, **options)
+    client = module.app.test_client()
+    auth = ("admin", "secret") if authentication else None
+    for method, path in ((client.get, "/api/updates"), (client.post, "/api/updates/check")):
+        if authentication:
+            assert method(path).status_code == 401
+        response = method(path, auth=auth)
+        assert response.status_code == 200
+        assert response.json == {"enabled": False, "available": False, "status": "disabled"}
+        assert response.headers["Cache-Control"] == "no-store"
+    response = client.get("/", auth=auth)
+    assert response.status_code == 200
+    assert json.loads(_FrontendDocument(response.text).config)["checkForUpdates"] is False
+    for control in ("updateBadge", "footerCheckUpdates", "footerUpdateBadge", "updateDialog"):
+        assert f'id="{control}"' not in response.text
+    assert 'class="footer-version"' in response.text
+    assert not (tmp_path / "update-check.json").exists()
 
 
 def test_app_icon_serves_home_assistant_icon(webapp):
@@ -182,7 +245,7 @@ def test_frontend_configuration_is_serialized_as_inert_json(webapp, monkeypatch)
     monkeypatch.setattr(webapp.lan_scan, "GATEWAY_CATEGORIES", categories)
     response = webapp.app.test_client().get("/")
     document = _FrontendDocument(response.text)
-    assert json.loads(document.config) == {"gatewayCategories": sorted(categories)}
+    assert json.loads(document.config) == {"gatewayCategories": sorted(categories), "checkForUpdates": True}
     assert not document.inline_code
     assert "gateway</script>" not in response.text
 
@@ -237,6 +300,7 @@ def _reload_app(monkeypatch, tmp_path, **env):
     monkeypatch.setenv("HASS_OPTIONS_FILE", str(tmp_path / "missing.json"))
     monkeypatch.delenv("AUTH_USERNAME", raising=False)
     monkeypatch.delenv("AUTH_PASSWORD", raising=False)
+    monkeypatch.delenv("CHECK_FOR_UPDATES", raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     import app

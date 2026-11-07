@@ -4,7 +4,7 @@ import { $ } from "../shared/dom.js";
 
 const INTERVAL = 24 * 60 * 60 * 1000;
 const STORAGE_KEY = `tuya-local-key:update-check:v1:${new URL(".", document.baseURI).pathname}`;
-let layoutActions, pending = false, state = { nextAutomaticAt: 0, result: null };
+let layoutActions, pending = false, stopped = false, state = { nextAutomaticAt: 0, result: null };
 
 function updateLink(value) {
   try {
@@ -45,6 +45,7 @@ function saveState() {
 }
 
 function renderUpdates() {
+  if (stopped) return;
   const body = state.result || {}, url = body.available === true && updateLink(body.update_url);
   const wasAvailable = !$("updateBadge").classList.contains("hidden");
   for (const id of ["updateBadge", "footerUpdateBadge"]) {
@@ -65,6 +66,14 @@ function renderUpdates() {
   check.setAttribute("aria-busy", String(pending));
   check.textContent = pending ? "Checking…" : "Check for updates";
   if (wasAvailable !== !!url) layoutActions();
+}
+
+function stopUpdates() {
+  stopped = true;
+  const wasAvailable = !$("updateBadge").classList.contains("hidden");
+  for (const id of ["updateBadge", "footerUpdateBadge", "footerCheckUpdates"]) $(id).classList.add("hidden");
+  if ($("updateDialog").open) $("updateDialog").close();
+  if (wasAvailable) layoutActions();
 }
 
 function showUpdateResult(body, valid) {
@@ -93,7 +102,7 @@ function showUpdateResult(body, valid) {
 }
 
 async function checkUpdates(manual = false) {
-  if (pending || document.hidden) return;
+  if (stopped || pending || document.hidden) return;
   if (readState()) renderUpdates();
   if (!manual && Date.now() < state.nextAutomaticAt) return;
   pending = true;
@@ -104,6 +113,7 @@ async function checkUpdates(manual = false) {
   const response = await api(manual ? "/api/updates/check" : "/api/updates", manual ? { method: "POST" } : undefined);
   pending = false;
   const body = response.body && typeof response.body === "object" ? response.body : {};
+  if (response.ok && body.enabled === false) { stopUpdates(); return; }
   const valid = response.ok && typeof body.available === "boolean" && typeof body.current_version === "string";
   if (valid) state.result = body;
   saveState();
@@ -122,6 +132,7 @@ function initUpdates(actions) {
     if (e.target === $("updateDialog")) $("updateDialog").close();
   });
   $("updateDialog").addEventListener("close", () => {
+    if (stopped) return;
     ($("footerCheckUpdates").classList.contains("hidden") ? $("footerUpdateBadge") : $("footerCheckUpdates")).focus({ preventScroll: true });
   });
   const activity = e => {
@@ -131,7 +142,7 @@ function initUpdates(actions) {
   for (const event of ["click", "keydown", "input", "change"]) document.addEventListener(event, activity, { passive: true });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdates(); });
   window.addEventListener("pageshow", () => checkUpdates());
-  window.addEventListener("storage", e => { if (e.key === STORAGE_KEY) { readState(); renderUpdates(); } });
+  window.addEventListener("storage", e => { if (!stopped && e.key === STORAGE_KEY) { readState(); renderUpdates(); } });
   checkUpdates();
 }
 

@@ -1,4 +1,7 @@
 configuration:
+  CHECK_FOR_UPDATES:
+    name: Check for updates
+    description: Enable update checks and notifications.
   QR_SCHEME:
     name: QR scheme
     description: >-

@@ -21,6 +21,7 @@ Set these options on the app's Configuration page:
 |---|---|---|
 | `QR_SCHEME` | `smartlife` | Use `tuyaSmart` if QR login fails. |
 | `DEVICE_CACHE` | `on` | Keep devices across restarts. Set to `off` to keep the list in memory only. |
+| `CHECK_FOR_UPDATES` | `on` | Turn off **Check for updates** to disable all update checks and notifications. |
 | `LAN_SUBNET` | _(unset)_ | Prefill Scan network with your IoT subnet. Separate multiple subnets with commas. |
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | _(unset)_ | Optional login for direct port access. Set both. |
 

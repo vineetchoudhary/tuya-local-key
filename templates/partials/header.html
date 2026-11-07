@@ -4,12 +4,12 @@
       <img class="app-icon" src="icon.png" alt="" aria-hidden="true">
       <h1>Tuya Local Key</h1>
     </a>
-    <div class="header-meta">
+    {% if check_for_updates %}<div class="header-meta">
       <a id="updateBadge" class="update-badge hidden" target="_blank" rel="noopener noreferrer">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12V4m-3 3 3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span class="update-label-full">Update available</span><span class="update-label-short">Update</span>
       </a>
-    </div>
+    </div>{% endif %}
   </div>
   <div class="header-actions hidden" id="headerActions">
     <button id="csvBtn">Export CSV</button>

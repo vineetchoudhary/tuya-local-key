@@ -26,10 +26,10 @@
   {% include "partials/devices.html" %}
 </main>
 {% include "partials/footer.html" %}
-{% include "partials/updates.html" %}
+{% if check_for_updates %}{% include "partials/updates.html" %}{% endif %}
 {% include "partials/logout.html" %}
 {% include "partials/panel.html" %}
-<script id="app-config" type="application/json">{{ {"gatewayCategories": gateway_categories} | tojson }}</script>
+<script id="app-config" type="application/json">{{ {"gatewayCategories": gateway_categories, "checkForUpdates": check_for_updates} | tojson }}</script>
 <script type="module" src="static/js/app.js"></script>
 </body>
 </html>

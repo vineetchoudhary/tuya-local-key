@@ -5,11 +5,11 @@
       <span class="footer-release">
         <a class="footer-version" data-app-version="{{ app_version }}" href="https://github.com/vineetchoudhary/tuya-local-key/releases/tag/{{ app_release_tag }}"
            target="_blank" rel="noopener noreferrer" aria-label="Release notes for version {{ app_version }} (opens in a new tab)">v{{ app_version }}</a>
-        <button id="footerCheckUpdates" class="footer-check-updates" type="button">Check for updates</button>
+        {% if check_for_updates %}<button id="footerCheckUpdates" class="footer-check-updates" type="button">Check for updates</button>
         <a id="footerUpdateBadge" class="update-badge hidden" target="_blank" rel="noopener noreferrer">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12V4m-3 3 3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Update available</span>
-        </a>
+        </a>{% endif %}
       </span>
     </div>
     <nav class="footer-links" aria-label="Project links">
