@@ -1,22 +1,24 @@
-<!-- DEVICE DETAILS -->
+<!-- DEVICE PANEL -->
 <div id="scrim" class="scrim"></div>
 <aside id="panel" class="panel" role="dialog" aria-labelledby="panelTitle" aria-hidden="true" tabindex="-1">
   <div class="panel-head">
-    <div class="grow">
+    <div class="panel-toolbar">
+      <span id="panelContext" class="panel-context">Device</span>
       <div id="panelNav" class="panel-nav hidden">
-        <button id="panelBack" class="panel-back" type="button" aria-controls="panelBody"></button>
+        <button id="panelBack" class="panel-back" type="button" aria-controls="menuBody"></button>
       </div>
+      <button id="panelClose" class="icon-btn" type="button" aria-label="Close panel" title="Close panel"></button>
+    </div>
+    <div class="panel-heading">
       <h2 id="panelTitle" class="panel-title"></h2>
       <p id="panelSub" class="panel-sub"></p>
     </div>
-    <button id="panelClose" class="icon-btn" type="button" aria-label="Close panel" title="Close panel"></button>
   </div>
-  <div id="panelSetupEntry" class="panel-setup-entry">
-    <button id="panelSetupOpen" class="panel-setup-open" type="button" aria-controls="setupBody"></button>
-    <button id="panelNetworkOpen" class="panel-setup-open" type="button" aria-controls="networkBody"></button>
-  </div>
-  <div id="panelBody" class="panel-body" tabindex="-1"></div>
+  <div id="menuBody" class="panel-body menu-body" tabindex="-1"></div>
+  <div id="panelBody" class="panel-body information-body hidden" tabindex="-1"></div>
+  <div id="rawBody" class="panel-body raw-body hidden" tabindex="-1"></div>
   <div id="setupBody" class="panel-body setup-body hidden" tabindex="-1"></div>
   <div id="networkBody" class="panel-body network-body hidden" tabindex="-1"></div>
   <div id="fixBody" class="panel-body fix-body hidden" tabindex="-1"></div>
+  <div id="valuesBody" class="panel-body values-body hidden" tabindex="-1"></div>
 </aside>

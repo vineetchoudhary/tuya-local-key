@@ -6,7 +6,7 @@ The web UI uses Flask/Jinja, CSS, and native JavaScript modules. It runs directl
 
 `templates/index.html` is the document shell. The files in `templates/partials/` contain the header, login/QR/loading screens, device list, scan form, device panel, and logout dialog. Data-dependent markup stays in the JavaScript renderer for its feature.
 
-Styles live in `static/css/`. Load them in the order listed in the main template: base, header, auth, devices, panel, setup, network, troubleshoot, then utilities. Base styles define the light/dark theme and shared controls. Utilities load last so `.hidden` keeps its precedence. Keep fixed styles in CSS classes. Only calculated popover coordinates are set from JavaScript.
+Styles live in `static/css/`. Load them in the order listed in the main template: base, header, auth, devices, panel, setup, network, troubleshoot, values, then utilities. Base styles define the light/dark theme and shared controls. Utilities load last so `.hidden` keeps its precedence. Keep fixed styles in CSS classes. Only calculated popover coordinates are set from JavaScript.
 
 ## JavaScript ownership
 
@@ -20,10 +20,12 @@ Styles live in `static/css/`. Load them in the order listed in the main template
 | `filters.js` | Home filters, saved exclusions, selection state, and exclusion/restoration requests |
 | `notices.js` | Cloud and LAN change notices, scan summaries, and dismissal preferences |
 | `panel.js` | Panel navigation, history, focus, scroll, and disclosure state |
-| `details.js` | Device fields, data points, and masked raw JSON |
+| `device-menu.js` | The device options list and its five page entries |
+| `details.js` | Device fields, shared data point definitions, and masked raw JSON |
 | `setup.js` | Integration tabs, setup values, snippets, and inline guidance |
 | `network.js` | LAN results, scan/check requests, scan polling, and the Local network page |
 | `troubleshoot.js` | The Fix connection wizard, recovery guidance, and inline scan forms using the network controller |
+| `values.js` | Manual local status reads, temporary readings, and the cloud/local value comparison |
 | `header.js` | App name/logo home action, responsive action placement, and the More actions menu |
 
 Cross-feature data lives in `shared/state.js` as `appState`. Features keep their timers and private caches in their own modules. Modules in `shared/` provide the API helper, device/gateway/connection derivations, constants, HTML/field renderers, formatting, icons, and clipboard support.
@@ -31,6 +33,8 @@ Cross-feature data lives in `shared/state.js` as `appState`. Features keep their
 Feature controllers import shared modules directly. Actions from other controllers are passed to their `init…` function by `app.js`, avoiding circular feature imports. Importing a feature or shared module does not bind DOM events or start requests. The application entrypoint starts the UI. The table routes selection interactions to the filters controller, which updates selection state and asks the table to synchronize checkboxes and row classes.
 
 To add a panel page, provide its renderer and register its body element, title, back label, and optional initial focus selector with `registerPanelPage` in `app.js`. Existing panel navigation and Back handling then apply to it. A page with internal steps can provide `back` and `stepBackLabel` callbacks so the same Back button and Escape key return through those steps before leaving the page.
+
+The initial panel page is `menu`, rendered in `menuBody`. Its buttons use `data-panel-page` and the panel's delegated click handler. Device information (`panelBody`) and raw JSON (`rawBody`) are independent pages alongside setup, network, troubleshooting and current values. Saved data points and their definitions are part of Current values (`valuesBody`). The header keeps the page title and device identity separate. Inactive page bodies are cleared, so the menu contains no hidden copies of device fields or local keys.
 
 ## URLs and configuration
 

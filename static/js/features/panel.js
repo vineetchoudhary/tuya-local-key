@@ -43,7 +43,7 @@ function panelFocusSelector(el) {
   const body = $(PANEL_PAGES[appState.panelView].body);
   if (!body.contains(el)) return null;
   // Stable control attributes avoid storing copy values, which can be keys.
-  for (const attr of ["data-setup-action", "data-network-action", "data-fix-action", "data-setup-tool", "data-open-device", "data-localtuya-edition", "data-key-toggle"]) {
+  for (const attr of ["data-setup-action", "data-network-action", "data-fix-action", "data-values-action", "data-setup-tool", "data-open-device", "data-localtuya-edition", "data-key-toggle"]) {
     if (el.hasAttribute(attr)) return `#${body.id} [${attr}="${CSS.escape(el.getAttribute(attr))}"]`;
   }
   return panelNodeSelector(el, body);
@@ -103,7 +103,7 @@ function focusPanelPage(selector) {
 }
 
 // Table and notice links start a new panel visit. Links inside it use navigatePanel.
-function openPanel(id, view = "details") {
+function openPanel(id, view = "menu") {
   if (!PANEL_PAGES[view] || !appState.deviceData.some(d => d.id === id)) return;
   const row = appState.panelOpener && appState.panelOpener.closest("#rows tr[data-id]");
   appState.panelOpenerSelector = row ? `#${CSS.escape(row.id)} [data-open]`
@@ -115,7 +115,7 @@ function openPanel(id, view = "details") {
   if (!renderPanel(false)) return;
   document.body.classList.add("panel-open");
   $("panel").setAttribute("aria-hidden", "false");
-  $("panel").focus();
+  if (view === "menu") focusPanelPage(); else $("panel").focus();
   markSelectedRow();
 }
 
@@ -128,8 +128,6 @@ function navigatePanel(id, view, opener = document.activeElement) {
   if (!renderPanel(false)) return;
   focusPanelPage(); markSelectedRow();
 }
-
-function openSetup() { if (appState.selectedId) navigatePanel(appState.selectedId, "setup", $("panelSetupOpen")); }
 
 function openNetwork(opener = document.activeElement) { if (appState.selectedId) navigatePanel(appState.selectedId, "network", opener); }
 
@@ -152,7 +150,7 @@ function backPanel() {
 
 function closePanel() {
   if (!appState.selectedId) return;
-  appState.selectedId = null; appState.panelPage = null; appState.panelView = "details";
+  appState.selectedId = null; appState.panelPage = null; appState.panelView = "menu";
   appState.panelKeyVisible = false;
   appState.panelHistory = []; panelPageCache.clear();
   delete $("panel").dataset.deviceId; delete $("panel").dataset.view;
@@ -181,26 +179,25 @@ function renderPanel(capture = true) {
   const active = document.activeElement;
   const focus = capture && body.contains(active) ? panelFocusSelector(active) : null;
   if (capture) capturePanelPage();
-  const state = appState.panelPage.state, actionView = appState.panelView !== "details";
+  const state = appState.panelPage.state, actionView = appState.panelView !== "menu";
   $("panel").dataset.deviceId = d.id;
   $("panel").dataset.view = appState.panelView;
   $("panelTitle").textContent = page.title(d);
   $("panelTitle").classList.toggle("setup-title", actionView);
-  $("panelTitle").title = actionView ? $("panelTitle").textContent : "";
-  $("panelSub").classList.toggle("hidden", actionView);
-  $("panelSub").innerHTML = actionView ? ""
+  $("panelTitle").title = $("panelTitle").textContent;
+  $("panelSub").innerHTML = actionView ? esc(d.name || d.id)
     : [statusBadge(d), esc(d.product_name), esc(d.category)]
       .filter(part => part && part !== "-").join("<span>·</span>");
   const previous = appState.panelHistory[appState.panelHistory.length - 1];
   const stepBack = page.stepBackLabel && page.stepBackLabel();
+  $("panelContext").classList.toggle("hidden", !!previous || !!stepBack);
   $("panelNav").classList.toggle("hidden", !previous && !stepBack);
   $("panelBack").innerHTML = `${icon("chevron")}${esc(stepBack || (previous ? PANEL_PAGES[previous.view].backLabel || "Back" : "Back"))}`;
   $("panelBack").setAttribute("aria-controls", stepBack ? page.body : previous ? PANEL_PAGES[previous.view].body : "panelBody");
-  $("panelSetupEntry").classList.toggle("hidden", actionView);
   for (const [view, definition] of Object.entries(PANEL_PAGES)) {
     const content = $(definition.body);
     content.classList.toggle("hidden", view !== appState.panelView);
-    const excludedNote = appState.excludedIds.has(d.id) ? `<div class="excluded-panel-note" data-excluded-note>` +
+    const excludedNote = view !== "menu" && appState.excludedIds.has(d.id) ? `<div class="excluded-panel-note" data-excluded-note>` +
       `<span class="badge muted">Excluded</span> Hidden from the main device list. ` +
       `<button type="button" class="link-btn" data-restore-device="${esc(d.id)}"${appState.exclusionBusy ? " disabled" : ""}>Restore device</button></div>` : "";
     content.innerHTML = view === appState.panelView ? excludedNote + page.render(d) : "";
@@ -241,6 +238,8 @@ function initPanel(actions = {}) {
   ({ loadDevices, repaintSetup, saveExclusions, showScanBox } = actions);
   // Device links stay in the current view, including a gateway's setup view.
   $("panel").addEventListener("click", (e) => {
+    const entry = e.target.closest("[data-panel-page]");
+    if (entry) { navigatePanel(appState.selectedId, entry.dataset.panelPage, entry); return; }
     const restore = e.target.closest("[data-restore-device]");
     if (restore) { saveExclusions([], [restore.dataset.restoreDevice]); return; }
     const tab = e.target.closest("[data-setup-tool]");
@@ -262,10 +261,6 @@ function initPanel(actions = {}) {
   });
   $("panelClose").innerHTML = icon("close");
   $("panelClose").onclick = closePanel;
-  $("panelSetupOpen").innerHTML = `Set up in…${icon("chevron")}`;
-  $("panelSetupOpen").onclick = openSetup;
-  $("panelNetworkOpen").innerHTML = `Local network${icon("chevron")}`;
-  $("panelNetworkOpen").onclick = () => openNetwork($("panelNetworkOpen"));
   $("panelBack").onclick = backPanel;
   $("scrim").onclick = closePanel;
 }

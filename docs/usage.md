@@ -66,19 +66,21 @@ Exclusion changes visibility in this app. Tuya still returns the complete accoun
 
 ## Device Details
 
-Selecting a device row opens a side panel with everything the device-sharing SDK reports for it:
+Selecting a device row opens a side panel with a list of options. The first screen contains navigation only. Choose an option to view or work with that device:
 
-| Section | Contents |
+| Option | Contents |
 |---|---|
-| Identity | Name, device ID, UUID, local key, category, product ID and name, model, icon path. |
-| Connectivity | Cloud online status, the IP address Tuya reports (your WAN address, not the device's), local-control support, sub-device flag, node and gateway ids, time zone, coordinates. |
-| Local network | What the last [network scan](network-scanning.md) found: local IP, protocol version, status, and when it was checked, with a Check button for this one device. |
-| Account | User, owner, and asset ids. |
-| Timeline | First paired, last paired, and status-updated times in your local timezone, with the UTC reading and the raw epoch below each one. |
-| Data points | Every data point: local dp id, code, current value, type, read/write access, and value range. |
-| Raw JSON | The complete device record, with a copy button. |
+| Set up in… | Copyable connection settings for tuya-local, localtuya and tinytuya. |
+| Local network | Saved IP, protocol and connection results, with rechecking and troubleshooting when needed. |
+| Current values | Saved data points, local IDs and definitions, plus manual LAN readings beside the cloud snapshot. |
+| Device information | Identity, keys, connectivity, account, timeline, and additional fields reported by Tuya. |
+| Raw JSON | The complete saved device record, with key visibility and a copy button. |
 
-Fields Tuya returns that are not listed above appear under "Other fields", so nothing is hidden. The dp id shown next to each data point code is the mapping local integrations such as localtuya and tuya-local need.
+The panel keeps the device name visible on every page. Use **Back** or Escape to return to the previous page, then back to the options list. Each page keeps its scroll position and any input draft during that visit. Closing and reopening a device starts at the options list with local keys hidden. Excluded devices offer **Restore device** in the options list.
+
+**Device information** groups the SDK fields into Identity, Connectivity, Account, Timeline, and Other fields. Identity includes the device ID, UUID, local key, product ID/name, model and icon path. Connectivity includes cloud status, the cloud-reported WAN IP, local-control support, sub-device and gateway IDs, time zone and coordinates. Account includes user, owner and asset IDs. Timeline includes paired and updated times in your local timezone, with UTC and raw epochs below. Extra SDK fields remain available under Other fields.
+
+The DP IDs in **Current values** are the mappings local integrations such as localtuya and tuya-local need. Expand **Value definitions** on that page for types, read/write access, units, ranges and other supplied definitions. Saved values remain available before a local read, and a device without saved data points shows an empty-state explanation. **Raw JSON** opens on its own page.
 
 The device table shows the columns you scan most. UUID, category, IP address, and the last-paired time live in the panel. CSV export and `--json` still include every field.
 
@@ -86,15 +88,29 @@ Timestamps in the web UI use your browser's timezone, so the same list reads dif
 
 ### Set up a local integration
 
-Choose **Set up in…** at the top of a device's details panel to open a separate setup view for tuya-local, localtuya and tinytuya.
+Choose **Set up in…** from the device's options list to open the setup view for tuya-local, localtuya and tinytuya.
 
 The separate **Local network** view shows connection problems and the last local result. When the connection details are complete and no failure needs attention, it shows **Recheck connection** instead of an IP form, repair button, or scan button. **Connection checked** means the device answered with the current local key; **Gateway checked** applies only to a sub-device's gateway. The gateway's report of the sub-device is shown separately. Protocol 3.1 status replies do not verify the key, so they show **Device found**. Older saved scans and results from before a key change need another check.
 
 When details are missing or a connection fails, choose **Fix connection** for a [guided connection check](network-scanning.md#fix-connection). It walks through the saved details, an IP check or network scan, and suggested recovery steps. Each screen offers the relevant next action. Use the panel's **Back** button or Escape to return through the steps.
 
+### Read Current Values
+
+Open a device's options and choose **Current values**, then **Read from device**. Opening the view starts no read. The button requests status over the local network using the saved IP, protocol, and local key, then closes the connection. The read leaves device settings and Tuya's saved cloud data unchanged.
+
+The view keeps **Cloud (saved)** and **Local (device reply)** in separate columns, with a timestamp for each source. These are snapshots taken at different times. The cloud timestamp describes when the app fetched the snapshot, not when the device originally measured a value. Choose **Read again** for another local snapshot. Values returned only over LAN appear by their data point ID, and cloud fields without a local mapping remain visible without an invented local value.
+
+Names and value definitions come from the saved Tuya details. **Value definitions** includes data types, read/write access, ranges, units, scaling and reporting details when supplied. Numeric units and scaling are applied only when an explicitly raw mapping supplies them. The original raw value remains visible and copyable. Other readings keep their raw representation.
+
+If the IP or protocol is missing, use **Open Local network** to find them first. Sub-devices require an identified gateway and a Node ID. The read requests that child's data points through the gateway, and never substitutes the gateway's own values or its online report. A device or gateway that does not return data points shows an explanation instead of cloud values labelled as local.
+
+Reads are manual and use short socket timeouts. A scan and a read cannot run together, and no continuous polling is started. A connection failure explains that another local client may be connected or the device's IP may have changed. A failed retry keeps the previous reading and its timestamp, clearly labelled as the previous result.
+
+Local readings are temporary browser state. They are not added to the encrypted caches, CSV export, or cloud device record. Refreshing the device list, reloading the page, or logging out clears the displayed reading. An in-flight reply is discarded if its account or connection details have changed.
+
 ## Bluetooth Devices
 
-Bluetooth-only devices have no local key to display. This is not a bug in this tool. Tuya's device-sharing API does not return a `local_key` for them. The SDK builds each device record straight from Tuya's response, so a field Tuya omits is simply absent. You can confirm this in the Raw JSON section of the details panel, where the `local_key` line is missing entirely rather than empty.
+Bluetooth-only devices have no local key to display. This is not a bug in this tool. Tuya's device-sharing API does not return a `local_key` for them. The SDK builds each device record straight from Tuya's response, so a field Tuya omits is simply absent. You can confirm this on the **Raw JSON** page, where the `local_key` line is missing entirely rather than empty.
 
 Tuya documents `local_key` as the ["unique encrypted key of the specified device over LAN"](https://developer.tuya.com/en/docs/cloud/9f0ad495f5?id=Kfpa9zysx687w). A Bluetooth-only device has no LAN presence, and Tuya's [Bluetooth pairing docs](https://developer.tuya.com/en/docs/app-development/activator_ble_ios?id=Kcy2u7zj5hwkf) describe the connection as point-to-point between phone and device, so the app-side API this tool logs into has no LAN key to hand out.
 

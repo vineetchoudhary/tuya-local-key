@@ -21,7 +21,7 @@ import {
 import { appState } from "../shared/state.js";
 
 // Cross-feature actions are connected by app.js.
-let exclusionError, indexChanges, indexDevices, loadDevices, render, renderPanel;
+let exclusionError, indexChanges, indexDevices, loadDevices, render, renderPanel, resetValues;
 
 let lanPollTimer = null;
 
@@ -59,7 +59,7 @@ function lanSection(d, summaryOnly = false) {
   const keyless = !sub && !d.local_key && !gateway;
   // Unless sub-devices name it in gateway_id, nothing says which keys are its.
   const unnamed = unnamedGateway(d);
-  const running = !!((appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending"));
+  const running = !!(appState.localReadPending || (appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending"));
   let html = "";
   if (lanStatus(display)) {
     const keys = ["lan_status", "local_ip", "protocol_version", "lan_checked_at"]
@@ -119,7 +119,7 @@ function lanSection(d, summaryOnly = false) {
 }
 
 function lanCheckForm(d, ip, gateway = false) {
-  const running = !!((appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending"));
+  const running = !!(appState.localReadPending || (appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending"));
   const note = appState.panelCheck && appState.panelCheck.id === d.id ? appState.panelCheck : null;
   let html = `<label class="network-check-label" for="networkCheckIP">${gateway ? "Enter gateway IP address" : "Enter local IP address"}</label>` +
     `<form class="lan-check" data-lan-check="${esc(d.id)}">` +
@@ -145,7 +145,7 @@ function networkSection(d) {
     child = `<div class="network-child-status" data-network-check="sub_device" data-state="${n.childOnline === false ? "attention" : "pending"}">` +
       `<p>${label}</p><span class="muted">${detail}</span></div>`;
   }
-  const busy = (appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending");
+  const busy = appState.localReadPending || (appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending");
   const complete = n.s.key && n.s.host && n.s.version && n.target && n.tone !== "attention" &&
     ["ok", "via_gateway"].includes(n.r.status) && n.childOnline !== false;
   const refresh = !n.s.key || n.r.status === "key_mismatch" || (n.s.sub && !n.target);
@@ -154,7 +154,7 @@ function networkSection(d) {
     `data-state="${state}" data-tone="${n.tone}" role="status"><span class="network-symbol">${icon(symbol)}</span>` +
     `<div><h3>${esc(n.title)}</h3><p>${esc(n.note)}</p></div></div>` +
     `${child}${lanSection(d, complete)}<div class="network-actions">` +
-    (complete ? `<button type="button" data-network-action="recheck"${busy || refreshing ? " disabled" : ""}>${busy ? "Checking…" : "Recheck connection"}</button>`
+    (complete ? `<button type="button" data-network-action="recheck"${busy || refreshing ? " disabled" : ""}>${appState.localReadPending ? "Reading values…" : busy ? "Checking…" : "Recheck connection"}</button>`
       : `<button type="button" class="primary" data-network-action="fix">Fix connection</button>` +
         `<button type="button" data-network-action="scan"${busy ? " disabled" : ""}>Scan network</button>` +
         (refresh ? `<button type="button" data-network-action="refresh"${refreshing ? " disabled" : ""}>${refreshing ? "Refreshing…" : "Refresh devices"}</button>` : "")) +
@@ -164,6 +164,7 @@ function networkSection(d) {
 // ---- scan network ----
 function resetLan() {
   stopScanWatch();
+  if (resetValues) resetValues();
   appState.lanData = { results: {}, summary: null, changes: null, changes_at: null, targets: "", job: null };
   appState.panelCheck = null;
   $("scanTargets").value = "";
@@ -309,6 +310,7 @@ function checkMessage(job) {
 }
 
 function scanFailure(body) {
+  if (body.error === "read_running") return "A device read is running. Wait for it to finish, then try again.";
   if (body.error === "bad_targets") return body.message || "Check the addresses and try again.";
   if (body.error === "scan_running") return "A scan is already running.";
   if (body.error === "no_devices") return "Load the device list first.";
@@ -319,6 +321,7 @@ function scanFailure(body) {
 }
 
 async function startScan(payload) {
+  if (appState.localReadPending) return { ok: false, body: { error: "read_running" } };
   const session = appState.accountGeneration, expectedAccount = appState.accountId;
   const { ok, body } = await api("/api/lan/scan", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -333,6 +336,7 @@ async function startScan(payload) {
 }
 
 async function checkDevice(id, ip) {
+  if (appState.localReadPending) return { ok: false, body: { error: "read_running" } };
   if ((appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending")) {
     return { ok: false, body: { error: "scan_running" } };
   }
@@ -395,7 +399,7 @@ let initialized = false;
 function initNetwork(actions = {}) {
   if (initialized) return;
   initialized = true;
-  ({ exclusionError, indexChanges, indexDevices, loadDevices, render, renderPanel } = actions);
+  ({ exclusionError, indexChanges, indexDevices, loadDevices, render, renderPanel, resetValues } = actions);
   $("scanBtn").onclick = () => showScanBox($("scanBox").classList.contains("hidden"));
   $("scanClose").onclick = () => showScanBox(false);
   $("scanForm").addEventListener("submit", async (e) => {

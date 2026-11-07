@@ -1,7 +1,7 @@
 // Details.
 import { DETAIL_SECTIONS, LAN_KEYS, SPEC_KEYS } from "../shared/constants.js";
-import { copyable, dash, fieldList, section } from "../shared/fields.js";
-import { esc, keyDisplay } from "../shared/html.js";
+import { fieldList, section } from "../shared/fields.js";
+import { esc, keyDisplay, renderLocalKeyToggle } from "../shared/html.js";
 import { isSubDevice, keySource } from "../shared/model.js";
 import { appState } from "../shared/state.js";
 
@@ -13,10 +13,10 @@ function fieldSections(d) {
     if (custom) { html += section(title, custom(d)); continue; }
     const present = keys.filter(key => key in d || (key === "local_key" && keySource(d)));
     present.forEach(key => shown.add(key));
-    if (present.length) html += section(title, fieldList(d, present, labels));
+    if (present.length) html += `<section class="information-section">${section(title, fieldList(d, present, labels))}</section>`;
   }
   const rest = Object.keys(d).filter(key => !shown.has(key));
-  if (rest.length) html += section("Other fields", fieldList(d, rest));
+  if (rest.length) html += `<section class="information-section">${section("Other fields", fieldList(d, rest))}</section>`;
   return html;
 }
 
@@ -72,35 +72,6 @@ function dpRange(raw, type) {
   return Object.keys(spec).length ? String(raw) : "";
 }
 
-function dpValue(row) {
-  if (!row.hasValue || row.value === null) return dash();
-  const value = row.value;
-  if (typeof value === "object") return `<code class="mono">${esc(JSON.stringify(value))}</code>`;
-  const text = String(value);
-  return text === "" ? dash() : copyable(text, true);
-}
-
-// dp id + code + current value on one line, the specification underneath.
-function dpSection(d) {
-  const rows = dpRows(d);
-  if (!rows.length) return "";
-  const items = rows.map(r => {
-    const meta = [
-      r.type,
-      { R: "read-only", W: "write-only", RW: "read/write" }[r.access] || "",
-      dpRange(r.values, r.type),
-      r.reportType,
-    ].filter(Boolean).map(esc).join(" · ");
-    return `<li><div class="dp-head">` +
-      `<span class="dp-id mono" title="Local data point id">${r.dpId === undefined ? "-" : esc(r.dpId)}</span>` +
-      `<span class="dp-code mono"${r.hint ? ` title="${esc(r.hint)}"` : ""}>${esc(r.code)}</span>` +
-      `<span class="dp-val">${dpValue(r)}</span></div>` +
-      (meta ? `<div class="dp-meta">${meta}</div>` : "") + `</li>`;
-  }).join("");
-  return `<details class="data-points"><summary>Data points (${rows.length})</summary>` +
-    `<ul class="dps">${items}</ul></details>`;
-}
-
 // Escape hatch for anything the sections above don't cover. The displayed copy
 // respects the local-key toggle; the copy button always yields the real values.
 function rawSection(d) {
@@ -108,9 +79,10 @@ function rawSection(d) {
   const masked = appState.panelKeyVisible || !d.local_key
     ? full
     : JSON.stringify({ ...d, local_key: keyDisplay(d.local_key, false) }, null, 2);
-  return `<details class="raw"><summary>Raw JSON</summary>` +
-    `<div class="raw-actions"><button type="button" data-copy="${esc(full)}">Copy JSON</button></div>` +
-    `<pre class="mono">${esc(masked)}</pre></details>`;
+  return `<section class="raw-record"><p class="panel-intro">The complete saved device record.</p>` +
+    `<div class="raw-actions"><button type="button" data-copy="${esc(full)}">Copy JSON</button>` +
+    (d.local_key ? `<span class="key-heading">${appState.panelKeyVisible ? "Hide key" : "Show key"}${renderLocalKeyToggle("panel")}</span>` : "") + `</div>` +
+    `<pre class="mono">${esc(masked)}</pre></section>`;
 }
 
-export { dpSection, fieldSections, rawSection };
+export { dpRange, dpRows, fieldSections, rawSection };

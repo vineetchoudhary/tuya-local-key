@@ -17,6 +17,7 @@ Endpoints (JSON unless noted):
                                {"device_id", "ip"?} | 400/401/404/409/503 {"error"}
   GET  /api/lan/scan        -> {"job": {...} | null}
   DELETE /api/lan/scan      -> {"ok": true}
+  POST /api/lan/read        -> {"device_id", "status", "dps"?, "read_at"?}
 """
 
 import base64
@@ -32,6 +33,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 
 import device_cache
 import device_preferences
+import device_values
 import lan_scan
 import tuya_devices as core
 
@@ -117,6 +119,8 @@ _lan_cache = None
 _lan_cache_loaded = False
 _lan_job = None
 _lan_lock = threading.Lock()
+# A manual value read and a scan must never compete for a local socket.
+_lan_read_lock = threading.Lock()
 
 
 def _cleanup_pending(now=None):
@@ -996,6 +1000,8 @@ def lan_scan_start():
         if current_key != session_key:
             return jsonify({"error": "account_changed"}), 409
         with _lan_lock:
+            if _lan_read_lock.locked():
+                return jsonify({"error": "read_running"}), 409
             if _lan_job is not None and _lan_job["state"] == "running":
                 return jsonify({"error": "scan_running"}), 409
             _lan_job = job
@@ -1013,6 +1019,57 @@ def lan_scan_start():
             job.update(state="failed", error="scan_failed", finished_at=time.time())
         return jsonify({"error": "scan_failed"}), 503
     return _devices_response({"job": view}, session), 202
+
+
+@app.post("/api/lan/read")
+def lan_read():
+    data = _json_object()
+    device_id = str(data.get("device_id") or "").strip()
+    with _account_lock:
+        session, session_key = _lan_session()
+        if not session:
+            return jsonify({"error": "not_logged_in"}), 401
+        error = _scan_account_precondition(session, data)
+        if error:
+            return error
+        generation = _account_generation
+        devices = _session_devices(session)
+        if not devices:
+            return jsonify({"error": "no_devices"}), 409
+        with _lan_lock:
+            results = (_lan_body_for(session_key) or _empty_lan_body())["results"]
+            try:
+                context = device_values.connection(devices, results, device_id)
+            except device_values.ReadUnavailable as e:
+                code = str(e)
+                return jsonify({"error": code}), 404 if code == "unknown_device" else 400
+            if (_lan_job and _lan_job["state"] == "running"):
+                return jsonify({"error": "scan_running"}), 409
+            if not _lan_read_lock.acquire(blocking=False):
+                return jsonify({"error": "read_running"}), 409
+    try:
+        try:
+            result = device_values.read(context)
+        except lan_scan.ScannerUnavailable:
+            return jsonify({"error": "scanner_unavailable"}), 503
+        except Exception:
+            return jsonify({"error": "read_failed"}), 502
+        with _account_lock:
+            current, current_key = _lan_session()
+            if not current or current_key != session_key or generation != _account_generation:
+                return jsonify({"error": "account_changed"}), 409
+            current_devices = _session_devices(current) or []
+            with _lan_lock:
+                results = (_lan_body_for(session_key) or _empty_lan_body())["results"]
+                try:
+                    latest = device_values.connection(current_devices, results, device_id)
+                except device_values.ReadUnavailable:
+                    latest = None
+                if latest != context:
+                    return jsonify({"error": "device_changed"}), 409
+            return _devices_response(dict(result, device_id=device_id), current)
+    finally:
+        _lan_read_lock.release()
 
 
 @app.get("/api/lan/scan")

@@ -31,7 +31,7 @@ const appState = {
   deviceLoadGeneration: 0,
   exclusionLoadGeneration: 0,
   accountGeneration: 0,
-  panelView: "details",
+  panelView: "menu",
   panelPage: null,
   panelHistory: [], // Contains UI state rather than copies of device records.
   deviceChanges: null,
@@ -44,6 +44,7 @@ const appState = {
   setupAdvancedOpen: false,
   lanData: { results: {}, summary: null, changes: null, changes_at: null, targets: "", job: null },
   panelCheck: null,
+  localReadPending: false,
   gatewayCategories: new Set(),
 };
 

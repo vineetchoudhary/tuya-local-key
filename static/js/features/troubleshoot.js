@@ -23,7 +23,7 @@ function connection(d) {
 }
 
 function busy() {
-  return (appState.lanData.job && appState.lanData.job.state === "running") ||
+  return appState.localReadPending || (appState.lanData.job && appState.lanData.job.state === "running") ||
     (appState.panelCheck && appState.panelCheck.kind === "pending");
 }
 

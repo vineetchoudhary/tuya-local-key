@@ -21,6 +21,7 @@ Retrieve local keys for your Smart Life / Tuya devices with QR-code login. No Tu
 - Filter by home, search or exclude devices, export CSV, and keep an encrypted cache across restarts.
 - Get setup values for tuya-local, localtuya, and tinytuya.
 - Troubleshoot local connections with a guided check, network scan, and suggested next steps.
+- Read current values over the local network and compare them with the saved cloud snapshot.
 
 ## Quick Start
 

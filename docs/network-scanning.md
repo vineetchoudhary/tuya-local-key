@@ -27,6 +27,8 @@ For a sub-device, the wizard tests its identified gateway and displays the gatew
 
 Changes to your Home Assistant integration remain a manual step through **Open setup values**.
 
+To inspect actual local data points after checking the connection, open the device's [Current values](usage.md#read-current-values) view. A connection check and a value read are separate actions. The value read does not change saved scan results.
+
 ### Networks and Firewalls
 
 The scan makes ordinary routed TCP connections and never relies on broadcasts, so it works when your devices are on a different VLAN from the app. Allow TCP port 6668 from the machine running Tuya Local Key to the IoT network. From Docker or the Home Assistant app, connections leave with the host's address, so the rule is for the host. The IoT network needs no access back. Set `LAN_SUBNET` to prefill the scan box.

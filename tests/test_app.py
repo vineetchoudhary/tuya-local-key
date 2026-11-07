@@ -1102,6 +1102,142 @@ def _lan_logged_in(webapp, monkeypatch, devices=None, user_code=None):
     return client
 
 
+def _values_ready(webapp, monkeypatch, devices=None):
+    client = _lan_logged_in(webapp, monkeypatch, devices=devices)
+    session = dict(PREFERENCE_SESSION)
+    webapp.core.save_session(webapp.SESSION_FILE, session)
+    assert client.get("/api/devices?refresh=1").status_code == 200
+    with webapp._lan_lock:
+        webapp._save_lan(webapp._session_cache_key(session), {
+            **webapp._empty_lan_body(), "results": {"plug": _ok("10.0.0.3")},
+        })
+    return client
+
+
+def test_values_read_requires_a_login_and_saved_connection_details(webapp, monkeypatch):
+    client = webapp.app.test_client()
+    assert client.post("/api/lan/read", json={"device_id": "plug"}).status_code == 401
+    client = _lan_logged_in(webapp, monkeypatch)
+    missing = client.post("/api/lan/read", json={"device_id": "plug"})
+    assert missing.status_code == 400 and missing.json["error"] == "missing_ip"
+    unknown = client.post("/api/lan/read", json={"device_id": "unknown"})
+    assert unknown.status_code == 404
+
+
+def test_values_read_uses_saved_details_without_fetching_cloud_or_writing_caches(webapp, monkeypatch):
+    client = _values_ready(webapp, monkeypatch)
+    before = {path: Path(path).read_bytes() for path in (webapp.DEVICE_CACHE_FILE, webapp.LAN_CACHE_FILE)}
+    calls = []
+
+    def read(context):
+        calls.append(context)
+        return {"status": "ok", "dps": {"1": True, "19": 427}, "read_at": 1_752_000_000}
+
+    monkeypatch.setattr(webapp.device_values, "read", read)
+    monkeypatch.setattr(webapp.core, "devices_from_session", lambda *a: pytest.fail("read fetched cloud data"))
+    response = client.post("/api/lan/read", json={"device_id": "plug"})
+    assert response.status_code == 200
+    assert response.json["dps"] == {"1": True, "19": 427}
+    assert response.json["device_id"] == "plug"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert calls[0]["ip"] == "10.0.0.3"
+    assert "plug-key" not in response.text
+    assert all(Path(path).read_bytes() == data for path, data in before.items())
+    assert client.get("/api/lan").json["job"] is None
+
+
+def test_values_read_rejects_another_accounts_request(webapp, monkeypatch):
+    client = _values_ready(webapp, monkeypatch)
+    response = client.post("/api/lan/read", json={"device_id": "plug", "account_id": "other-account"})
+    assert response.status_code == 409 and response.json["error"] == "account_changed"
+
+
+@pytest.mark.parametrize("error", [RuntimeError("private key in error"), "unavailable"])
+def test_values_read_errors_do_not_leak_secrets_and_release_the_lock(webapp, monkeypatch, error):
+    client = _values_ready(webapp, monkeypatch)
+
+    def read(context):
+        if error == "unavailable":
+            raise webapp.lan_scan.ScannerUnavailable("private")
+        raise error
+
+    monkeypatch.setattr(webapp.device_values, "read", read)
+    response = client.post("/api/lan/read", json={"device_id": "plug"})
+    assert response.status_code in (502, 503)
+    assert "private" not in response.text
+    assert not webapp._lan_read_lock.locked()
+
+
+@pytest.mark.parametrize("change", ["key", "node", "removed", "logout", "account"])
+def test_values_read_discards_a_reply_after_details_or_account_change(webapp, monkeypatch, change):
+    initial = [dict(d) for d in LAN_DEVICES]
+    initial[2]["node_id"] = "node-a"
+    device_id = "sensor" if change == "node" else "plug"
+    client = _values_ready(webapp, monkeypatch, devices=initial)
+
+    def read(context):
+        if change in ("logout", "account"):
+            assert client.post("/api/logout").status_code == 200
+            if change == "account":
+                webapp.core.save_session(webapp.SESSION_FILE, {"user_code": "new-account", "token_info": {}})
+        else:
+            devices = [dict(d) for d in initial]
+            if change == "key":
+                devices[0]["local_key"] = "changed-key-12345"
+            elif change == "node":
+                devices[2]["node_id"] = "node-b"
+            else:
+                devices.pop(0)
+            monkeypatch.setattr(webapp.core, "devices_from_session", lambda *a: devices)
+            assert client.get("/api/devices?refresh=1").status_code == 200
+        return {"status": "ok", "dps": {"1": "should not escape"}, "read_at": time.time()}
+
+    monkeypatch.setattr(webapp.device_values, "read", read)
+    response = client.post("/api/lan/read", json={"device_id": device_id})
+    assert response.status_code == 409
+    assert response.json["error"] == ("account_changed" if change in ("logout", "account") else "device_changed")
+    assert "dps" not in response.json
+    assert not webapp._lan_read_lock.locked()
+
+
+def test_values_read_and_scans_are_serialized(webapp, monkeypatch):
+    client = _values_ready(webapp, monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    replies = []
+
+    def read(context):
+        entered.set()
+        assert release.wait(5)
+        return {"status": "ok", "dps": {"1": True}, "read_at": time.time()}
+
+    monkeypatch.setattr(webapp.device_values, "read", read)
+    thread = threading.Thread(target=lambda: replies.append(client.post("/api/lan/read", json={"device_id": "plug"})))
+    thread.start()
+    try:
+        assert entered.wait(2)
+        assert client.post("/api/lan/read", json={"device_id": "plug"}).json["error"] == "read_running"
+        assert client.post("/api/lan/scan", json={"targets": "10.0.0.3"}).json["error"] == "read_running"
+    finally:
+        release.set()
+        thread.join(5)
+    assert replies[0].status_code == 200
+    assert not webapp._lan_read_lock.locked()
+
+
+def test_values_read_waits_for_an_existing_scan(webapp, monkeypatch):
+    client = _values_ready(webapp, monkeypatch)
+    gate = threading.Event()
+    monkeypatch.setattr(webapp.lan_scan, "scan", FakeScan(gate=gate))
+    response = client.post("/api/lan/scan", json={"targets": "10.0.0.3"})
+    assert response.status_code == 202
+    try:
+        response = client.post("/api/lan/read", json={"device_id": "plug"})
+        assert response.status_code == 409 and response.json["error"] == "scan_running"
+    finally:
+        gate.set()
+        _wait_for_job(client)
+
+
 class FakeScan:
     """Stands in for lan_scan.scan, answering from a queue of outcomes."""
 

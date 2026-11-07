@@ -226,6 +226,18 @@ def open_network(page, name):
     page.wait_for_selector("#networkBody", state="visible")
 
 
+def open_information(page, name):
+    open_panel(page, name)
+    page.locator("#panelInfoOpen").click()
+    expect(page.locator("#panelBody")).to_be_visible()
+
+
+def open_raw(page, name):
+    open_panel(page, name)
+    page.locator("#panelRawOpen").click()
+    expect(page.locator("#rawBody")).to_be_visible()
+
+
 def field_value(page, key):
     """The panel's rendered value for a device field, addressed by its raw name."""
     return page.locator(f"#panelBody dt[title='{key}'] + dd:visible, #networkBody dt[title='{key}'] + dd:visible").inner_text()
@@ -365,7 +377,7 @@ def test_table_and_panel_local_key_visibility_are_independent(page):
     keys = page.locator("#rows .key")
     assert MASK in keys.first.inner_text()
     assert PLUG.local_key not in page.locator("#rows").inner_text()
-    open_panel(page, PLUG.name)
+    open_information(page, PLUG.name)
     panel_toggle = page.locator("#panelBody [data-key-toggle]")
     table_toggle = page.locator("#thead [data-key-toggle]")
     panel_key = page.locator("#panelBody .key").element_handle()
@@ -397,14 +409,14 @@ def test_table_and_panel_local_key_visibility_are_independent(page):
 
 
 def test_panel_keys_start_hidden_when_reopened_or_another_device_is_opened(page):
-    open_panel(page, PLUG.name)
+    open_information(page, PLUG.name)
     page.locator("#panelBody [data-key-toggle]").click()
     assert PLUG.local_key in field_value(page, "local_key")
     page.locator("#panelClose").click()
-    open_panel(page, PLUG.name)
+    open_information(page, PLUG.name)
     assert MASK in field_value(page, "local_key")
     page.locator("#panelBody [data-key-toggle]").click()
-    open_panel(page, LAMP.name)
+    open_information(page, LAMP.name)
     assert MASK in field_value(page, "local_key")
     assert LAMP.local_key not in field_value(page, "local_key")
     assert page.locator("#thead [data-key-toggle]").get_attribute("aria-pressed") == "false"
@@ -423,10 +435,10 @@ def test_copying_a_masked_key_yields_the_real_value(page):
 
 
 def test_panel_shows_the_fields_the_table_leaves_out(page):
-    open_panel(page, PLUG.name)
+    open_information(page, PLUG.name)
 
-    assert page.locator("#panelTitle").inner_text() == PLUG.name
-    assert PLUG.product_name in page.locator("#panelSub").inner_text()
+    assert page.locator("#panelTitle").inner_text() == "Device information"
+    assert PLUG.name in page.locator("#panelSub").inner_text()
     assert field_value(page, "uuid") == PLUG.uuid
     assert field_value(page, "category") == PLUG.category
     assert field_value(page, "ip") == PLUG.ip
@@ -437,7 +449,7 @@ def test_panel_shows_the_fields_the_table_leaves_out(page):
 
 
 def test_panel_surfaces_fields_the_sdk_does_not_document(page):
-    open_panel(page, "Balcony Door Sensor")
+    open_information(page, "Balcony Door Sensor")
 
     assert "OTHER FIELDS" in page.locator("#panelBody").inner_text().upper()
     assert field_value(page, "firmware_channel") == "beta"
@@ -446,7 +458,7 @@ def test_panel_surfaces_fields_the_sdk_does_not_document(page):
 
 
 def test_panel_shows_local_time_utc_and_epoch(page):
-    open_panel(page, PLUG.name)
+    open_information(page, PLUG.name)
 
     updated = field_value(page, "update_time")
 
@@ -458,49 +470,34 @@ def test_panel_shows_local_time_utc_and_epoch(page):
     assert "2025-07-09 00:10:00" in cell_texts(page, "update_time")[0]
 
 
-def data_points(page):
-    """{code: (dp id, value, specification line)} from the panel's data point list."""
-    page.locator("#panelBody details.data-points summary").click()
-    points = {}
-    for item in page.locator("#panelBody ul.dps li").all():
-        meta = item.locator(".dp-meta")
-        points[item.locator(".dp-code").inner_text()] = (
-            item.locator(".dp-id").inner_text(),
-            item.locator(".dp-val").inner_text(),
-            meta.inner_text() if meta.count() else "",
-        )
-    return points
+def test_current_values_keeps_data_point_ids_values_and_definitions(page):
+    open_values(page)
+    power = page.locator("#valuesBody [data-values-dp='19']")
+    expect(power.locator("th small")).to_have_text("DP 19")
+    expect(power.locator("[data-cloud-value]")).to_contain_text("raw 812")
+    expect(page.locator("#valuesBody [data-values-dp='1'] [data-cloud-value]")).to_have_text("true")
+    page.locator("#valuesBody .values-specs summary").click()
+    expect(page.locator("[data-values-definition='cur_power']")).to_have_text(
+        "cur_power: Integer · read-only · 0–50000 W · scale 1 · minux")
+    expect(page.locator("[data-values-definition='switch_1']")).to_have_text("switch_1: Boolean · read/write")
+    page.keyboard.press("Escape")
+    expect(page.locator("#panelValuesOpen")).to_be_focused()
+    page.locator("#panelValuesOpen").click()
+    expect(page.locator("#valuesBody .values-specs")).to_have_attribute("open", "")
 
 
-def test_data_points_map_dp_ids_to_codes_values_and_specs(page):
-    open_panel(page, PLUG.name)
-    disclosure = page.locator("#panelBody details.data-points")
-    assert not disclosure.evaluate("el => el.open")
-    assert disclosure.locator("ul.dps").is_hidden()
-
-    points = data_points(page)
-
-    assert disclosure.locator("summary").inner_text() == "Data points (2)"
-    assert disclosure.locator("ul.dps").is_visible()
-    # dp id comes from local_strategy, the value from status, the rest from the spec.
-    assert points["cur_power"] == ("19", "812", "Integer · read-only · 0–50000 W · scale 1 · minux")
-    assert points["switch_1"] == ("1", "true", "Boolean · read/write")
-    disclosure.locator("summary").focus()
-    page.keyboard.press("Enter")
-    assert not disclosure.evaluate("el => el.open")
-    assert disclosure.locator("ul.dps").is_hidden()
-
-
-def test_data_points_fall_back_when_the_device_has_no_local_mapping(page):
-    open_panel(page, "Balcony Door Sensor")   # support_local False: no dp ids to show
-
-    points = data_points(page)
-
-    assert points["battery_percentage"] == ("-", "84", "Integer · read-only · 0–100 %")
+def test_current_values_keeps_definitions_without_a_local_mapping(page):
+    open_values(page, "Balcony Door Sensor")
+    battery = page.locator("#valuesBody [data-values-dp='battery_percentage']")
+    expect(battery.locator("th small")).to_have_text("No local mapping")
+    expect(battery.locator("[data-cloud-value]")).to_have_text("84")
+    page.locator("#valuesBody .values-specs summary").click()
+    expect(page.locator("[data-values-definition='battery_percentage']")).to_have_text(
+        "battery_percentage: Integer · read-only · 0–100 %")
 
 
 def test_panel_degrades_for_a_device_with_no_specs_or_timestamps(page):
-    open_panel(page, "Unpaired Relay")
+    open_information(page, "Unpaired Relay")
 
     body = page.locator("#panelBody").inner_text()
     assert "DATA POINTS" not in body.upper()
@@ -567,14 +564,13 @@ def test_csv_export_keeps_the_fields_dropped_from_the_table(page, tmp_path):
 
 
 def test_raw_json_hides_the_key_but_copies_the_real_record(page):
-    open_panel(page, PLUG.name)
-    page.click("#panelBody details.raw summary")
+    open_raw(page, PLUG.name)
 
-    dumped = page.locator("#panelBody details.raw pre").inner_text()
+    dumped = page.locator("#rawBody pre").inner_text()
     assert MASK in dumped
     assert PLUG.local_key not in dumped
 
-    page.click("#panelBody details.raw button")
+    page.click("#rawBody .raw-actions > button")
     assert json.loads(clipboard(page))["local_key"] == PLUG.local_key
 
 
@@ -696,6 +692,7 @@ def test_a_changed_device_opens_its_panel_from_the_notice(page, running_app, mon
     page.wait_for_selector("#panel[aria-hidden='false']", state="visible")
 
     assert PLUG.name in page.locator("#panelTitle").inner_text()
+    page.locator("#panelInfoOpen").click()
     page.click("#panelBody [data-key-toggle]")
     assert "ROTATED-KEY-9999" in field_value(page, "local_key")
 
@@ -1144,7 +1141,7 @@ def test_sub_device_details_and_csv_keep_the_key_node_id_and_uuid_separate(
     sub = _named_sub(VALVE, ZIGBEE_GATEWAY)
     sub.uuid = "sub-device-uuid"
     _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, sub)
-    open_panel(page, sub.name)
+    open_information(page, sub.name)
 
     labels = page.locator("#panelBody dl.fields dt").all_inner_texts()
     assert "Gateway local key" in labels and "Node ID" in labels and "UUID" in labels
@@ -1327,7 +1324,7 @@ def test_a_keyless_gateway_shows_the_key_it_answered_to(page, running_app, monke
     page.fill("#filter", PLUG.name)
     assert footnote.is_hidden(), "only while a key it explains is listed"
     page.fill("#filter", "")
-    open_panel(page, ZIGBEE_GATEWAY.name)
+    open_information(page, ZIGBEE_GATEWAY.name)
     assert VALVE.local_key not in field_value(page, "local_key")
     page.locator("#panelBody [data-key-toggle]").click()
     assert VALVE.local_key in field_value(page, "local_key")
@@ -1362,8 +1359,9 @@ def test_a_sub_device_shows_its_gateways_version_only_as_the_gateways(page, runn
     assert names[-2].startswith(ZIGBEE_GATEWAY.name)
     assert names[-1].startswith(VALVE.name), "a sub-device stays under its gateway when sorting by protocol"
 
-    open_panel(page, VALVE.name)
+    open_information(page, VALVE.name)
     assert field_value(page, "node_id") == VALVE.node_id
+    page.locator("#panelBack").click()
     page.locator("#panelNetworkOpen").click()
     labels = page.locator("#networkBody dl.fields dt").all_inner_texts()
     assert "Gateway IP" in labels and "Gateway protocol" in labels
@@ -1439,7 +1437,7 @@ def test_a_sub_device_links_to_the_gateway_the_scan_found_it_through(page, runni
     assert gateway_link.inner_text() == ZIGBEE_GATEWAY.name
     page.click(f"#networkBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']")
 
-    expected_title = f"Local network for “{ZIGBEE_GATEWAY.name}”"
+    expected_title = "Local network"
     page.wait_for_function("expected => document.querySelector('#panelTitle').innerText === expected", arg=expected_title)
 
 
@@ -1608,10 +1606,12 @@ def test_brand_exits_selection_without_changing_home_search_or_exclusions(page, 
 def test_brand_closes_each_device_panel_page_on_home(page, target):
     page.fill("#filter", "plug")
     cached_at, url = frontend_state(page, "devicesCachedAt"), page.url
-    for view in ("details", "setup", "network"):
+    entries = {"menu": None, "details": "panelInfoOpen", "raw": "panelRawOpen",
+               "setup": "panelSetupOpen", "network": "panelNetworkOpen", "values": "panelValuesOpen"}
+    for view, entry in entries.items():
         open_panel(page, PLUG.name)
-        if view != "details":
-            page.locator("#panelSetupOpen" if view == "setup" else "#panelNetworkOpen").click()
+        if entry:
+            page.locator(f"#{entry}").click()
         page.locator(f"#homeLink {target}").click()
 
         expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
@@ -1895,37 +1895,28 @@ def test_setup_view_has_its_own_content_and_returns_to_details(page, width, sche
     page.emulate_media(color_scheme=scheme)
     open_panel(page, PLUG.name)
     close_box = page.locator("#panelClose").bounding_box()
-    assert page.locator("#panelSetupOpen").is_visible()
-    assert page.locator("#panelBody .setup-card").count() == 0
-    assert page.locator("#setupBody").is_hidden()
-    assert page.locator("#panelBack").is_hidden()
-    page.locator("#panelBody").evaluate("el => { el.scrollTop = 350; }")
-    entry = page.locator("#panelSetupEntry")
-    assert entry.evaluate("el => parseFloat(getComputedStyle(el).borderBottomWidth)") == 1
-    gap = page.locator("#panelBody").evaluate("""el =>
-        el.getBoundingClientRect().top - document.getElementById('panelSetupEntry').getBoundingClientRect().bottom
-    """)
-    assert gap >= 12
-
-    page.locator("#panelSetupOpen").press("Enter")
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{PLUG.name}” in…"
-    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
-    assert page.locator("#panelSub").is_hidden()
+    expect(page.locator("#menuBody")).to_be_visible()
+    assert page.locator("#menuBody [data-panel-page]").count() == 6
+    assert page.locator("#menuBody dl.fields, #menuBody ul.dps, #menuBody pre").count() == 0
+    assert page.locator("#panelSetupEntry").count() == 0
     assert page.locator("#panelBody").is_hidden()
+    assert page.locator("#panelBack").is_hidden()
+    page.locator("#panelSetupOpen").press("Enter")
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
+    assert page.locator("#panelSub").inner_text() == PLUG.name
+    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
+    assert page.locator("#menuBody").is_hidden()
     assert page.locator("#setupBody").is_visible()
     assert page.locator("#setupBody dl.fields, #setupBody details.raw").count() == 0
-    assert page.locator("[data-setup-tool='tuya-local']").evaluate("el => el === document.activeElement")
-
+    expect(page.locator("[data-setup-tool='tuya-local']")).to_be_focused()
     page.keyboard.press("Escape")
     assert page.locator("#panelTitle").inner_text() == PLUG.name
     assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
-    assert page.locator("#panelSub").is_visible()
-    assert page.locator("#panelBody").is_visible()
+    assert page.locator("#menuBody").is_visible()
     assert page.locator("#setupBody").is_hidden()
-    assert page.locator("#panelSetupOpen").evaluate("el => el === document.activeElement")
+    expect(page.locator("#panelSetupOpen")).to_be_focused()
     page.keyboard.press("Escape")
     assert page.locator("#panel").get_attribute("aria-hidden") == "true"
-
     open_setup(page, PLUG.name)
     page.locator("#panelClose").click()
     assert page.locator("#panel").get_attribute("aria-hidden") == "true"
@@ -2038,15 +2029,17 @@ def test_setup_gateway_children_use_the_full_list_and_open_their_panels(page, ru
     page.locator(f".setup-children [data-copy='{VALVE.node_id}']").click()
     assert clipboard(page) == VALVE.node_id
     page.locator(f".setup-children [data-open-device='{VALVE.id}']").click()
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{VALVE.name}” in…"
-    assert page.locator("#panelSub").is_hidden()
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
+    assert page.locator("#panelSub").inner_text() == VALVE.name
     assert setup_value(page, "device_cid") == VALVE.node_id
     page.locator("#panelBack").click()
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{ZIGBEE_GATEWAY.name}” in…"
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
     expect(page.locator(f".setup-children [data-open-device='{VALVE.id}']")).to_be_focused()
     page.locator("#panelBack").click()
     assert page.locator("#panelTitle").inner_text() == ZIGBEE_GATEWAY.name
+    page.locator("#panelInfoOpen").click()
     assert field_value(page, "id") == ZIGBEE_GATEWAY.id
+    page.locator("#panelBack").click()
     assert page.locator("#setupBody").is_hidden()
     page.fill("#filter", "")
     page.locator("#panelSetupOpen").click()
@@ -2164,21 +2157,20 @@ def test_panel_visibility_applies_to_details_setup_and_snippets_without_changing
         page, running_app, monkeypatch, tool):
     _scans(running_app, monkeypatch, FIRST_SCAN)
     scanned(page)
-    open_panel(page, PLUG.name)
-    page.locator("#panelBody details.raw summary").click()
-    page.locator("#panelBody [data-key-toggle]").click()
-    assert PLUG.local_key in page.locator("#panelBody details.raw pre").inner_text()
+    open_raw(page, PLUG.name)
+    page.locator("#rawBody [data-key-toggle]").click()
+    assert PLUG.local_key in page.locator("#rawBody pre").inner_text()
+    page.locator("#panelBack").click()
+    assert PLUG.local_key not in page.locator("#menuBody").inner_text()
     page.locator("#panelSetupOpen").click()
     setup_tool(page, tool)
     assert PLUG.local_key in setup_value(page, "local_key")
     if tool == "tinytuya":
         assert PLUG.local_key in page.locator("[data-setup-snippet]").inner_text()
     assert PLUG.local_key not in page.locator("#rows").inner_text()
-
     page.locator("#thead [data-key-toggle]").click()
     panel_toggle = setup_field(page, "local_key").locator("[data-key-toggle]")
     panel_toggle.click()
-
     assert MASK in setup_value(page, "local_key")
     assert PLUG.local_key in page.locator("#rows").inner_text()
     assert page.locator("#thead [data-key-toggle]").get_attribute("aria-pressed") == "true"
@@ -2188,10 +2180,12 @@ def test_panel_visibility_applies_to_details_setup_and_snippets_without_changing
     if tool == "tinytuya":
         assert PLUG.local_key not in page.locator("[data-setup-snippet]").inner_text()
         assert PLUG.local_key in copied_setup_snippet(page)
-
     page.locator("#panelBack").click()
+    page.locator("#panelRawOpen").click()
+    assert PLUG.local_key not in page.locator("#rawBody pre").inner_text()
+    page.locator("#panelBack").click()
+    page.locator("#panelInfoOpen").click()
     assert MASK in field_value(page, "local_key")
-    assert PLUG.local_key not in page.locator("#panelBody details.raw pre").inner_text()
     assert PLUG.local_key in page.locator("#rows").inner_text()
 
 
@@ -2235,30 +2229,24 @@ def test_setup_updates_copied_values_after_key_and_scan_changes(page, running_ap
 def test_setup_controls_keep_their_state_and_support_keyboard_tabs(page, running_app, monkeypatch):
     _scans(running_app, monkeypatch, FIRST_SCAN)
     scanned(page)
-    open_panel(page, PLUG.name)
-    page.locator("#panelBody details.data-points summary").click()
-    page.locator("#panelBody details.raw summary").click()
-    scroll = page.locator("#panelBody").evaluate("el => { el.scrollTop = 350; return el.scrollTop; }")
-    page.locator("#panelSetupOpen").click()
+    open_setup(page, PLUG.name)
     page.locator("[data-setup-tool='tuya-local']").focus()
     page.keyboard.press("ArrowRight")
-    assert page.locator("[data-setup-tool='localtuya']").evaluate("el => el === document.activeElement")
+    expect(page.locator("[data-setup-tool='localtuya']")).to_be_focused()
     page.locator("[data-setup-advanced] summary").click()
     page.locator("#thead [data-key-toggle]").click()
     assert page.locator("[data-setup-tool='localtuya']").get_attribute("aria-selected") == "true"
     assert page.locator("[data-setup-advanced]").evaluate("el => el.open")
     page.locator("#panelBack").click()
-    assert page.locator("#panelBody details.data-points").evaluate("el => el.open")
-    assert page.locator("#panelBody details.raw").evaluate("el => el.open")
-    assert page.locator("#panelBody").evaluate("el => el.scrollTop") == scroll
-    assert page.locator("#panelSetupOpen").evaluate("el => el === document.activeElement")
+    expect(page.locator("#menuBody")).to_be_visible()
+    expect(page.locator("#panelSetupOpen")).to_be_focused()
     page.locator("#panelSetupOpen").click()
     assert page.locator("[data-setup-advanced]").evaluate("el => el.open")
     page.locator("[data-setup-tool='localtuya']").focus()
     page.keyboard.press("End")
-    assert page.locator("[data-setup-tool='tinytuya']").evaluate("el => el === document.activeElement")
+    expect(page.locator("[data-setup-tool='tinytuya']")).to_be_focused()
     page.keyboard.press("Home")
-    assert page.locator("[data-setup-tool='tuya-local']").evaluate("el => el === document.activeElement")
+    expect(page.locator("[data-setup-tool='tuya-local']")).to_be_focused()
 
 
 @pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"), (390, "light"), (390, "dark")])
@@ -2279,10 +2267,10 @@ def test_setup_card_layouts(page, running_app, monkeypatch, width, scheme, tool)
     page.locator("#panelSetupOpen").click()
     setup_tool(page, tool)
     title = page.locator("#panelTitle")
-    assert title.text_content() == f"Set up “{sub.name}” in…"
+    assert title.text_content() == "Set up in…"
     assert title.get_attribute("title") == title.text_content()
     assert title.evaluate("el => el.clientHeight <= 2 * parseFloat(getComputedStyle(el).lineHeight) + 1")
-    assert title.evaluate("el => el.clientHeight > parseFloat(getComputedStyle(el).lineHeight)")
+    assert page.locator("#panelSub").inner_text() == sub.name
     assert page.locator("#panelClose").bounding_box()["width"] >= 28
     assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
     assert page.locator(".setup-card").evaluate("el => el.scrollWidth <= el.clientWidth")
@@ -2337,7 +2325,7 @@ def test_setup_missing_details_are_inline_and_link_to_the_network_view(page):
 
     assert page.locator("#networkBody").is_visible()
     assert page.locator("#setupBody").is_hidden()
-    assert page.locator("#panelTitle").inner_text() == f"Local network for “{PLUG.name}”"
+    assert page.locator("#panelTitle").inner_text() == "Local network"
     assert page.locator("#networkBody [data-lan-check] input").is_editable()
     assert page.locator("#networkBody [data-setup-tool], #networkBody [role='tablist']").count() == 0
 
@@ -2584,7 +2572,7 @@ def test_network_form_checks_the_device_or_gateway_and_keeps_the_view_open(page,
 
     assert page.locator("#networkBody").is_visible()
     assert page.locator("#panelBody").is_hidden()
-    assert page.locator("#panelTitle").inner_text() == f"Local network for “{device.name}”"
+    assert page.locator("#panelTitle").inner_text() == "Local network"
     expected = "Gateway checked" if child else "Connection checked"
     page.wait_for_function("""expected => {
         const summary = document.querySelector('#networkBody [data-network-summary]');
@@ -2676,36 +2664,32 @@ def test_network_scan_action_opens_the_actual_network_scan_form(page):
 
 def test_setup_network_history_returns_to_setup_then_details_with_their_state(page):
     page.set_viewport_size({"width": 390, "height": 640})
-    open_panel(page, PLUG.name)
-    page.locator("#panelBody details.data-points summary").click()
-    page.locator("#panelBody details.raw summary").click()
+    open_information(page, PLUG.name)
     details_scroll = page.locator("#panelBody").evaluate("el => { el.scrollTop = 350; return el.scrollTop; }")
     assert details_scroll > 0
+    page.locator("#panelBack").click()
     page.locator("#panelSetupOpen").click()
     setup_tool(page, "localtuya")
     page.select_option("#setupBody [data-localtuya-edition]", "original")
     page.locator("#setupBody [data-setup-advanced] summary").click()
     manual_ip = setup_action(page, "network")
     assert manual_ip.inner_text() == "Enter IP manually"
-
     manual_ip.click()
     assert page.locator("#panelBack").inner_text() == "Back to set up in…"
     page.fill("#networkBody [data-lan-check] input", "192.168.2.245")
     page.locator("#panelBack").click()
-
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{PLUG.name}” in…"
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
     assert page.locator("#setupBody [data-setup-tool='localtuya']").get_attribute("aria-selected") == "true"
     assert page.locator("#setupBody [data-localtuya-edition]").input_value() == "original"
     assert page.locator("#setupBody [data-setup-advanced]").evaluate("el => el.open")
     expect(manual_ip).to_be_focused()
-    assert page.locator("#panelBack").inner_text() == "Back to device details"
+    assert page.locator("#panelBack").inner_text() == "Back to device"
     page.keyboard.press("Escape")
-
     assert page.locator("#panelTitle").inner_text() == PLUG.name
-    assert page.locator("#panelBody details.data-points").evaluate("el => el.open")
-    assert page.locator("#panelBody details.raw").evaluate("el => el.open")
-    assert page.locator("#panelBody").evaluate("el => el.scrollTop") == pytest.approx(details_scroll, abs=1)
     expect(page.locator("#panelSetupOpen")).to_be_focused()
+    page.locator("#panelInfoOpen").click()
+    assert page.locator("#panelBody").evaluate("el => el.scrollTop") == pytest.approx(details_scroll, abs=1)
+    page.keyboard.press("Escape")
     assert page.locator("#panelBack").is_hidden()
     page.keyboard.press("Escape")
     assert page.locator("#panel").get_attribute("aria-hidden") == "true"
@@ -2725,11 +2709,11 @@ def test_setup_device_link_history_restores_previous_device_options_scroll_and_f
     assert setup_scroll > 0
 
     child_link.press("Enter")
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{sub.name}” in…"
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
     setup_tool(page, "tinytuya")
     page.locator("#panelBack").click()
 
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{ZIGBEE_GATEWAY.name}” in…"
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
     assert page.locator("#setupBody [data-setup-tool='localtuya']").get_attribute("aria-selected") == "true"
     assert page.locator("#setupBody [data-localtuya-edition]").input_value() == "original"
     assert page.locator("#setupBody [data-setup-advanced]").evaluate("el => el.open")
@@ -2749,12 +2733,12 @@ def test_network_gateway_link_history_restores_the_child_draft_and_initiating_li
     gateway_link = page.locator(f"#networkBody .lan-note [data-open-device='{ZIGBEE_GATEWAY.id}']")
 
     gateway_link.click()
-    assert page.locator("#panelTitle").inner_text() == f"Local network for “{ZIGBEE_GATEWAY.name}”"
+    assert page.locator("#panelTitle").inner_text() == "Local network"
     assert page.locator("#panelBack").inner_text() == "Back to local network"
     ip_input.fill("192.168.2.246")
     page.keyboard.press("Escape")
 
-    assert page.locator("#panelTitle").inner_text() == f"Local network for “{sub.name}”"
+    assert page.locator("#panelTitle").inner_text() == "Local network"
     assert ip_input.input_value() == "192.168.2.245"
     expect(gateway_link).to_be_focused()
     page.locator("#panelBack").click()
@@ -2772,7 +2756,7 @@ def test_network_close_and_table_reopen_start_a_fresh_navigation_history(page):
     assert page.locator("#panelTitle").inner_text() == LAMP.name
     assert page.locator("#panelBack").is_hidden()
     page.locator("#panelNetworkOpen").click()
-    assert page.locator("#panelBack").inner_text() == "Back to device details"
+    assert page.locator("#panelBack").inner_text() == "Back to device"
     page.keyboard.press("Escape")
     assert page.locator("#panelTitle").inner_text() == LAMP.name
     assert page.locator("#panelBack").is_hidden()
@@ -2791,7 +2775,7 @@ def test_setup_history_skips_a_previous_device_removed_by_refresh(page, running_
     refreshed(page, "#changesNotice")
     page.locator("#panelBack").click()
 
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{sub.name}” in…"
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
     assert page.locator("#setupBody").is_visible()
     page.locator("#panelBack").click()
     assert page.locator("#panel").get_attribute("aria-hidden") == "true"
@@ -2808,7 +2792,7 @@ def test_setup_history_returns_to_previous_view_when_the_current_device_is_remov
 
     refreshed(page, "#changesNotice")
 
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{ZIGBEE_GATEWAY.name}” in…"
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
     assert page.locator("#setupBody").is_visible()
     assert page.locator("#setupBody .setup-children li").count() == 0
     expect(page.locator("#setupBody [data-setup-tool='tuya-local']")).to_be_focused()
@@ -2868,7 +2852,7 @@ def test_setup_history_supports_a_registered_extra_page_without_another_back_han
     assert extra_body.evaluate("el => el.scrollTop") == pytest.approx(extra_scroll, abs=1)
     expect(next_page).to_be_focused()
     page.keyboard.press("Escape")
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{PLUG.name}” in…"
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
     assert page.locator("#setupBody [data-setup-tool='tinytuya']").get_attribute("aria-selected") == "true"
     expect(setup_action(page, "network")).to_be_focused()
 
@@ -2889,7 +2873,7 @@ def test_network_navigation_and_layout_at_each_screen_size(page, running_app, mo
     page.locator("#panelNetworkOpen").press("Enter")
 
     title = page.locator("#panelTitle")
-    assert title.inner_text() == f"Local network for “{sub.name}”"
+    assert title.inner_text() == "Local network"
     assert title.get_attribute("title") == title.text_content()
     assert title.evaluate("el => el.clientHeight <= 2 * parseFloat(getComputedStyle(el).lineHeight) + 1")
     assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
@@ -3452,7 +3436,7 @@ def test_exclusions_gateway_visibility_keeps_account_wide_scan_and_child_setup_e
         expect(row(page, ZIGBEE_GATEWAY)).to_be_visible()
         expect(page.locator("#panel [data-excluded-note]")).to_have_count(0)
         page.locator("#panelBack").click()
-        assert page.locator("#panelTitle").inner_text() == f"Set up “{child.name}” in…"
+        assert page.locator("#panelTitle").inner_text() == "Set up in…"
 
 
 @pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"),
@@ -3923,7 +3907,7 @@ def test_homes_gateway_context_stays_in_home_while_setup_and_scan_keep_full_acco
     assert setup_value(page, "device_id") == ZIGBEE_GATEWAY.id
     assert listed_ids(page) == [child.id]
     page.locator("#panelBack").click()
-    assert page.locator("#panelTitle").inner_text() == f"Set up “{child.name}” in…"
+    assert page.locator("#panelTitle").inner_text() == "Set up in…"
 
 
 def test_homes_change_notices_and_csv_follow_the_selected_home(page, running_app, monkeypatch, tmp_path):
@@ -4753,10 +4737,10 @@ def test_fix_connection_does_not_guess_an_unidentified_gateway(page, running_app
     assert "gateway has not been identified" in page.locator("#fixBody").inner_text()
     assert fix_action(page, "test").count() == 0
     page.locator(f"#fixBody [data-open-device='{BLE_GATEWAY.id}']").click()
-    expect(page.locator("#panelTitle")).to_contain_text(BLE_GATEWAY.name)
+    expect(page.locator("#panelSub")).to_contain_text(BLE_GATEWAY.name)
     expect(fix_action(page, "test")).to_be_visible()
     page.keyboard.press("Escape")
-    expect(page.locator("#panelTitle")).to_contain_text(VALVE.name)
+    expect(page.locator("#panelSub")).to_contain_text(VALVE.name)
 
 
 def test_fix_connection_keeps_protocol_31_key_verification_unconfirmed(page, running_app, monkeypatch):
@@ -4880,7 +4864,11 @@ def test_fix_connection_can_retry_a_failed_stop_request(page, running_app, monke
         expect(page.locator("#fixBody")).to_contain_text("The stop request failed")
         expect(fix_action(page, "cancel")).to_be_enabled()
         page.unroute("**/api/lan/scan", fail_stop)
-        fix_action(page, "cancel").click()
+        # Accept the stop request before allowing the held scan to finish.
+        with page.expect_response(lambda r: r.url.endswith("/api/lan/scan") and
+                                  r.request.method == "DELETE") as stopped:
+            fix_action(page, "cancel").click()
+        assert stopped.value.status == 200
         release.set()
         expect(fix_heading(page)).to_have_text("Check stopped")
     finally:
@@ -4975,3 +4963,275 @@ def test_fix_connection_back_steps_keep_ip_and_scan_drafts_without_duplicate_con
     expect(fix_heading(page)).to_have_text("Check the saved details")
     page.keyboard.press("Escape")
     expect(page.locator("#networkBody")).to_be_visible()
+
+
+# --------------------------------------------------------------------------- #
+# Manual local value reads
+# --------------------------------------------------------------------------- #
+def open_values(page, name=PLUG.name):
+    open_panel(page, name)
+    page.locator("#panelValuesOpen").click()
+    expect(page.locator("#valuesBody")).to_be_visible()
+
+
+def values_read(page):
+    return page.locator("#valuesBody [data-values-action='read']")
+
+
+def values_ready(page, app, monkeypatch, reply=None):
+    _scans(app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", "3.4")})
+    scanned(page)
+    calls = []
+
+    def read(context):
+        calls.append(context)
+        return copy.deepcopy(reply or {"status": "ok", "dps": {"1": False, "19": 427, "101": "extra value"},
+                                       "read_at": demo_devices.UPDATE_TIME})
+
+    monkeypatch.setattr(app.device_values, "read", read)
+    return calls
+
+
+def test_current_values_opening_does_not_read_and_missing_details_offer_network_setup(page):
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    open_values(page)
+    body = page.locator("#valuesBody")
+    assert "Cloud snapshot" in body.inner_text()
+    assert "Local reading: Not read yet" in body.inner_text()
+    assert values_read(page).count() == 0
+    assert "81.2 W" in body.locator("[data-values-dp='19'] [data-cloud-value]").inner_text()
+    page.locator("#valuesBody [data-values-action='network']").click()
+    expect(page.locator("#networkBody")).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(body).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(page.locator("#panelValuesOpen")).to_be_focused()
+    assert not [request for request in requests if request.url.endswith("/api/lan/read")]
+
+
+def test_current_values_read_displays_separate_cloud_and_local_values_with_a_timestamp(page, running_app, monkeypatch):
+    calls = values_ready(page, running_app, monkeypatch)
+    open_values(page)
+    values_read(page).click()
+    expect(values_read(page)).to_have_text("Read again")
+    row = page.locator("#valuesBody [data-values-dp='19']")
+    assert "81.2 W" in row.locator("[data-cloud-value]").inner_text()
+    assert "42.7 W" in row.locator("[data-local-value]").inner_text()
+    assert "raw 427" in row.locator("[data-local-value]").inner_text()
+    assert "2025-07-09 00:10:00" in page.locator("[data-values-read-at]").inner_text()
+    assert page.locator("#valuesBody [data-values-dp='101'] .values-code").inner_text() == "Data point 101"
+    assert len(calls) == 1 and calls[0]["ip"] == "192.168.2.61"
+    assert calls[0]["version"] == "3.4"
+    assert PLUG.local_key not in page.locator("#valuesBody").inner_text()
+    row.locator("[data-local-value] [data-copy]").click()
+    assert clipboard(page) == "427"
+    assert frontend_state(page, "deviceData")[0]["status"]["cur_power"] == 812
+    assert "dps" not in page.request.get(page.url + "api/lan").json()
+
+
+def test_current_values_failed_retry_keeps_previous_values_and_their_old_timestamp(page, running_app, monkeypatch):
+    values_ready(page, running_app, monkeypatch)
+    open_values(page)
+    values_read(page).click()
+    expect(values_read(page)).to_have_text("Read again")
+    timestamp = page.locator("[data-values-read-at]").inner_text()
+    monkeypatch.setattr(running_app.device_values, "read", lambda context: {"status": "connection_failed"})
+    values_read(page).click()
+    expect(page.locator("#valuesBody .values-notice")).to_contain_text("Could not open a local connection")
+    assert "previous reading is still shown" in page.locator("#valuesBody .values-notice").inner_text()
+    assert page.locator("[data-values-read-at]").inner_text() == timestamp
+    assert "42.7 W" in page.locator("#valuesBody [data-values-dp='19'] [data-local-value]").inner_text()
+
+
+def test_current_values_read_targets_the_child_node_through_its_gateway(page, running_app, monkeypatch):
+    child = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, child)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=child.id),
+        child.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+    calls = []
+
+    def read(context):
+        calls.append(context)
+        return {"status": "ok", "dps": {"1": True}, "read_at": demo_devices.UPDATE_TIME}
+
+    monkeypatch.setattr(running_app.device_values, "read", read)
+    open_values(page, child.name)
+    values_read(page).click()
+    expect(values_read(page)).to_have_text("Read again")
+    assert calls[0]["host_id"] == ZIGBEE_GATEWAY.id
+    assert calls[0]["node_id"] == child.node_id
+    assert calls[0]["ip"] == "192.168.2.8"
+    assert calls[0]["device_id"] == child.id
+
+
+def test_current_values_missing_child_node_id_offers_a_refresh_instead_of_reading_the_gateway(page, running_app, monkeypatch):
+    child = _named_sub(VALVE, ZIGBEE_GATEWAY)
+    child.node_id = ""
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, child)
+    _scans(running_app, monkeypatch, {
+        ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=child.id),
+        child.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=ZIGBEE_GATEWAY.id),
+    })
+    scanned(page)
+    open_values(page, child.name)
+    assert values_read(page).count() == 0
+    assert "Node ID" in page.locator("#valuesBody .values-notice").inner_text()
+    refresh = page.locator("#valuesBody [data-values-action='refresh']")
+    expect(refresh).to_have_text("Refresh device list")
+    child.node_id = "new-node"
+    _serves(running_app, monkeypatch, list(DEVICES) + [ZIGBEE_GATEWAY, child])
+    refresh.click()
+    expect(values_read(page)).to_be_enabled()
+
+
+def test_current_values_refresh_discards_the_previous_local_reading(page, running_app, monkeypatch):
+    values_ready(page, running_app, monkeypatch)
+    open_values(page)
+    values_read(page).click()
+    expect(values_read(page)).to_have_text("Read again")
+    refreshed(page, "#valuesBody")
+    expect(values_read(page)).to_have_text("Read from device")
+    expect(page.locator("[data-values-read-at]")).to_have_text("Local reading: Not read yet")
+
+
+def test_current_values_does_not_show_an_inflight_reply_for_another_device(page, running_app, monkeypatch):
+    values_ready(page, running_app, monkeypatch)
+    held = []
+    page.route("**/api/lan/read", lambda route: held.append(route))
+    open_values(page)
+    values_read(page).click()
+    expect(values_read(page)).to_have_text("Reading…")
+    page.locator("#panelClose").click()
+    open_values(page, LAMP.name)
+    assert len(held) == 1
+    held[0].continue_()
+    page.wait_for_function("""async () => {
+        const { appState } = await import(new URL('static/js/shared/state.js', document.baseURI).href);
+        return !appState.localReadPending;
+    }""")
+    assert "extra value" not in page.locator("#valuesBody").inner_text()
+    assert "Local reading: Not read yet" in page.locator("#valuesBody").inner_text()
+
+
+def test_current_values_read_temporarily_disables_connection_rechecks_without_losing_proof(page, running_app, monkeypatch):
+    values_ready(page, running_app, monkeypatch)
+    held = []
+    page.route("**/api/lan/read", lambda route: held.append(route))
+    open_values(page)
+    values_read(page).click()
+    page.locator("#panelBack").click()
+    page.locator("#panelNetworkOpen").click()
+    recheck = page.locator("#networkBody [data-network-action='recheck']")
+    expect(recheck).to_be_disabled()
+    assert network_summary(page) == "Connection checked"
+    assert len(held) == 1
+    held[0].continue_()
+    expect(recheck).to_be_enabled()
+    assert network_summary(page) == "Connection checked"
+    assert page.locator("#networkBody [data-network-action='fix']").count() == 0
+
+
+@pytest.mark.parametrize("status", ["no_values", "key_or_protocol", "unreachable"])
+def test_current_values_explains_unsuccessful_reads_without_using_cloud_as_local(page, running_app, monkeypatch, status):
+    values_ready(page, running_app, monkeypatch, {"status": status})
+    open_values(page)
+    values_read(page).click()
+    expect(page.locator("#valuesBody .values-notice")).to_be_visible()
+    expect(values_read(page)).to_be_enabled()
+    assert "Local reading: Not read yet" in page.locator("#valuesBody").inner_text()
+    assert "81.2 W" not in page.locator("#valuesBody [data-local-value]").all_inner_texts()
+
+
+@pytest.mark.parametrize("width, scheme", [(1440, "light"), (390, "dark"), (320, "dark")])
+def test_current_values_layout_and_keyboard_navigation(page, running_app, monkeypatch, width, scheme):
+    values_ready(page, running_app, monkeypatch)
+    page.set_viewport_size({"width": width, "height": 640})
+    page.emulate_media(color_scheme=scheme)
+    open_values(page)
+    expect(values_read(page)).to_be_focused()
+    values_read(page).press("Enter")
+    expect(values_read(page)).to_have_text("Read again")
+    expect(values_read(page)).to_be_focused()
+    page.locator("#valuesBody .values-specs summary").click()
+    expect(page.locator("[data-values-definition='cur_power']")).to_be_visible()
+    assert page.locator("#valuesBody").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator("#panel").evaluate("el => el.scrollWidth <= el.clientWidth")
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"current-values-{width}-{scheme}.png", full_page=False)
+    page.keyboard.press("Escape")
+    expect(page.locator("#panelValuesOpen")).to_be_focused()
+
+
+# --------------------------------------------------------------------------- #
+# Device directory and dedicated information pages
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"), (390, "light"), (390, "dark"),
+                                          (320, "light"), (320, "dark")])
+def test_device_menu_only_shows_options_and_navigates_every_page(page, width, scheme):
+    page.set_viewport_size({"width": width, "height": 640})
+    page.emulate_media(color_scheme=scheme)
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    open_panel(page, PLUG.name)
+    entries = [("panelSetupOpen", "setupBody", "Set up in…"),
+               ("panelNetworkOpen", "networkBody", "Local network"),
+               ("panelValuesOpen", "valuesBody", "Current values"),
+               ("panelInfoOpen", "panelBody", "Device information"),
+               ("panelRawOpen", "rawBody", "Raw JSON")]
+    menu = page.locator("#menuBody")
+    assert menu.locator(".device-menu-label").all_inner_texts() == [title for _, _, title in entries]
+    assert page.locator("#panelDataPointsOpen, #dataPointsBody").count() == 0
+    assert menu.locator("dl, pre, .dps, [data-copy]").count() == 0
+    assert PLUG.local_key not in menu.inner_html()
+    expect(page.locator("#panelSetupOpen")).to_be_focused()
+    close_box = page.locator("#panelClose").bounding_box()
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"device-menu-{width}-{scheme}.png", full_page=False)
+    for entry, body, title in entries:
+        page.locator(f"#{entry}").press("Enter")
+        expect(page.locator(f"#{body}")).to_be_visible()
+        expect(page.locator("#panelTitle")).to_have_text(title)
+        expect(page.locator("#panelSub")).to_have_text(PLUG.name)
+        assert page.locator("#panel [data-panel-page]").count() == 0
+        assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
+        assert page.locator(f"#{body}").evaluate("el => el.scrollWidth <= el.clientWidth")
+        assert page.locator("#panel").evaluate("el => el.scrollWidth <= el.clientWidth")
+        page.keyboard.press("Escape")
+        expect(menu).to_be_visible()
+        expect(page.locator(f"#{entry}")).to_be_focused()
+    assert not [request for request in requests if request.method != "GET"]
+    assert page.locator("#panelBack").is_hidden()
+
+
+def test_device_menu_current_values_explains_empty_data_points(page):
+    open_values(page, BARE.name)
+    expect(page.locator("#valuesBody")).to_contain_text("No saved data points. A local read may return values the cloud does not list.")
+    assert page.locator("#valuesBody .values-specs").count() == 0
+    page.locator("#panelBack").click()
+    expect(page.locator("#panelValuesOpen")).to_be_focused()
+    page.locator("#panelRawOpen").click()
+    assert json.loads(page.locator("#rawBody pre").inner_text())["id"] == BARE.id
+
+
+def test_device_information_scroll_and_raw_key_visibility_survive_returning_to_menu(page):
+    page.set_viewport_size({"width": 390, "height": 640})
+    open_information(page, PLUG.name)
+    scroll = page.locator("#panelBody").evaluate("el => { el.scrollTop = 320; return el.scrollTop; }")
+    assert scroll > 0
+    page.locator("#panelBack").click()
+    page.locator("#panelRawOpen").click()
+    assert PLUG.local_key not in page.locator("#rawBody pre").inner_text()
+    page.locator("#rawBody [data-key-toggle]").click()
+    assert PLUG.local_key in page.locator("#rawBody pre").inner_text()
+    page.locator("#panelBack").click()
+    assert PLUG.local_key not in page.locator("#menuBody").inner_text()
+    page.locator("#panelInfoOpen").click()
+    assert page.locator("#panelBody").evaluate("el => el.scrollTop") == pytest.approx(scroll, abs=1)
+    assert PLUG.local_key in field_value(page, "local_key")
+    page.locator("#panelClose").click()
+    open_raw(page, PLUG.name)
+    assert PLUG.local_key not in page.locator("#rawBody pre").inner_text()

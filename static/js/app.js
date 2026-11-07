@@ -3,6 +3,7 @@ import { api } from "./shared/api.js";
 import * as auth from "./features/auth.js";
 import { copyOnClick } from "./shared/clipboard.js";
 import * as details from "./features/details.js";
+import * as deviceMenu from "./features/device-menu.js";
 import * as devices from "./features/devices.js";
 import { $, initDom } from "./shared/dom.js";
 import * as filters from "./features/filters.js";
@@ -13,6 +14,7 @@ import * as panel from "./features/panel.js";
 import * as setup from "./features/setup.js";
 import * as shell from "./features/shell.js";
 import * as troubleshoot from "./features/troubleshoot.js";
+import * as values from "./features/values.js";
 import { appState } from "./shared/state.js";
 
 export function render() {
@@ -46,26 +48,39 @@ export function initApp() {
   initDom();
   const config = JSON.parse($("app-config").textContent);
   appState.gatewayCategories = new Set(config.gatewayCategories);
-  panel.registerPanelPage("details", {
-    body: "panelBody", backLabel: "Back to device details",
+  panel.registerPanelPage("menu", {
+    body: "menuBody", backLabel: "Back to device",
     title: d => d.name || "(unnamed)",
-    render: d => details.fieldSections(d) + details.dpSection(d) + details.rawSection(d),
+    render: deviceMenu.menuSection, focus: "[data-panel-page]",
+  });
+  panel.registerPanelPage("details", {
+    body: "panelBody", backLabel: "Back to device information",
+    title: () => "Device information", render: details.fieldSections,
+  });
+  panel.registerPanelPage("raw", {
+    body: "rawBody", backLabel: "Back to raw JSON",
+    title: () => "Raw JSON", render: details.rawSection, focus: "[data-copy]",
   });
   panel.registerPanelPage("setup", {
     body: "setupBody", backLabel: "Back to set up in…",
-    title: d => `Set up “${d.name || d.id}” in…`, render: setup.setupSection,
+    title: () => "Set up in…", render: setup.setupSection,
     focus: '[aria-selected="true"]',
   });
   panel.registerPanelPage("network", {
     body: "networkBody", backLabel: "Back to local network",
-    title: d => `Local network for “${d.name || d.id}”`, render: network.networkSection,
+    title: () => "Local network", render: network.networkSection,
     focus: "[data-lan-check] input, [data-network-action='recheck']",
   });
   panel.registerPanelPage("fix", {
     body: "fixBody", backLabel: "Back to fix connection",
-    title: d => `Fix connection for “${d.name || d.id}”`, render: troubleshoot.fixSection,
+    title: () => "Fix connection", render: troubleshoot.fixSection,
     focus: "[data-fix-heading]",
     back: troubleshoot.backFix, stepBackLabel: troubleshoot.fixBackLabel,
+  });
+  panel.registerPanelPage("values", {
+    body: "valuesBody", backLabel: "Back to current values",
+    title: () => "Current values", render: values.valuesSection,
+    focus: "[data-values-action]",
   });
   shell.initShell({
     closePanel: panel.closePanel,
@@ -142,7 +157,9 @@ export function initApp() {
     loadDevices: devices.loadDevices,
     render,
     renderPanel: panel.renderPanel,
+    resetValues: values.resetValues,
   });
+  values.initValues({ loadDevices: devices.loadDevices, navigatePanel: panel.navigatePanel, renderPanel: panel.renderPanel });
   troubleshoot.initTroubleshoot({
     cancelScan: network.cancelScan,
     checkDevice: network.checkDevice,
@@ -170,9 +187,11 @@ export function initApp() {
   });
   copyOnClick($("rows"));
   copyOnClick($("panelBody"));
+  copyOnClick($("rawBody"));
   copyOnClick($("setupBody"));
   copyOnClick($("networkBody"));
   copyOnClick($("fixBody"));
+  copyOnClick($("valuesBody"));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("filtersPopover").classList.contains("hidden")) {
       e.preventDefault(); e.stopPropagation(); filters.closeFilters(true); return;
