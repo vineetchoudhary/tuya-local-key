@@ -5,6 +5,8 @@ Web interface for tuya_devices — QR-login to Smart Life and list your devices.
 Endpoints (JSON unless noted):
   GET  /                    -> the single-page UI (HTML)
   GET  /api/state           -> {"logged_in": bool}
+  GET  /api/updates         -> cached release status and installation-specific update link
+  POST /api/updates/check   -> manually refresh release status
   POST /api/login/start     -> {"token", "qr"} (qr is a data: PNG) | {"error"}
   POST /api/login/poll      -> {"status": "pending"|"confirmed"|"expired"}
   GET  /api/devices         -> {"devices": [...], "cached_at": ts,
@@ -40,6 +42,7 @@ import device_values
 import lan_scan
 import support_report
 import tuya_devices as core
+import updates
 
 SESSION_FILE = os.environ.get(
     "SESSION_FILE", os.path.expanduser("~/.config/tuya-smartlife/session.json")
@@ -84,6 +87,7 @@ LAN_CACHE_FILE = os.environ.get(
 DEVICE_PREFERENCES_FILE = os.environ.get(
     "DEVICE_PREFERENCES_FILE", os.path.join(_SESSION_DIR, "device-preferences.json")
 )
+UPDATE_CACHE_FILE = os.environ.get("UPDATE_CACHE_FILE", os.path.join(_SESSION_DIR, "update-check.json"))
 MAX_EXCLUSION_REQUEST_BYTES = 256 * 1024
 MAX_EXCLUSION_BATCH = 2000
 DEVICE_CACHE_PERSIST = _setting("DEVICE_CACHE", "on").lower() not in {
@@ -125,6 +129,7 @@ _lan_job = None
 _lan_lock = threading.Lock()
 # A manual value read and a scan must never compete for a local socket.
 _lan_read_lock = threading.Lock()
+_update_checker = updates.UpdateChecker(UPDATE_CACHE_FILE)
 
 
 def _cleanup_pending(now=None):
@@ -256,6 +261,23 @@ def index():
 @app.get("/icon.png")
 def app_icon():
     return send_file(APP_ICON, mimetype="image/png", max_age=86400)
+
+
+@app.get("/api/updates")
+def update_status():
+    return _update_status(manual=False)
+
+
+@app.post("/api/updates/check")
+def check_updates_manually():
+    return _update_status(manual=True)
+
+
+def _update_status(manual):
+    token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASSIO_TOKEN")
+    home_assistant = bool(token or request.headers.get("X-Ingress-Path"))
+    return jsonify(_update_checker.status(support_report.app_version(), home_assistant=home_assistant,
+                                          supervisor_token=token, manual=manual))
 
 
 @app.before_request

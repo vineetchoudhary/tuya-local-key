@@ -40,6 +40,57 @@ def test_api_responses_are_not_cached(webapp):
     assert response.headers["Cache-Control"] == "no-store"
 
 
+@pytest.mark.parametrize("token_name,ingress,expected_ha", [
+    (None, False, False), (None, True, True), ("SUPERVISOR_TOKEN", False, True), ("HASSIO_TOKEN", False, True),
+])
+def test_update_status_detects_home_assistant_without_exposing_its_token(webapp, monkeypatch, token_name, ingress, expected_ha):
+    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    monkeypatch.delenv("HASSIO_TOKEN", raising=False)
+    if token_name:
+        monkeypatch.setenv(token_name, "private-supervisor-token")
+    calls = []
+
+    def status(version, **kwargs):
+        calls.append((version, kwargs))
+        return {"available": False, "check_after_seconds": 3600}
+
+    monkeypatch.setattr(webapp._update_checker, "status", status)
+    client = webapp.app.test_client()
+    assert client.get("/").status_code == 200
+    assert calls == [], "rendering the page must not wait for a release check"
+    headers = {"X-Ingress-Path": "/api/hassio_ingress/test"} if ingress else {}
+    response = client.get("/api/updates", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert calls[0][1] == {"home_assistant": expected_ha,
+                           "supervisor_token": "private-supervisor-token" if token_name else None, "manual": False}
+    assert "private-supervisor-token" not in response.text
+
+
+def test_update_status_uses_the_apps_existing_authentication(tmp_path, monkeypatch):
+    module = _reload_app(monkeypatch, tmp_path, AUTH_USERNAME="admin", AUTH_PASSWORD="secret")
+    monkeypatch.setattr(module._update_checker, "status", lambda *args, **kwargs: {"available": False})
+    client = module.app.test_client()
+    assert client.get("/api/updates").status_code == 401
+    assert client.get("/api/updates", auth=("admin", "secret")).status_code == 200
+    assert client.get("/api/updates", headers={"X-Ingress-Path": "/api/hassio_ingress/test"}).status_code == 200
+    assert client.post("/api/updates/check").status_code == 401
+    assert client.post("/api/updates/check", auth=("admin", "secret")).status_code == 200
+
+
+def test_manual_update_endpoint_explicitly_bypasses_the_daily_cooldown(webapp, monkeypatch):
+    calls = []
+
+    def status(version, **kwargs):
+        calls.append(kwargs)
+        return {"available": False}
+
+    monkeypatch.setattr(webapp._update_checker, "status", status)
+    response = webapp.app.test_client().post("/api/updates/check")
+    assert response.status_code == 200 and response.headers["Cache-Control"] == "no-store"
+    assert calls[0]["manual"] is True
+
+
 def test_app_icon_serves_home_assistant_icon(webapp):
     response = webapp.app.test_client().get("/icon.png")
 

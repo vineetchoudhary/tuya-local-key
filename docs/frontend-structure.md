@@ -4,9 +4,9 @@ The web UI uses Flask/Jinja, CSS, and native JavaScript modules. It runs directl
 
 ## HTML and styles
 
-`templates/index.html` is the document shell. The files in `templates/partials/` contain the header, login/QR/loading screens, device list, scan form, device panel, and logout dialog. Data-dependent markup stays in the JavaScript renderer for its feature.
+`templates/index.html` is the document shell. The files in `templates/partials/` contain the header, footer, login/QR/loading screens, device list, scan form, device panel, and logout dialog. The footer version uses the same project metadata as support reports. Data-dependent markup stays in the JavaScript renderer for its feature.
 
-Styles live in `static/css/`. Load them in the order listed in the main template: base, header, auth, devices, panel, setup, network, troubleshoot, values, then utilities. Base styles define the light/dark theme and shared controls. Utilities load last so `.hidden` keeps its precedence. Keep fixed styles in CSS classes. Only calculated popover coordinates are set from JavaScript.
+Styles live in `static/css/`. Load them in the order listed in the main template: base, header, footer, auth, devices, panel, setup, network, troubleshoot, values, then utilities. Base styles define the light/dark theme and shared controls. Footer styles keep the page at least as tall as the viewport, with the footer following the content. Utilities load last so `.hidden` keeps its precedence. Keep fixed styles in CSS classes. Only calculated popover coordinates are set from JavaScript.
 
 ## JavaScript ownership
 
@@ -28,6 +28,7 @@ Styles live in `static/css/`. Load them in the order listed in the main template
 | `values.js` | Manual local status reads, temporary readings, and the cloud/local value comparison |
 | `support.js` | Support report download, retry feedback, and rejection of replies from an older device/account snapshot |
 | `header.js` | App name/logo home action, responsive action placement, and the More actions menu |
+| `updates.js` | Release checks, badges, and result dialogs |
 
 Cross-feature data lives in `shared/state.js` as `appState`. Features keep their timers and private caches in their own modules. Modules in `shared/` provide the API helper, device/gateway/connection derivations, constants, HTML/field renderers, formatting, icons, and clipboard support.
 

@@ -7,6 +7,7 @@ body > main { flex: 1 0 auto; width: 100%; }
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px;
 }
 .footer-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.footer-release { display: inline-flex; align-items: center; gap: 8px; }
 .footer-name { color: var(--fg); font-weight: 600; }
 .footer-version { padding: 2px 7px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; line-height: 1.5;
   color: inherit; text-decoration: none;
@@ -18,8 +19,19 @@ body > main { flex: 1 0 auto; width: 100%; }
   color: inherit; text-decoration: none; border-radius: 3px;
 }
 .footer-links a:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
-.footer-links a:focus-visible { color: var(--fg); outline: 2px solid var(--accent); outline-offset: 4px; }
+.footer-links a:focus-visible, .footer-check-updates:focus-visible { color: var(--fg); outline: 2px solid var(--accent); outline-offset: 4px; }
+.footer-check-updates { padding: 0; border: 0; border-radius: 3px; min-height: 28px;
+  background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.footer-check-updates:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
+.update-dialog-link { display: inline-flex; align-items: center; padding: 9px 14px;
+  border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: var(--accent-fg);
+  font-weight: 600; text-decoration: none;
+}
+.update-dialog-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+#updateDialog .confirm-actions { flex-wrap: wrap; }
 .footer-links svg { width: 15px; height: 15px; flex: 0 0 auto; }
 @media (max-width: 480px) {
   .footer-inner { flex-direction: column; align-items: flex-start; padding: 16px; gap: 8px; }
+  .footer-links { column-gap: 16px; }
 }

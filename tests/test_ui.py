@@ -72,6 +72,9 @@ def server(tmp_path_factory):
         app = importlib.reload(app)
         APP = app
         mp.setattr(app.core, "devices_from_session", lambda session, path: DEVICES)
+        mp.setattr(app._update_checker, "status", lambda current_version, **kwargs: {
+            "current_version": current_version, "available": False, "check_after_seconds": 86400,
+        })
         def ingress(environ, start_response):
             environ["HTTP_X_INGRESS_PATH"] = INGRESS_PREFIX
             return app.app(environ, start_response)
@@ -1896,7 +1899,8 @@ def test_setup_view_has_its_own_content_and_returns_to_details(page, width, sche
     open_panel(page, PLUG.name)
     close_box = page.locator("#panelClose").bounding_box()
     expect(page.locator("#menuBody")).to_be_visible()
-    assert page.locator("#menuBody [data-panel-page]").count() == 6
+    assert page.locator("#menuBody [data-panel-page]").count() == 5
+    assert page.locator("#menuBody [data-support-report]").count() == 1
     assert page.locator("#menuBody dl.fields, #menuBody ul.dps, #menuBody pre").count() == 0
     assert page.locator("#panelSetupEntry").count() == 0
     assert page.locator("#panelBody").is_hidden()
@@ -5389,3 +5393,259 @@ def test_support_report_reply_cannot_restore_feedback_after_leaving_and_returnin
     page.wait_for_load_state("networkidle")
     assert downloads == []
     expect(page.locator("#menuBody .device-menu-message")).to_have_count(0)
+
+
+def reset_update_check(page):
+    page.evaluate("""() => {
+        for (const key of Object.keys(localStorage)) {
+            if (key.startsWith('tuya-local-key:update-check:')) localStorage.removeItem(key);
+        }
+    }""")
+
+
+@pytest.mark.parametrize("width,scheme", [(1440, "light"), (1440, "dark"), (1024, "light"),
+                                          (390, "dark"), (375, "light"), (320, "dark")])
+@pytest.mark.parametrize("home_assistant", [False, True])
+def test_update_badge_fits_the_header_and_links_to_the_right_update_page(page, width, scheme, home_assistant):
+    page.set_viewport_size({"width": width, "height": 800})
+    page.emulate_media(color_scheme=scheme)
+    target = ("https://my.home-assistant.io/redirect/supervisor_addon/?addon=a1b2c3d4_tuya_local_key" if home_assistant
+              else "https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v3.6")
+    reset_update_check(page)
+    page.route("**/api/updates", lambda route: route.fulfill(json={
+        "available": True, "current_version": "3.5.0", "latest_version": "3.6",
+        "update_url": target, "installation": "home_assistant" if home_assistant else "standalone",
+        "check_after_seconds": 86400,
+    }))
+    page.reload(wait_until="networkidle")
+    badge = page.locator("#updateBadge")
+    expect(badge).to_be_visible()
+    expect(page.locator("#updateDialog")).to_be_hidden()
+    assert page.locator("header .header-version").count() == 0
+    assert page.locator(".footer-version").inner_text().startswith("v")
+    expect(page.locator("#footerCheckUpdates")).to_be_hidden()
+    expect(page.locator("#footerUpdateBadge")).to_have_attribute("href", target)
+    expect(badge).to_have_attribute("href", target)
+    expect(badge).to_have_attribute("target", "_blank")
+    assert "3.6" in badge.get_attribute("aria-label")
+    assert "Home Assistant" in badge.get_attribute("title") if home_assistant else "GitHub" in badge.get_attribute("title")
+    badge.focus()
+    expect(badge).to_be_focused()
+    assert page.locator("header").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"update-{width}-{scheme}-{'ha' if home_assistant else 'standalone'}.png")
+    if width >= 900:
+        open_panel(page, PLUG.name)
+        page.wait_for_function("document.querySelector('#panel').getBoundingClientRect().right <= innerWidth + 0.5")
+        # Wait for the body-padding transition and header observer to settle.
+        page.wait_for_timeout(300)
+        assert page.locator("header").evaluate("el => el.scrollWidth <= el.clientWidth")
+        expect(badge).to_be_visible()
+
+
+@pytest.mark.parametrize("response", [
+    {"available": False, "latest_version": "3.5", "check_after_seconds": 3600},
+    {"available": False, "installation": "home_assistant", "check_after_seconds": 1},
+    {"available": True, "update_url": "javascript:alert(1)"},
+    {"available": True, "update_url": "https://attacker.test/release"},
+    {"available": True, "update_url": "https://github.com/other/repository/releases/tag/v4.0"},
+    None,
+])
+def test_update_badge_stays_hidden_for_current_delayed_or_invalid_results(page, response):
+    reset_update_check(page)
+    page.route("**/api/updates", lambda route: route.fulfill(json=response))
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#updateBadge")).to_be_hidden()
+    expect(page.locator("#banner")).to_be_hidden()
+    expect(row(page, PLUG)).to_be_visible()
+
+
+def test_a_slow_or_failed_update_check_does_not_block_device_loading(page):
+    held = []
+    reset_update_check(page)
+    page.route("**/api/updates", lambda route: held.append(route))
+    page.reload(wait_until="domcontentloaded")
+    expect(row(page, PLUG)).to_be_visible()
+    assert len(held) == 1
+    held[0].abort()
+    expect(page.locator("#updateBadge")).to_be_hidden()
+    expect(page.locator("#banner")).to_be_hidden()
+
+
+def test_automatic_update_checks_wait_for_activity_and_a_full_day(page):
+    calls = []
+    reset_update_check(page)
+    page.add_init_script("window.updateNow = 1800000000000; Date.now = () => window.updateNow;")
+
+    def update(route):
+        calls.append(route.request.url)
+        route.fulfill(json={"available": False, "current_version": "3.5.0", "check_after_seconds": 1})
+
+    page.route("**/api/updates", update)
+    page.reload(wait_until="networkidle")
+    assert len(calls) == 1
+    page.wait_for_timeout(1200)
+    assert len(calls) == 1, "no background timer, even if a short server retry was suggested"
+    page.evaluate("window.updateNow += 86400000 - 1")
+    page.locator("#filter").fill("plug")
+    assert len(calls) == 1
+    page.evaluate("window.updateNow += 1")
+    page.wait_for_timeout(100)
+    assert len(calls) == 1, "elapsed time alone does not start a check"
+    with page.expect_response(lambda response: response.url.endswith("/api/updates")):
+        page.locator("#filter").fill("lamp")
+    assert len(calls) == 2
+    page.reload(wait_until="networkidle")
+    assert len(calls) == 2, "reopening the app keeps the daily cooldown"
+
+
+def test_update_badge_remains_separate_from_the_home_action(page):
+    reset_update_check(page)
+    page.route("**/api/updates", lambda route: route.fulfill(json={
+        "available": True, "current_version": "3.5.0", "latest_version": "3.6", "installation": "standalone",
+        "update_url": "https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v3.6", "check_after_seconds": 3600,
+    }))
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#updateBadge")).to_be_visible()
+    open_panel(page, PLUG.name)
+    assert page.locator("#homeLink .header-version, #homeLink #updateBadge").count() == 0
+    page.locator("#homeLink").click()
+    expect(page.locator("#panel")).to_have_attribute("aria-hidden", "true")
+    expect(page.locator("#updateBadge")).to_be_visible()
+
+
+@pytest.mark.parametrize("width,scheme", [(1440, "light"), (390, "dark"), (320, "light")])
+@pytest.mark.parametrize("home_assistant", [False, True])
+def test_manual_update_check_finds_an_update_in_both_header_and_footer(page, width, scheme, home_assistant):
+    page.set_viewport_size({"width": width, "height": 800})
+    page.emulate_media(color_scheme=scheme)
+    calls = []
+    target = ("https://my.home-assistant.io/redirect/supervisor_addon/?addon=a1b2c3d4_tuya_local_key" if home_assistant
+              else "https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v3.6")
+
+    def manual(route):
+        calls.append(route.request.method)
+        route.fulfill(json={"available": True, "current_version": "3.5.0", "latest_version": "3.6",
+                            "update_url": target, "installation": "home_assistant" if home_assistant else "standalone",
+                            "last_check_succeeded": True})
+
+    page.route("**/api/updates/check", manual)
+    check = page.locator("#footerCheckUpdates")
+    expect(check).to_be_visible()
+    check.click()
+    expect(page.locator("#updateBadge")).to_be_visible()
+    expect(page.locator("#footerUpdateBadge")).to_be_visible()
+    expect(check).to_be_hidden()
+    expect(page.locator("#footerUpdateBadge")).to_have_attribute("href", target)
+    dialog = page.locator("#updateDialog")
+    expect(dialog).to_be_visible()
+    expect(page.locator("#updateDialogTitle")).to_have_text("Update available")
+    expect(page.locator("#updateDialogText")).to_have_text("Version 3.6 is available.")
+    expect(page.locator("#updateDialogLink")).to_have_attribute("href", target)
+    expect(page.locator("#updateDialogLink")).to_have_attribute("target", "_blank")
+    expect(page.locator("#updateDialogClose")).to_be_focused()
+    assert page.locator("#footerUpdateStatus").count() == 0
+    assert dialog.evaluate("el => el.scrollWidth <= el.clientWidth")
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"manual-update-dialog-{width}-{scheme}-{'ha' if home_assistant else 'standalone'}.png")
+    page.locator("#updateDialogClose").click()
+    expect(dialog).to_be_hidden()
+    expect(page.locator("#footerUpdateBadge")).to_be_focused()
+    assert calls == ["POST"]
+    assert page.locator("#appFooter").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator("header .header-version").count() == 0
+    automatic = []
+    page.route("**/api/updates", lambda route: automatic.append(route) or route.continue_())
+    page.reload(wait_until="networkidle")
+    assert automatic == []
+    expect(page.locator("#updateBadge")).to_be_visible()
+    expect(page.locator("#footerUpdateBadge")).to_be_visible()
+    expect(check).to_be_hidden()
+    expect(dialog).to_be_hidden()
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"manual-update-{width}-{scheme}-{'ha' if home_assistant else 'standalone'}.png", full_page=True)
+
+
+@pytest.mark.parametrize("result", ["current", "failed", "waiting"])
+@pytest.mark.parametrize("width", [1440, 320])
+def test_manual_update_check_reports_its_result_and_can_be_retried(page, result, width):
+    page.set_viewport_size({"width": width, "height": 800})
+    page.emulate_media(color_scheme="dark" if width == 320 else "light")
+    requests = []
+
+    def manual(route):
+        requests.append(route.request)
+        if result == "failed":
+            route.abort()
+        else:
+            route.fulfill(json={"available": False, "current_version": "3.5.0", "status": "ok",
+                                "last_check_succeeded": True, "waiting_for_release": result == "waiting"})
+
+    page.route("**/api/updates/check", manual)
+    check = page.locator("#footerCheckUpdates")
+    check.click()
+    expected = {"current": "No updates available", "failed": "Could not check for updates",
+                "waiting": "Update coming soon"}[result]
+    dialog = page.locator("#updateDialog")
+    expect(dialog).to_be_visible()
+    expect(page.locator("#updateDialogTitle")).to_have_text(expected)
+    expect(page.locator("#updateDialogLink")).to_be_hidden()
+    assert page.locator("#footerUpdateStatus").count() == 0
+    assert dialog.evaluate("el => el.scrollWidth <= el.clientWidth")
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"manual-update-dialog-{width}-{result}.png")
+    page.locator("#updateDialogClose").click()
+    expect(dialog).to_be_hidden()
+    expect(check).to_be_visible()
+    expect(check).to_be_enabled()
+    expect(check).to_be_focused()
+    expect(page.locator("#updateBadge")).to_be_hidden()
+    check.click()
+    expect(dialog).to_be_visible()
+    expect(page.locator("#updateDialogTitle")).to_have_text(expected)
+    assert len(requests) == 2
+
+
+@pytest.mark.parametrize("dismiss", ["escape", "backdrop"])
+def test_dismissing_an_update_popup_keeps_the_device_panel_open(page, dismiss):
+    open_panel(page, PLUG.name)
+    page.locator("#footerCheckUpdates").click()
+    dialog = page.locator("#updateDialog")
+    expect(dialog).to_be_visible()
+    if dismiss == "escape":
+        page.keyboard.press("Escape")
+    else:
+        page.mouse.click(5, 5)
+    expect(dialog).to_be_hidden()
+    expect(page.locator("#panel")).to_have_attribute("aria-hidden", "false")
+    expect(page.locator("#footerCheckUpdates")).to_be_focused()
+
+
+def test_failed_automatic_checks_also_keep_the_daily_cooldown(page):
+    reset_update_check(page)
+    calls = []
+
+    def fail(route):
+        calls.append(route.request)
+        route.abort()
+
+    page.route("**/api/updates", fail)
+    page.reload(wait_until="networkidle")
+    page.locator("#filter").fill("plug")
+    page.reload(wait_until="networkidle")
+    assert len(calls) == 1
+    expect(page.locator("#footerCheckUpdates")).to_be_visible()
+
+
+def test_manual_update_check_is_disabled_while_a_request_is_running(page):
+    held = []
+    page.route("**/api/updates/check", lambda route: held.append(route))
+    check = page.locator("#footerCheckUpdates")
+    check.click()
+    expect(check).to_be_disabled()
+    expect(check).to_have_text("Checking…")
+    page.locator("#filter").fill("plug")
+    assert len(held) == 1
+    held[0].fulfill(json={"available": False, "current_version": "3.5.0", "last_check_succeeded": True})
+    expect(check).to_be_enabled()

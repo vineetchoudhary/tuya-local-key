@@ -18,6 +18,7 @@ devices.cache
 lan.cache
 cache.key
 device-preferences.json
+update-check.json
 .env
 .env.*
 *.pem

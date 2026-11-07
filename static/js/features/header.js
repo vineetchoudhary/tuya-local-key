@@ -25,8 +25,7 @@ function layoutActions() {
   const header = bar.parentElement, css = getComputedStyle(header);
   const gap = parseFloat(css.columnGap) || 10;
   const inner = header.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
-  const title = header.querySelector(".app-icon").offsetWidth + gap +
-    header.querySelector("h1").scrollWidth + gap;
+  const title = header.querySelector(".header-identity").getBoundingClientRect().width + gap;
   const room = inner - title;
   const width = (ids) => ids.reduce((sum, id) => sum + $(id).offsetWidth, 0) +
     gap * Math.max(0, ids.length - 1);

@@ -1,8 +1,20 @@
 /* Header styles. */
 header {
   padding: 14px 20px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 10px; min-height: 69px;
+  display: flex; align-items: center; gap: 10px; min-height: 72px;
 }
+.header-identity { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 0 0 auto; }
+.header-meta { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.header-meta:has(.update-badge.hidden) { display: none; }
+.update-badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px 2px 4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--card)); color: var(--accent);
+  font-size: 11px; font-weight: 600; text-decoration: none; white-space: nowrap;
+}
+.update-badge:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 17%, var(--card)); }
+.update-badge svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.update-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.update-label-short { display: none; }
 .app-brand {
   display: flex; align-items: center; gap: 10px; min-width: 0;
   color: inherit; text-decoration: none; border-radius: 4px;
@@ -38,4 +50,13 @@ header {
 header h1 {
   font-size: 17px; margin: 0; font-weight: 650; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+@media (max-width: 700px) {
+  header { padding-top: 10px; padding-bottom: 10px; }
+  .header-identity { flex-direction: column; align-items: flex-start; gap: 0; }
+  .header-meta { padding-left: 42px; margin-top: -3px; gap: 6px; }
+  .update-badge { font-size: 10px; line-height: 1.4; }
+  .update-badge { gap: 1px; }
+  .update-label-full { display: none; }
+  .update-label-short { display: inline; }
 }

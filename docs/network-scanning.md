@@ -1,72 +1,56 @@
 # Network Scanning
 
-Local-control tools such as tinytuya, tuya-local and localtuya need each device's protocol version as well as its local key. Tuya's device-sharing API doesn't return one, and the IP address it reports is your WAN address, so both have to come from the device itself.
+Local integrations need a device's local IP, protocol version, and local key. Scanning finds the IP and protocol on your network.
 
-Click **Scan network**, enter your IoT VLAN or subnet, the one your Tuya devices are on (for example `192.168.2.0/24`, or several separated by commas, up to 1,024 addresses), and start the scan. The app then:
+Choose **Scan network**, enter your IoT subnet, such as `192.168.2.0/24`, and start the scan. Separate multiple subnets with commas, up to 1,024 addresses in total. A typical /24 scan takes about 30 seconds, while larger device lists can take a few minutes.
 
-1. Opens a plain TCP connection to port 6668 on every address, to find the ones listening.
-2. Asks each of those addresses for a device's status with that device's local key, trying 3.3, 3.4 and 3.5 in turn, then 3.1. A device only answers to its own key, so a reply identifies it.
+Results are saved for later visits. Scans run only when requested. **Refresh** fetches device details from Tuya without scanning the network.
 
-A first scan of a /24 takes about 30 seconds for a typical home. An account with many devices takes longer, up to a few minutes, because each address that answers is asked with every key not yet matched. The results are saved, so later visits show them straight away. The next scan checks each device at its last address first, so a device that hasn't moved is found in about a second, but the scan still starts by checking every address, which takes several seconds on a /24. A scan never runs on its own: Refresh only reloads the list from Tuya.
-
-For a device the scan missed, open its **Local network** view and use **Check** with its IP address (for example `192.168.2.1`), which you can find in your router's client list. A Check that fails at an address the device wasn't known at only reports the result. It doesn't replace what the last scan saved. When connection details are complete and no failure needs attention, the view shows just **Recheck connection** to test the saved address again.
+For a missed device, open **Local network** and check the IP shown in your router's client list. Use **Recheck connection** to test an existing connection.
 
 ### Fix Connection
 
-Open a device's **Local network** view and choose **Fix connection** for guided troubleshooting:
+Open a device's **Local network > Fix connection** for guided troubleshooting:
 
-1. **Details:** review the saved connection details and choose **Continue**. When the key or gateway is unavailable, the app offers a refresh or login instead. Key values stay hidden in the wizard.
-2. **Test:** enter the device's local IP from your router and choose **Test connection**. The full-width button sits below the IP field. If you do not know the address, choose **Don't know the IP? Find it** to open a separate network-range screen. Scans use all account devices, including excluded devices. A running check can be stopped.
-3. **Next steps:** read the result and take the suggested action, such as refreshing a rejected key, finding a missing device, or retrying a refused connection. A successful check offers **Open setup values**. The screen shows one main action instead of a list of unrelated options.
+1. Review the saved details.
+2. Enter the device's local IP and test it, or scan to find the address.
+3. Follow the suggested recovery step or open the setup values after a successful check.
 
-Use the panel's **Back** button or Escape for the previous screen, including returning from a network scan to manual IP entry. The IP and network-range drafts are kept while navigating. A completed check can be tested again by going back to **Test**.
+Use **Back** or Escape to return to the previous step. Changes to your local integration must be made in that integration.
 
-Opening the wizard starts no network check or Tuya refresh. Tests and scans use the existing LAN checker and close their connections afterward. Refreshing from Tuya is a separate action. If Tuya cannot be reached or your login has expired, the wizard explains that it is using saved details and offers a new login when needed.
-
-For a sub-device, the wizard tests its identified gateway and displays the gateway's report of the sub-device separately. A checked gateway does not establish that the sub-device itself is responding. Unidentified gateways must be checked at the correct IP before proceeding. Protocol 3.1 remains **Device found, key not verified**, since its status reply cannot verify the local key.
-
-Changes to your Home Assistant integration remain a manual step through **Open setup values**.
-
-To inspect actual local data points after checking the connection, open the device's [Current values](usage.md#read-current-values) view. A connection check and a value read are separate actions. The value read does not change saved scan results.
+To read the device's data points, use [Current values](usage.md#read-current-values).
 
 ### Networks and Firewalls
 
-The scan makes ordinary routed TCP connections and never relies on broadcasts, so it works when your devices are on a different VLAN from the app. Allow TCP port 6668 from the machine running Tuya Local Key to the IoT network. From Docker or the Home Assistant app, connections leave with the host's address, so the rule is for the host. The IoT network needs no access back. Set `LAN_SUBNET` to prefill the scan box.
+Allow TCP port **6668** from the machine running Tuya Local Key to the IoT network. Scanning works across routed VLANs without broadcasts. For Docker and Home Assistant, allow traffic from the host. Set `LAN_SUBNET` to prefill the scan range.
 
 ### What the Status Column Shows
 
-After a scan, the Status column shows what the device did when asked, tagged `LAN`. Devices without a scan result still show the cloud's online flag, which is often wrong about devices that are on your network.
+Local results are tagged **LAN** to distinguish them from Tuya's cloud status.
 
 | Status | Meaning |
 |---|---|
-| reachable | Answered on port 6668 to its local key. |
-| via gateway | A Zigbee or Bluetooth sub-device. It shares its gateway's key and is reached at the gateway's IP and version. It has no protocol version of its own, so its Protocol column shows a dash with the gateway's version in a tooltip. Its details panel labels the values **Gateway IP** and **Gateway protocol**, and links to the gateway when known. It is greyed out when the scan didn't find the gateway. See [Gateways](#gateways). |
-| offline | A sub-device whose gateway answered, but reports it offline. The scan asks each gateway it finds which of its sub-devices are online, since the gateway answering says nothing about them. |
-| check needed | A gateway Tuya lists without a key, which the last scan found but couldn't tell apart from your other gateways. Check it at its IP. See [Gateways](#gateways). |
-| busy | Refused the connection at its last known IP. Tuya devices accept only one local connection, so a device already connected to Home Assistant or another local client refuses new ones. A manual Check will be refused too until that client lets go. |
-| key mismatch | Answered at its last known IP, but not to its key, at the version it used before, twice in a row. The key has probably changed, so click Refresh. Another device may also have taken that IP. |
-| unreachable | Didn't answer at its last known IP. |
-| not found | No scanned address answered to its key. |
+| reachable | The device answered with its local key. |
+| via gateway | A sub-device reached through its gateway. See [Gateways](#gateways). |
+| offline | The gateway reports that its sub-device is offline. |
+| check needed | A gateway needs to be identified at its correct IP. |
+| busy | Another local client may be using the connection. Disconnect that client and retry. |
+| key mismatch | The device rejected the saved key. Refresh from Tuya and confirm the IP. |
+| unreachable | The device did not answer at its last known IP. |
+| not found | The scan did not find a matching device. |
 
-The scan never holds a connection itself. Each check opens a connection, asks once and closes it, usually within a fraction of a second, or after a few seconds for an address that doesn't answer. It never has more than one connection open to an address, so a local integration that reconnects at that exact moment only has to retry, as it does after any dropped connection.
+Protocol 3.1 replies show **Device found**, because they cannot verify the local key. A successful gateway check does not prove that its sub-devices are responding.
 
-The scan summary lists the addresses that refused connections, the ones that answered but not to any key in your account, and any that ran out of time before every key was tried, so you can match them against your router's client list. An address that refuses isn't necessarily a Tuya device: any device that doesn't use port 6668 refuses it. The .1 that starts each subnet you enter, where a router usually sits, is still scanned but left out of these lists unless one of your devices answers there.
+Checks close their connections after reading status. The scan summary lists refused, unmatched, and incomplete checks to help compare results with your router's client list.
 
 ### Gateways
 
-Tuya's device-sharing API can list a Zigbee or Bluetooth gateway with no local key, and put the gateway's key on each of its sub-devices instead. It doesn't say which sub-devices belong to which gateway, and it can mark the gateway itself as a sub-device. The scan tells gateways apart by their category, and tries the keys on your sub-devices at each address that answers.
+Zigbee and Bluetooth sub-devices use their gateway's local key, IP, and protocol. Their own **Node ID** identifies them to the gateway. Copy these settings from the sub-device's **Set up in…** page.
 
-When Tuya or a scan identifies which gateway a sub-device belongs to, the table groups it under that gateway. Groups start expanded. Use the arrow beside the gateway's name to collapse or expand its sub-devices. Sorting keeps each group together and sorts its sub-devices within it. Searching reveals matching sub-devices and shows their gateway for context. Unlinked sub-devices stay in their own rows until the gateway is known.
+Identified sub-devices appear under their gateway in the table. The **Local Key / Node ID** column shows local keys for gateways and Node IDs for sub-devices.
 
-When the account has sub-devices, the key column is labelled **Local Key / Node ID**. Gateway and direct-device rows show local keys; sub-device rows show copyable Node IDs with setup tooltips. Node IDs stay visible when keys are hidden, and show a dash when missing. Without sub-devices, the heading remains **Local Key**. The details panel keeps **Gateway local key**, **Node ID** and **UUID** separate for sub-devices.
-
-- **One gateway without a key:** it gets the key its sub-devices carry. Its row shows that key, marked with an asterisk, along with its IP and version. The asterisk's tooltip and a note below the table say the key comes from a sub-device.
-- **Several gateways without a key:** the scan still finds where each key answers, so every sub-device gets its gateway's IP and version. Tuya's data doesn't say which gateway is at which address, so the gateways show **check needed**, and the scan summary lists each address with the sub-devices whose key answered there. Open a gateway and **Check** it at its IP, with one click on the address its sub-devices point to, or one from your router's client list. The key it answers to becomes its key, and later scans remember it. When that leaves only one gateway, it's checked too, so two gateways take one click. A gateway checked at the wrong IP takes the other gateway's key, so check it again at the right one.
-
-For tuya-local setup, use the gateway's IP, protocol version and local key, together with the sub-device's **Node ID**. These fields are available in the sub-device's details panel, with a link to its gateway when known.
-
-In the CSV export and the CLI, a sub-device keeps its gateway's IP in `local_ip` and version in `protocol_version`, which local tools need to reach it, and `lan_gateway_id` names that gateway. `lan_sub_online` says whether that gateway reports it online, and is empty when the gateway didn't say. Collapsing a group does not remove its sub-devices from the CSV. The export still follows the filter and sort order, and excludes gateways shown only for context.
+If only one gateway lacks a key, the app can use the key supplied with its sub-devices. With several unidentified gateways, open each gateway's **Local network** page and check its correct IP from your router. Avoid guessing addresses, as that can associate a gateway with the wrong key.
 
 ### device22
 
-Some devices need a quirk tinytuya calls `device22`. The Protocol column marks it next to the version, and the details panel gives the name tuya-local uses: `3.22` for 3.3 with the quirk, `3.42` for 3.4. Version 3.2 behaves exactly like 3.3 with the quirk, so the scan reports it that way.
+Some devices use tinytuya's `device22` quirk. The app shows the corresponding tuya-local version in the device details: **3.22** for protocol 3.3 with the quirk, or **3.42** for 3.4. Protocol 3.2 is reported as 3.3 with this quirk.

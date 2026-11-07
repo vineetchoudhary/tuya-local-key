@@ -16,6 +16,7 @@ import * as shell from "./features/shell.js";
 import * as support from "./features/support.js";
 import * as troubleshoot from "./features/troubleshoot.js";
 import * as values from "./features/values.js";
+import * as updates from "./features/updates.js";
 import { appState } from "./shared/state.js";
 
 export function render() {
@@ -175,6 +176,7 @@ export function initApp() {
     watchScan: network.watchScan,
   });
   header.initHeader({ goHome });
+  updates.initUpdates({ layoutActions: header.layoutActions });
   // Each eye controls only its own area, without repainting the other one.
   document.addEventListener("click", (e) => {
     const toggle = e.target.closest("[data-key-toggle]");
@@ -196,11 +198,12 @@ export function initApp() {
   copyOnClick($("fixBody"));
   copyOnClick($("valuesBody"));
   document.addEventListener("keydown", (e) => {
+    // Let Escape close a modal without changing the view behind it.
+    if (e.key === "Escape" && document.querySelector("dialog[open]")) return;
     if (e.key === "Escape" && !$("filtersPopover").classList.contains("hidden")) {
       e.preventDefault(); e.stopPropagation(); filters.closeFilters(true); return;
     }
-    // Escape in the confirmation closes only the dialog, not the panel behind it.
-    if (e.key === "Escape" && !$("logoutDialog").open) {
+    if (e.key === "Escape") {
       if (appState.selectionMode && !appState.selectedId) { e.preventDefault(); filters.setSelectionMode(false); }
       else panel.backPanel();
     }

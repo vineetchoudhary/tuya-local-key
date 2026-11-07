@@ -34,7 +34,7 @@ ol.steps b { color: var(--fg); font-weight: 650; }
   font-size: 13.5px; line-height: 1.55; color: var(--muted);
 }
 .note b { color: var(--fg); font-weight: 650; }
-/* Log out confirmation */
+/* Modal dialogs */
 dialog.confirm {
   width: min(420px, calc(100% - 32px)); padding: 22px; border-radius: 12px;
   border: 1px solid var(--border); background: var(--card); color: var(--fg);

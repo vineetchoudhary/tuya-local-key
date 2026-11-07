@@ -71,6 +71,7 @@ def test_dockerfile_has_home_assistant_labels_and_runtime_contract():
     assert "device_preferences.py" in dockerfile
     assert "device_values.py" in dockerfile
     assert "support_report.py" in dockerfile
+    assert "updates.py" in dockerfile
     assert "pyproject.toml" in dockerfile
     assert "lan_scan.py" in dockerfile
     assert "COPY templates ./templates" in dockerfile
