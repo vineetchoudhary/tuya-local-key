@@ -53,11 +53,18 @@ body.panel-open .panel { transition-delay: 0s; }
 .panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 20px 20px 28px; background: var(--bg); }
 .device-menu { list-style: none; padding: 0; margin: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--card); }
 .device-menu li + li { border-top: 1px solid var(--border); }
-.device-menu-item { display: grid; grid-template-columns: 36px minmax(0, 1fr) 16px; align-items: center; gap: 12px;
+.device-menu-item { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr) 16px; align-items: center; gap: 12px;
   width: 100%; min-height: 80px; padding: 15px 14px; border: 0; border-radius: 0; background: transparent; text-align: left;
 }
 .device-menu-item:hover { background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
-.device-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+.device-menu-item:focus-visible { outline: none; background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+/* Keep the frame inside the row so the rounded list cannot clip its edges. */
+.device-menu-item:focus-visible::after { content: ""; position: absolute; inset: 3px; border: 2px solid var(--accent); pointer-events: none; }
+.device-menu > li:first-child .device-menu-item:focus-visible::after { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+.device-menu > li:last-child .device-menu-item:focus-visible::after { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+@media (forced-colors: active) {
+  .device-menu-item:focus-visible::after { border-color: Highlight; }
+}
 .device-menu-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px;
   color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card));
 }

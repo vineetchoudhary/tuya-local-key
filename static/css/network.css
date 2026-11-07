@@ -38,6 +38,6 @@
 .network-gateways li + li { margin-top: 6px; }
 .network-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 14px; margin-top: 16px; border-top: 1px solid var(--border); }
 .network-actions button { flex: 1 1 140px; min-width: 0; padding: 9px 10px; font-size: 13px; }
-.network-actions button:focus-visible, #panelNetworkOpen:focus-visible, .setup-note-actions button:focus-visible {
+.network-actions button:focus-visible, .setup-note-actions button:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
