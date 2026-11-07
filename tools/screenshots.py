@@ -13,7 +13,7 @@ from the same run, so the pair always shows the same state.
 
 Nothing here reaches the network and no real session is touched: the session
 file lives in a temp directory and the two Tuya calls the UI can make are
-stubbed. Re-running only changes an image when the UI changed.
+stubbed. Run it after UI changes to refresh the previews.
 """
 
 import argparse
@@ -25,6 +25,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [ROOT, os.path.join(ROOT, "tools")]
@@ -86,6 +87,11 @@ class Fixture:
         self.app.core.mint_qr_token = lambda user_code: DEMO_QR_TOKEN
         self.app.core.poll_login = lambda token, user_code: None   # stays pending
         self.app.lan_scan.scan = self._scan
+        self.app.device_values.read = self._read
+        self.app._update_checker.status = lambda current_version, **kwargs: {
+            "current_version": current_version, "available": False, "check_after_seconds": 86400,
+            "status": "ok", "last_check_succeeded": True,
+        }
 
         self._server = make_server("127.0.0.1", 0, self.app.app, threaded=True)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -130,7 +136,16 @@ class Fixture:
 
     def _scan(self, targets, devices, known, progress=None, cancel=None, only=None, routers=None):
         results = demo_fleet.lan_results()
-        return {"results": results, "summary": demo_fleet.lan_summary(results)}
+        checked_at = time.time()
+        for result in results.values():
+            result["checked_at"] = checked_at
+        summary = demo_fleet.lan_summary(results)
+        summary["finished_at"] = checked_at
+        return {"results": results, "summary": summary}
+
+    def _read(self, context):
+        return {"status": "ok", "read_at": self.app._devices_cache["cached_at"] + 1,
+                "dps": {"1": True, "9": 0, "19": 785, "20": 3410, "21": 2302, "22": 1284}}
 
     def close(self):
         self._server.shutdown()
@@ -182,6 +197,42 @@ def shot_header_devices(page, fx):
     return {"clip": {"x": 0, "y": 0, "width": HERO_WIDTH, "height": HERO_HEIGHT}}
 
 
+def demo_update(fx):
+    version = fx.app.support_report.app_version()
+    major, minor, _ = fx.app.updates.version_parts(version)
+    latest = f"{major}.{minor + 1}"
+    return {
+        "available": True, "current_version": version, "latest_version": latest,
+        "installation": "standalone", "check_after_seconds": 86400,
+        "update_url": f"https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v{latest}",
+        "status": "ok", "last_check_succeeded": True,
+    }
+
+
+def shot_header_update(page, fx):
+    page.route("**/api/updates", lambda route: route.fulfill(json=demo_update(fx)))
+    options = shot_header_devices(page, fx)
+    page.wait_for_selector("#updateBadge:not(.hidden)")
+    return options
+
+
+def shot_update_available(page, fx):
+    page.route("**/api/updates/check", lambda route: route.fulfill(json=demo_update(fx)))
+    open_list(page, fx)
+    page.click("#footerCheckUpdates")
+    page.wait_for_selector("#updateDialog[open]")
+    page.wait_for_selector("#updateDialogLink:not(.hidden)")
+    return {"element": "#updateDialog"}
+
+
+def shot_no_updates(page, fx):
+    open_list(page, fx)
+    page.click("#footerCheckUpdates")
+    page.wait_for_selector("#updateDialog[open]")
+    page.wait_for_selector("#updateDialogTitle:text-is('No updates available')")
+    return {"element": "#updateDialog"}
+
+
 def shot_filter(page, fx):
     open_list(page, fx)
     page.fill("#filter", "plug")
@@ -222,8 +273,75 @@ def panel_clip(page):
 def shot_details(page, fx):
     open_list(page, fx)
     open_device_panel(page)
+    fit_panel(page, "menuBody")
+    return panel_clip(page)
+
+
+def shot_device_information(page, fx):
+    open_list(page, fx)
+    open_device_panel(page)
+    page.click("#panelInfoOpen")
     fit_panel(page, "panelBody")
-    return {}
+    return panel_clip(page)
+
+
+def shot_raw_json(page, fx):
+    open_list(page, fx)
+    open_device_panel(page)
+    page.click("#panelRawOpen")
+    page.set_viewport_size({"width": WIDTH, "height": HEIGHT})
+    return panel_clip(page)
+
+
+def shot_current_values(page, fx):
+    open_list(page, fx)
+    open_device_panel(page)
+    page.click("#panelValuesOpen")
+    page.click("#valuesBody [data-values-action='read']")
+    page.wait_for_selector("#valuesBody [data-values-action='read']:text-is('Read again')")
+    page.click("#valuesBody .values-specs summary")
+    fit_panel(page, "valuesBody")
+    return panel_clip(page)
+
+
+def fix_connection_panel(page, fx, step):
+    open_list(page, fx, scanned=False)
+    open_device_panel(page)
+    page.click("#panelNetworkOpen")
+    page.click("#networkBody [data-network-action='fix']")
+    if step >= 1:
+        page.click("#fixBody [data-fix-action='test']")
+        page.wait_for_selector("#fixCheckIP")
+    if step >= 2:
+        device_id = demo_fleet.fleet()[1].id
+        page.fill("#fixCheckIP", demo_fleet.lan_results()[device_id]["ip"])
+        page.click("#fixBody [data-lan-check] button")
+        page.wait_for_selector("#fixBody [data-fix-heading]:text-is('Connection checked')")
+    fit_panel(page, "fixBody")
+    return panel_clip(page)
+
+
+def shot_fix_connection_details(page, fx):
+    return fix_connection_panel(page, fx, 0)
+
+
+def shot_fix_connection_test(page, fx):
+    return fix_connection_panel(page, fx, 1)
+
+
+def shot_fix_connection_result(page, fx):
+    return fix_connection_panel(page, fx, 2)
+
+
+def shot_support_report(page, fx):
+    open_list(page, fx)
+    open_device_panel(page)
+    with page.expect_download() as downloaded:
+        page.click("#panelSupportDownload")
+    assert downloaded.value.failure() is None
+    page.wait_for_selector("#menuBody [role='status']:text-is('Support report downloaded.')")
+    fit_panel(page, "menuBody")
+    return panel_clip(page)
 
 
 def setup_panel(page, fx, tool):
@@ -296,13 +414,23 @@ SHOTS = {
     "qr-login": shot_qr_login,
     "devices": shot_devices,
     "header-devices": shot_header_devices,
+    "header-update": shot_header_update,
+    "update-available": shot_update_available,
+    "no-updates": shot_no_updates,
     "changes": shot_changes,
     "scan": shot_scan,
     "details": shot_details,
+    "device-information": shot_device_information,
+    "raw-json": shot_raw_json,
     "setup-tuya-local": shot_setup_tuya_local,
     "setup-localtuya": shot_setup_localtuya,
     "setup-tinytuya": shot_setup_tinytuya,
     "local-network": shot_local_network,
+    "fix-connection-details": shot_fix_connection_details,
+    "fix-connection-test": shot_fix_connection_test,
+    "fix-connection-result": shot_fix_connection_result,
+    "current-values": shot_current_values,
+    "support-report": shot_support_report,
     "filter": shot_filter,
 }
 
@@ -312,11 +440,16 @@ def capture(browser, fx, name, scheme):
                                   timezone_id=TIMEZONE, color_scheme=scheme)
     try:
         page = context.new_page()
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
         options = SHOTS[name](page, fx)
         page.mouse.move(0, 0)
         page.evaluate("document.activeElement.blur()")
         path = os.path.join(OUT_DIR, f"{name}-{scheme}.png")
-        page.screenshot(path=path, **options)
+        element = options.pop("element", None)
+        target = page.locator(element) if element else page
+        target.screenshot(path=path, **options)
+        assert not errors, f"{name} raised browser errors: {errors}"
         return path
     finally:
         context.close()
