@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a problem with Tuya Local Key.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem and include a support report when one is available.
+        For help getting started, see the [troubleshooting guide](https://github.com/vineetchoudhary/tuya-local-key/blob/main/docs/troubleshooting.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe what went wrong and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Explain how to trigger the problem, step by step.
+      placeholder: |
+        1. Open...
+        2. Select...
+        3. The problem appears when...
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: How are you running Tuya Local Key?
+      options:
+        - Home Assistant app
+        - Docker Compose
+        - Docker
+        - Web UI from source
+        - CLI
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: App version or Docker image tag. Include this if you cannot generate a support report.
+      placeholder: Version or image tag
+  - type: markdown
+    attributes:
+      value: |
+        ### Download and attach a support report
+
+        1. Open Tuya Local Key and select the affected device.
+        2. In its side panel, choose **Download a support report**.
+        3. Drag the downloaded `tuya-local-key-support-*.json` file into the **Support report** field below, or use the field's attachment button.
+
+        The exported report removes keys and personal details. If the app cannot open, no device is listed, or you use the CLI, explain why a report is unavailable instead.
+  - type: textarea
+    id: support-report
+    attributes:
+      label: Support report
+      description: Attach the downloaded JSON file, or explain why you could not generate it.
+      placeholder: Drop the support report file here, or explain why it is unavailable.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context or screenshots
+      description: Include anything else that helps explain the problem, such as your browser or screenshots.

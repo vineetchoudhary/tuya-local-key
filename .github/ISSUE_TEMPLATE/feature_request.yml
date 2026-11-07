@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest an improvement or a new feature for Tuya Local Key.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what you want to achieve and how the feature would help.
+        For something that is not working as expected, please use the bug report form.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe your use case, what is difficult today, and who would benefit.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like to add or change?
+      description: Describe how you would like the app to work.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any workarounds or other approaches you have tried.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context or mockups
+      description: Add any examples, links, screenshots or mockups that help explain the request.
