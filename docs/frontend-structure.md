@@ -20,12 +20,13 @@ Styles live in `static/css/`. Load them in the order listed in the main template
 | `filters.js` | Home filters, saved exclusions, selection state, and exclusion/restoration requests |
 | `notices.js` | Cloud and LAN change notices, scan summaries, and dismissal preferences |
 | `panel.js` | Panel navigation, history, focus, scroll, and disclosure state |
-| `device-menu.js` | The device options list and its five page entries |
+| `device-menu.js` | The device options list, its five page entries and support report download action |
 | `details.js` | Device fields, shared data point definitions, and masked raw JSON |
 | `setup.js` | Integration tabs, setup values, snippets, and inline guidance |
 | `network.js` | LAN results, scan/check requests, scan polling, and the Local network page |
 | `troubleshoot.js` | The Fix connection wizard, recovery guidance, and inline scan forms using the network controller |
 | `values.js` | Manual local status reads, temporary readings, and the cloud/local value comparison |
+| `support.js` | Support report download, retry feedback, and rejection of replies from an older device/account snapshot |
 | `header.js` | App name/logo home action, responsive action placement, and the More actions menu |
 
 Cross-feature data lives in `shared/state.js` as `appState`. Features keep their timers and private caches in their own modules. Modules in `shared/` provide the API helper, device/gateway/connection derivations, constants, HTML/field renderers, formatting, icons, and clipboard support.
@@ -35,6 +36,8 @@ Feature controllers import shared modules directly. Actions from other controlle
 To add a panel page, provide its renderer and register its body element, title, back label, and optional initial focus selector with `registerPanelPage` in `app.js`. Existing panel navigation and Back handling then apply to it. A page with internal steps can provide `back` and `stepBackLabel` callbacks so the same Back button and Escape key return through those steps before leaving the page.
 
 The initial panel page is `menu`, rendered in `menuBody`. Its buttons use `data-panel-page` and the panel's delegated click handler. Device information (`panelBody`) and raw JSON (`rawBody`) are independent pages alongside setup, network, troubleshooting and current values. Saved data points and their definitions are part of Current values (`valuesBody`). The header keeps the page title and device identity separate. Inactive page bodies are cleared, so the menu contains no hidden copies of device fields or local keys.
+
+The support report entry uses `data-support-report` to download directly without opening another page. `POST api/support-report` builds an allowlisted report from the server's account-scoped snapshots in `support_report.py`; the browser saves only the returned `report` object, not its account response envelope.
 
 ## URLs and configuration
 

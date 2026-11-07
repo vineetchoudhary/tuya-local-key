@@ -13,6 +13,7 @@ import * as notices from "./features/notices.js";
 import * as panel from "./features/panel.js";
 import * as setup from "./features/setup.js";
 import * as shell from "./features/shell.js";
+import * as support from "./features/support.js";
 import * as troubleshoot from "./features/troubleshoot.js";
 import * as values from "./features/values.js";
 import { appState } from "./shared/state.js";
@@ -142,6 +143,7 @@ export function initApp() {
   panel.initPanel({
     loadDevices: devices.loadDevices,
     repaintSetup: setup.repaintSetup,
+    resetSupport: support.resetSupport,
     saveExclusions: filters.saveExclusions,
     showScanBox: network.showScanBox,
   });
@@ -160,6 +162,7 @@ export function initApp() {
     resetValues: values.resetValues,
   });
   values.initValues({ loadDevices: devices.loadDevices, navigatePanel: panel.navigatePanel, renderPanel: panel.renderPanel });
+  support.initSupport({ renderPanel: panel.renderPanel });
   troubleshoot.initTroubleshoot({
     cancelScan: network.cancelScan,
     checkDevice: network.checkDevice,

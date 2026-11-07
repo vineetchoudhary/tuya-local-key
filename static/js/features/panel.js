@@ -6,7 +6,7 @@ import { statusBadge } from "../shared/model.js";
 import { appState } from "../shared/state.js";
 
 // Cross-feature actions are connected by app.js.
-let loadDevices, repaintSetup, saveExclusions, showScanBox;
+let loadDevices, repaintSetup, saveExclusions, showScanBox, resetSupport = () => {};
 
 const panelPageCache = new Map();
 
@@ -81,7 +81,10 @@ function newPanelPage(id, view) {
 }
 
 function activatePanelPage(page) {
-  if (appState.selectedId !== page.id) appState.panelKeyVisible = false;
+  if (appState.selectedId !== page.id) {
+    appState.panelKeyVisible = false;
+    resetSupport();
+  }
   appState.panelPage = page; appState.selectedId = page.id; appState.panelView = page.view;
   if (appState.panelView === "setup" && page.state.setup) {
     appState.setupTool = page.state.setup.tool;
@@ -105,6 +108,7 @@ function focusPanelPage(selector) {
 // Table and notice links start a new panel visit. Links inside it use navigatePanel.
 function openPanel(id, view = "menu") {
   if (!PANEL_PAGES[view] || !appState.deviceData.some(d => d.id === id)) return;
+  resetSupport();
   const row = appState.panelOpener && appState.panelOpener.closest("#rows tr[data-id]");
   appState.panelOpenerSelector = row ? `#${CSS.escape(row.id)} [data-open]`
     : appState.panelOpener && appState.panelOpener.hasAttribute("data-open-device")
@@ -150,6 +154,7 @@ function backPanel() {
 
 function closePanel() {
   if (!appState.selectedId) return;
+  resetSupport();
   appState.selectedId = null; appState.panelPage = null; appState.panelView = "menu";
   appState.panelKeyVisible = false;
   appState.panelHistory = []; panelPageCache.clear();
@@ -235,7 +240,7 @@ let initialized = false;
 function initPanel(actions = {}) {
   if (initialized) return;
   initialized = true;
-  ({ loadDevices, repaintSetup, saveExclusions, showScanBox } = actions);
+  ({ loadDevices, repaintSetup, saveExclusions, showScanBox, resetSupport = () => {} } = actions);
   // Device links stay in the current view, including a gateway's setup view.
   $("panel").addEventListener("click", (e) => {
     const entry = e.target.closest("[data-panel-page]");

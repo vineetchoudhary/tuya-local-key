@@ -75,6 +75,7 @@ Selecting a device row opens a side panel with a list of options. The first scre
 | Current values | Saved data points, local IDs and definitions, plus manual LAN readings beside the cloud snapshot. |
 | Device information | Identity, keys, connectivity, account, timeline, and additional fields reported by Tuya. |
 | Raw JSON | The complete saved device record, with key visibility and a copy button. |
+| Download a support report | Save a JSON file containing diagnostic details with private information removed. |
 
 The panel keeps the device name visible on every page. Use **Back** or Escape to return to the previous page, then back to the options list. Each page keeps its scroll position and any input draft during that visit. Closing and reopening a device starts at the options list with local keys hidden. Excluded devices offer **Restore device** in the options list.
 
@@ -93,6 +94,20 @@ Choose **Set up in…** from the device's options list to open the setup view fo
 The separate **Local network** view shows connection problems and the last local result. When the connection details are complete and no failure needs attention, it shows **Recheck connection** instead of an IP form, repair button, or scan button. **Connection checked** means the device answered with the current local key; **Gateway checked** applies only to a sub-device's gateway. The gateway's report of the sub-device is shown separately. Protocol 3.1 status replies do not verify the key, so they show **Device found**. Older saved scans and results from before a key change need another check.
 
 When details are missing or a connection fails, choose **Fix connection** for a [guided connection check](network-scanning.md#fix-connection). It walks through the saved details, an IP check or network scan, and suggested recovery steps. Each screen offers the relevant next action. Use the panel's **Back** button or Escape to return through the steps.
+
+### Download a Support Report
+
+Choose **Download a support report** from a device's options to save a JSON file for troubleshooting. The download includes the app, Python and library versions; product and category details; data point IDs, types and definitions; saved connection evidence; and the latest relevant network check's outcome and timings. A sub-device's gateway information is kept separate from that child's status. Protocol 3.1 is never labelled as key verification.
+
+The report uses the existing snapshot. Downloading it does not refresh Tuya, start a network scan, or read the device. Local keys, credentials, device/account IDs, personal device/home/room names, addresses, coordinates, current values and raw logs are excluded. Extra SDK fields are omitted by default. The file stays in your browser's download location; share it yourself when asking for help.
+
+To include it in a bug report:
+
+1. Select the affected device and choose **Download a support report** in its side panel.
+2. Open a [bug report](https://github.com/vineetchoudhary/tuya-local-key/issues/new?template=bug_report.yml).
+3. Drag the downloaded `tuya-local-key-support-*.json` file into the **Support report** field, or use its attachment button.
+
+If the app cannot open, no device is listed, or you use the CLI, explain why a report cannot be generated and include the app version or image tag instead.
 
 ### Read Current Values
 

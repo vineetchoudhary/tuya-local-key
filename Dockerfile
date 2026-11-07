@@ -22,7 +22,7 @@ COPY requirements.txt requirements-web.txt ./
 RUN pip install -r requirements-web.txt
 
 # App
-COPY tuya_devices.py app.py device_cache.py device_preferences.py device_values.py lan_scan.py ./
+COPY tuya_devices.py app.py device_cache.py device_preferences.py device_values.py lan_scan.py support_report.py pyproject.toml ./
 COPY LICENSE NOTICE ./
 COPY templates ./templates
 COPY static ./static

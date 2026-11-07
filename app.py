@@ -18,9 +18,11 @@ Endpoints (JSON unless noted):
   GET  /api/lan/scan        -> {"job": {...} | null}
   DELETE /api/lan/scan      -> {"ok": true}
   POST /api/lan/read        -> {"device_id", "status", "dps"?, "read_at"?}
+  POST /api/support-report  -> {"report", "account_id"} for {"device_id", "account_id"?}
 """
 
 import base64
+import copy
 import hashlib
 import hmac
 import json
@@ -35,6 +37,7 @@ import device_cache
 import device_preferences
 import device_values
 import lan_scan
+import support_report
 import tuya_devices as core
 
 SESSION_FILE = os.environ.get(
@@ -1070,6 +1073,50 @@ def lan_read():
             return _devices_response(dict(result, device_id=device_id), current)
     finally:
         _lan_read_lock.release()
+
+
+@app.post("/api/support-report")
+def download_support_report():
+    if request.content_length is not None and request.content_length > 4096:
+        return jsonify({"error": "request_too_large"}), 413
+    data = _json_object()
+    device_id = data.get("device_id")
+    if not isinstance(device_id, str) or not device_id or len(device_id) > 256:
+        return jsonify({"error": "invalid_device"}), 400
+    with _account_lock:
+        session, session_key = _lan_session()
+        if not session:
+            return jsonify({"error": "not_logged_in"}), 401
+        error = _scan_account_precondition(session, data)
+        if error:
+            return error
+        generation = _account_generation
+        with _devices_cache_lock:
+            cache = _devices_cache_for_session(session)
+            if not cache:
+                return jsonify({"error": "no_devices"}), 409
+            devices = copy.deepcopy([d for d in cache["body"].get("devices", []) if isinstance(d, dict)])
+            snapshot_at = cache.get("cached_at")
+        current = {device.get("id"): device for device in devices}
+        if device_id not in current:
+            return jsonify({"error": "unknown_device"}), 404
+        with _lan_lock:
+            stored = _lan_body_for(session_key) or _empty_lan_body()
+            evidence = stored.get("key_evidence") or {}
+            results = {dev_id: dict(copy.deepcopy(result),
+                                   key_current=_lan_key_current(result, evidence.get(dev_id), current))
+                       for dev_id, result in (stored.get("results") or {}).items()}
+            job = copy.deepcopy(_job_view(_lan_job)) if _lan_job and _lan_job["session_key"] == session_key else None
+    try:
+        report = support_report.build(devices, results, device_id, snapshot_at, job=job, session=session)
+    except Exception as error:
+        app.logger.warning("Support report unavailable: %s", type(error).__name__)
+        return jsonify({"error": "report_unavailable"}), 502
+    with _account_lock:
+        current_session, current_key = _lan_session()
+        if not current_session or current_key != session_key or generation != _account_generation:
+            return jsonify({"error": "account_changed"}), 409
+        return _devices_response({"report": report}, current_session)
 
 
 @app.get("/api/lan/scan")

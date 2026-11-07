@@ -57,6 +57,8 @@ body.panel-open .panel { transition-delay: 0s; }
   width: 100%; min-height: 80px; padding: 15px 14px; border: 0; border-radius: 0; background: transparent; text-align: left;
 }
 .device-menu-item:hover { background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+.device-menu-item[aria-disabled="true"] { opacity: .65; cursor: progress; }
+.device-menu-message { margin: 14px 2px 0; color: var(--muted); font-size: 13px; }
 .device-menu-item:focus-visible { outline: none; background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
 /* Keep the frame inside the row so the rounded list cannot clip its edges. */
 .device-menu-item:focus-visible::after { content: ""; position: absolute; inset: 3px; border: 2px solid var(--accent); pointer-events: none; }

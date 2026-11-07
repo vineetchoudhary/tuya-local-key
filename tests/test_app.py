@@ -1114,6 +1114,68 @@ def _values_ready(webapp, monkeypatch, devices=None):
     return client
 
 
+def test_support_report_requires_login_a_saved_list_and_a_known_device(webapp, monkeypatch):
+    client = webapp.app.test_client()
+    assert client.post("/api/support-report", json={"device_id": "plug"}).status_code == 401
+    webapp.core.save_session(webapp.SESSION_FILE, dict(PREFERENCE_SESSION))
+    assert client.post("/api/support-report", json={"device_id": "plug"}).status_code == 409
+    client = _values_ready(webapp, monkeypatch)
+    assert client.post("/api/support-report", json={"device_id": "unknown"}).status_code == 404
+    assert client.post("/api/support-report", json=[]).status_code == 400
+    assert client.post("/api/support-report", json={"device_id": []}).status_code == 400
+    assert client.post("/api/support-report", json={"device_id": "x" * 5000}).status_code == 413
+
+
+def test_support_report_uses_only_cached_state_and_never_writes_or_starts_network_activity(webapp, monkeypatch):
+    client = _values_ready(webapp, monkeypatch)
+    before = {path: Path(path).read_bytes() for path in
+              (webapp.SESSION_FILE, webapp.DEVICE_CACHE_FILE, webapp.LAN_CACHE_FILE)}
+    for module, attribute in ((webapp.core, "devices_from_session"), (webapp.lan_scan, "scan"), (webapp.device_values, "read")):
+        monkeypatch.setattr(module, attribute, lambda *a, **kw: pytest.fail("report started network activity"))
+    response = client.post("/api/support-report", json={"device_id": "plug", "account_id": client.get("/api/lan").json["account_id"]})
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    report = response.json["report"]
+    assert report["schema_version"] == 1
+    assert report["device"]["connection"]["protocol_version"] == "3.3"
+    assert report["device"]["connection"]["key_verified"] is False, "legacy evidence is not verification"
+    assert "account_id" not in report
+    assert not any(value in json.dumps(report) for value in ("plug-key-0123456", "Kitchen Plug", "10.0.0.3", "secret"))
+    assert all(Path(path).read_bytes() == data for path, data in before.items())
+    assert webapp._lan_job is None
+
+
+def test_support_report_rejects_a_stale_accounts_request(webapp, monkeypatch):
+    client = _values_ready(webapp, monkeypatch)
+    response = client.post("/api/support-report", json={"device_id": "plug", "account_id": "another-account"})
+    assert response.status_code == 409 and response.json == {"error": "account_changed"}
+
+
+def test_support_report_discards_a_report_if_the_account_changes_during_generation(webapp, monkeypatch):
+    client = _values_ready(webapp, monkeypatch)
+    build = webapp.support_report.build
+
+    def switch(*args, **kwargs):
+        result = build(*args, **kwargs)
+        webapp.core.save_session(webapp.SESSION_FILE, dict(PREFERENCE_SESSION, user_code="another-account"))
+        return result
+
+    monkeypatch.setattr(webapp.support_report, "build", switch)
+    response = client.post("/api/support-report", json={"device_id": "plug"})
+    assert response.status_code == 409 and response.json == {"error": "account_changed"}
+
+
+def test_support_report_never_returns_an_exception_message(webapp, monkeypatch):
+    client = _values_ready(webapp, monkeypatch)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("private-key-and-token")
+
+    monkeypatch.setattr(webapp.support_report, "build", fail)
+    response = client.post("/api/support-report", json={"device_id": "plug"})
+    assert response.status_code == 502 and response.json == {"error": "report_unavailable"}
+
+
 def test_values_read_requires_a_login_and_saved_connection_details(webapp, monkeypatch):
     client = webapp.app.test_client()
     assert client.post("/api/lan/read", json={"device_id": "plug"}).status_code == 401

@@ -5183,7 +5183,7 @@ def test_device_menu_only_shows_options_and_navigates_every_page(page, width, sc
                ("panelInfoOpen", "panelBody", "Device information"),
                ("panelRawOpen", "rawBody", "Raw JSON")]
     menu = page.locator("#menuBody")
-    assert menu.locator(".device-menu-label").all_inner_texts() == [title for _, _, title in entries]
+    assert menu.locator(".device-menu-label").all_inner_texts() == [title for _, _, title in entries] + ["Download a support report"]
     assert page.locator("#panelDataPointsOpen, #dataPointsBody").count() == 0
     assert menu.locator("dl, pre, .dps, [data-copy]").count() == 0
     assert PLUG.local_key not in menu.inner_html()
@@ -5235,3 +5235,157 @@ def test_device_information_scroll_and_raw_key_visibility_survive_returning_to_m
     page.locator("#panelClose").click()
     open_raw(page, PLUG.name)
     assert PLUG.local_key not in page.locator("#rawBody pre").inner_text()
+
+
+@pytest.mark.parametrize("width,scheme", [(1440, "light"), (390, "dark"), (320, "dark")])
+def test_support_report_downloads_private_diagnostics_directly_from_the_menu(page, tmp_path, width, scheme):
+    page.set_viewport_size({"width": width, "height": 800})
+    page.emulate_media(color_scheme=scheme)
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    open_panel(page, PLUG.name)
+    assert not [request for request in requests if request.url.endswith("/api/support-report")]
+    control = page.locator("#panelSupportDownload")
+    control.focus()
+    with page.expect_download() as downloaded:
+        control.press("Enter")
+    filename = downloaded.value.suggested_filename
+    assert filename.startswith("tuya-local-key-support-") and filename.endswith(".json")
+    assert PLUG.id not in filename and PLUG.name not in filename
+    path = tmp_path / filename
+    downloaded.value.save_as(path)
+    text = path.read_text()
+    report = json.loads(text)
+    assert report["schema_version"] == 1
+    assert report["device"]["product_id"] == PLUG.product_id
+    assert report["data_points"]["definitions"]
+    for secret in (PLUG.id, PLUG.name, PLUG.local_key, PLUG.uid, PLUG.ip):
+        assert secret not in text
+    assert "account_id" not in report
+    expect(page.locator("#menuBody [role='status']")).to_have_text("Support report downloaded.")
+    expect(control).to_be_focused()
+    assert page.locator("#menuBody").evaluate("el => el.scrollWidth <= el.clientWidth")
+    posts = [request for request in requests if request.method == "POST"]
+    assert len(posts) == 1 and posts[0].url.endswith("/api/support-report")
+    assert page.locator("#panelTitle").inner_text() == PLUG.name
+
+
+@pytest.mark.parametrize("failure", ["network", "wrong_account", "malformed"])
+def test_support_report_failures_offer_a_retry_without_downloading_a_file(page, failure):
+    downloads = []
+    page.on("download", lambda download: downloads.append(download))
+    open_panel(page, PLUG.name)
+
+    def fail(route):
+        if failure == "network":
+            route.abort()
+        elif failure == "malformed":
+            route.fulfill(status=200, content_type="application/json", body="null")
+        else:
+            route.fulfill(status=200, json={"account_id": "another-account", "report": {"schema_version": 1}})
+
+    page.route("**/api/support-report", fail)
+    control = page.locator("#panelSupportDownload")
+    control.click()
+    expect(page.locator("#menuBody [role='alert']")).to_have_text("Could not download the report. Try again.")
+    expect(control).to_have_attribute("aria-busy", "false")
+    assert downloads == []
+    page.unroute("**/api/support-report", fail)
+    with page.expect_download():
+        control.click()
+    expect(page.locator("#menuBody [role='status']")).to_have_text("Support report downloaded.")
+
+
+@pytest.mark.parametrize("transition", ["close", "refresh", "another_device"])
+def test_support_report_deduplicates_clicks_and_discards_replies_after_context_changes(page, transition):
+    held, downloads = [], []
+    page.route("**/api/support-report", lambda route: held.append(route))
+    page.on("download", lambda download: downloads.append(download))
+    open_panel(page, PLUG.name)
+    control = page.locator("#panelSupportDownload")
+    control.click()
+    expect(control).to_have_attribute("aria-busy", "true")
+    control.press("Enter")
+    assert len(held) == 1
+    if transition == "refresh":
+        refreshed(page, "#menuBody")
+    else:
+        page.locator("#panelClose").click()
+        if transition == "another_device":
+            open_panel(page, LAMP.name)
+            expect(control).to_have_attribute("aria-busy", "false")
+    with page.expect_response(lambda response: response.url.endswith("/api/support-report")):
+        held[0].continue_()
+    page.wait_for_load_state("networkidle")
+    assert downloads == []
+    if transition != "close":
+        expect(control).to_have_attribute("aria-busy", "false")
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+@pytest.mark.parametrize("transition", ["close", "switch", "history"])
+def test_support_report_feedback_clears_when_the_device_visit_ends(page, running_app, monkeypatch, outcome, transition):
+    device = PLUG
+    if transition == "history":
+        child = _named_sub(VALVE, ZIGBEE_GATEWAY)
+        _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, child)
+        device = ZIGBEE_GATEWAY
+    open_panel(page, device.name)
+    control = page.locator("#panelSupportDownload")
+
+    def fail(route):
+        route.abort()
+
+    if outcome == "failure":
+        page.route("**/api/support-report", fail)
+        control.click()
+        expect(page.locator("#menuBody [role='alert']")).to_be_visible()
+    else:
+        with page.expect_download():
+            control.click()
+        expect(page.locator("#menuBody [role='status']")).to_be_visible()
+    message = page.locator("#menuBody .device-menu-message")
+    page.locator("#panelInfoOpen").click()
+    page.locator("#panelBack").click()
+    expect(message).to_be_visible()
+    if transition == "close":
+        page.locator("#panelClose").click()
+        open_panel(page, device.name)
+    elif transition == "switch":
+        open_panel(page, LAMP.name)
+        expect(message).to_have_count(0)
+        open_panel(page, device.name)
+    else:
+        page.locator("#panelSetupOpen").click()
+        page.locator(f"#setupBody [data-open-device='{child.id}']").click()
+        page.locator("#panelBack").click()
+        page.locator("#panelBack").click()
+    expect(message).to_have_count(0)
+    expect(control).to_have_attribute("aria-busy", "false")
+    if outcome == "failure":
+        page.unroute("**/api/support-report", fail)
+    with page.expect_download():
+        control.click()
+    expect(page.locator("#menuBody [role='status']")).to_have_text("Support report downloaded.")
+
+
+@pytest.mark.parametrize("transition", ["close", "switch"])
+def test_support_report_reply_cannot_restore_feedback_after_leaving_and_returning(page, transition):
+    held, downloads = [], []
+    page.route("**/api/support-report", lambda route: held.append(route))
+    page.on("download", lambda download: downloads.append(download))
+    open_panel(page, PLUG.name)
+    control = page.locator("#panelSupportDownload")
+    control.click()
+    expect(control).to_have_attribute("aria-busy", "true")
+    if transition == "close":
+        page.locator("#panelClose").click()
+    else:
+        open_panel(page, LAMP.name)
+    open_panel(page, PLUG.name)
+    expect(control).to_have_attribute("aria-busy", "false")
+    with page.expect_response(lambda response: response.url.endswith("/api/support-report")):
+        held[0].continue_()
+    page.wait_for_load_state("networkidle")
+    assert downloads == []
+    expect(page.locator("#menuBody .device-menu-message")).to_have_count(0)
