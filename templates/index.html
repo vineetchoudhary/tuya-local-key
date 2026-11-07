@@ -8,6 +8,7 @@
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="stylesheet" href="static/css/base.css">
 <link rel="stylesheet" href="static/css/header.css">
+<link rel="stylesheet" href="static/css/footer.css">
 <link rel="stylesheet" href="static/css/auth.css">
 <link rel="stylesheet" href="static/css/devices.css">
 <link rel="stylesheet" href="static/css/panel.css">
@@ -24,6 +25,7 @@
   {% include "partials/auth.html" %}
   {% include "partials/devices.html" %}
 </main>
+{% include "partials/footer.html" %}
 {% include "partials/logout.html" %}
 {% include "partials/panel.html" %}
 <script id="app-config" type="application/json">{{ {"gatewayCategories": gateway_categories} | tojson }}</script>

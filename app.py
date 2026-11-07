@@ -27,6 +27,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -246,7 +247,10 @@ def _is_session_invalid_error(error):
 
 @app.get("/")
 def index():
-    return render_template("index.html", gateway_categories=sorted(lan_scan.GATEWAY_CATEGORIES))
+    version = support_report.app_version()
+    release_version = re.sub(r"^(\d+\.\d+)\.0$", r"\1", version)
+    return render_template("index.html", gateway_categories=sorted(lan_scan.GATEWAY_CATEGORIES),
+                           app_version=version, app_release_tag="v" + release_version)
 
 
 @app.get("/icon.png")

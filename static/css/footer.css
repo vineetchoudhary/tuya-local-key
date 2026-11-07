@@ -1,0 +1,25 @@
+/* Keep project details in the page flow, below short and long screens alike. */
+body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+body > header { flex: 0 0 auto; }
+body > main { flex: 1 0 auto; width: 100%; }
+.app-footer { flex: 0 0 auto; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.footer-inner { width: 100%; max-width: 1300px; margin: 0 auto; padding: 18px 20px;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px;
+}
+.footer-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.footer-name { color: var(--fg); font-weight: 600; }
+.footer-version { padding: 2px 7px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; line-height: 1.5;
+  color: inherit; text-decoration: none;
+}
+.footer-version:hover { color: var(--fg); border-color: var(--accent); }
+.footer-version:focus-visible { color: var(--fg); outline: 2px solid var(--accent); outline-offset: 3px; }
+.footer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
+.footer-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 28px;
+  color: inherit; text-decoration: none; border-radius: 3px;
+}
+.footer-links a:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
+.footer-links a:focus-visible { color: var(--fg); outline: 2px solid var(--accent); outline-offset: 4px; }
+.footer-links svg { width: 15px; height: 15px; flex: 0 0 auto; }
+@media (max-width: 480px) {
+  .footer-inner { flex-direction: column; align-items: flex-start; padding: 16px; gap: 8px; }
+}

@@ -74,7 +74,7 @@ def _redactor(devices, session):
     return clean
 
 
-def _app_version():
+def app_version():
     # Prefer the source actually running, rather than another installed checkout.
     try:
         text = Path(__file__).with_name("pyproject.toml").read_text()
@@ -189,7 +189,7 @@ def build(devices, results, device_id, snapshot_at, job=None, session=None, now=
     now = time.time() if now is None else now
     report = {
         "schema_version": 1, "generated_at": _timestamp(now),
-        "app": {"name": "Tuya Local Key", "version": _app_version()},
+        "app": {"name": "Tuya Local Key", "version": app_version()},
         "runtime": {"python": platform.python_version(), "os": platform.system(),
                     "architecture": platform.machine(),
                     "dependencies": {name: _package_version(name) for name in
