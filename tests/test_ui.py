@@ -35,6 +35,7 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware  # noqa: E402
 from werkzeug.serving import make_server  # noqa: E402
 
 import demo_devices  # noqa: E402
+import support_report  # noqa: E402
 
 pytestmark = pytest.mark.ui
 
@@ -44,6 +45,10 @@ BROWSER_CHANNELS = (None, "msedge", "chrome")   # None = playwright's own Chromi
 MASK = "•"
 APP = None      # the reloaded app module the server runs, for tests that vary it
 INGRESS_PREFIX = "/api/hassio_ingress/frontend-test"
+CURRENT_VERSION = support_report.app_version()
+_major, _minor, *_patch = CURRENT_VERSION.split(".")
+NEXT_VERSION = f"{_major}.{int(_minor) + 1}"
+NEXT_RELEASE_URL = f"https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v{NEXT_VERSION}"
 
 # Every test leaves a screenshot behind, gathered into a gallery you can open.
 # Local convenience only: CI runners set CI, and skip the whole thing.
@@ -5410,10 +5415,10 @@ def test_update_badge_fits_the_header_and_links_to_the_right_update_page(page, w
     page.set_viewport_size({"width": width, "height": 800})
     page.emulate_media(color_scheme=scheme)
     target = ("https://my.home-assistant.io/redirect/supervisor_addon/?addon=a1b2c3d4_tuya_local_key" if home_assistant
-              else "https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v3.6")
+              else NEXT_RELEASE_URL)
     reset_update_check(page)
     page.route("**/api/updates", lambda route: route.fulfill(json={
-        "available": True, "current_version": "3.5.0", "latest_version": "3.6",
+        "available": True, "current_version": CURRENT_VERSION, "latest_version": NEXT_VERSION,
         "update_url": target, "installation": "home_assistant" if home_assistant else "standalone",
         "check_after_seconds": 86400,
     }))
@@ -5427,7 +5432,7 @@ def test_update_badge_fits_the_header_and_links_to_the_right_update_page(page, w
     expect(page.locator("#footerUpdateBadge")).to_have_attribute("href", target)
     expect(badge).to_have_attribute("href", target)
     expect(badge).to_have_attribute("target", "_blank")
-    assert "3.6" in badge.get_attribute("aria-label")
+    assert NEXT_VERSION in badge.get_attribute("aria-label")
     assert "Home Assistant" in badge.get_attribute("title") if home_assistant else "GitHub" in badge.get_attribute("title")
     badge.focus()
     expect(badge).to_be_focused()
@@ -5445,7 +5450,7 @@ def test_update_badge_fits_the_header_and_links_to_the_right_update_page(page, w
 
 
 @pytest.mark.parametrize("response", [
-    {"available": False, "latest_version": "3.5", "check_after_seconds": 3600},
+    {"available": False, "current_version": CURRENT_VERSION, "latest_version": CURRENT_VERSION, "check_after_seconds": 86400},
     {"available": False, "installation": "home_assistant", "check_after_seconds": 1},
     {"available": True, "update_url": "javascript:alert(1)"},
     {"available": True, "update_url": "https://attacker.test/release"},
@@ -5480,7 +5485,7 @@ def test_automatic_update_checks_wait_for_activity_and_a_full_day(page):
 
     def update(route):
         calls.append(route.request.url)
-        route.fulfill(json={"available": False, "current_version": "3.5.0", "check_after_seconds": 1})
+        route.fulfill(json={"available": False, "current_version": CURRENT_VERSION, "check_after_seconds": 1})
 
     page.route("**/api/updates", update)
     page.reload(wait_until="networkidle")
@@ -5503,8 +5508,8 @@ def test_automatic_update_checks_wait_for_activity_and_a_full_day(page):
 def test_update_badge_remains_separate_from_the_home_action(page):
     reset_update_check(page)
     page.route("**/api/updates", lambda route: route.fulfill(json={
-        "available": True, "current_version": "3.5.0", "latest_version": "3.6", "installation": "standalone",
-        "update_url": "https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v3.6", "check_after_seconds": 3600,
+        "available": True, "current_version": CURRENT_VERSION, "latest_version": NEXT_VERSION, "installation": "standalone",
+        "update_url": NEXT_RELEASE_URL, "check_after_seconds": 86400,
     }))
     page.reload(wait_until="networkidle")
     expect(page.locator("#updateBadge")).to_be_visible()
@@ -5522,11 +5527,11 @@ def test_manual_update_check_finds_an_update_in_both_header_and_footer(page, wid
     page.emulate_media(color_scheme=scheme)
     calls = []
     target = ("https://my.home-assistant.io/redirect/supervisor_addon/?addon=a1b2c3d4_tuya_local_key" if home_assistant
-              else "https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v3.6")
+              else NEXT_RELEASE_URL)
 
     def manual(route):
         calls.append(route.request.method)
-        route.fulfill(json={"available": True, "current_version": "3.5.0", "latest_version": "3.6",
+        route.fulfill(json={"available": True, "current_version": CURRENT_VERSION, "latest_version": NEXT_VERSION,
                             "update_url": target, "installation": "home_assistant" if home_assistant else "standalone",
                             "last_check_succeeded": True})
 
@@ -5541,7 +5546,7 @@ def test_manual_update_check_finds_an_update_in_both_header_and_footer(page, wid
     dialog = page.locator("#updateDialog")
     expect(dialog).to_be_visible()
     expect(page.locator("#updateDialogTitle")).to_have_text("Update available")
-    expect(page.locator("#updateDialogText")).to_have_text("Version 3.6 is available.")
+    expect(page.locator("#updateDialogText")).to_have_text(f"Version {NEXT_VERSION} is available.")
     expect(page.locator("#updateDialogLink")).to_have_attribute("href", target)
     expect(page.locator("#updateDialogLink")).to_have_attribute("target", "_blank")
     expect(page.locator("#updateDialogClose")).to_be_focused()
@@ -5579,7 +5584,7 @@ def test_manual_update_check_reports_its_result_and_can_be_retried(page, result,
         if result == "failed":
             route.abort()
         else:
-            route.fulfill(json={"available": False, "current_version": "3.5.0", "status": "ok",
+            route.fulfill(json={"available": False, "current_version": CURRENT_VERSION, "status": "ok",
                                 "last_check_succeeded": True, "waiting_for_release": result == "waiting"})
 
     page.route("**/api/updates/check", manual)
@@ -5646,7 +5651,7 @@ def test_cached_home_assistant_release_appears_after_an_hour_without_another_che
 
     def update(route):
         calls.append(route.request)
-        route.fulfill(json={"available": False, "current_version": "3.5.0", "latest_version": "3.6",
+        route.fulfill(json={"available": False, "current_version": CURRENT_VERSION, "latest_version": NEXT_VERSION,
                             "installation": "home_assistant", "waiting_for_release": True,
                             "published_at": published, "check_after_seconds": 86400})
 
@@ -5681,9 +5686,9 @@ def test_background_update_reply_preserves_the_open_header_menu_and_focus(page, 
     menu = page.locator("#moreMenu")
     expect(menu).to_be_visible()
     focused = page.evaluate("document.activeElement.id")
-    held[0].fulfill(json={"available": available, "current_version": "3.5.0", "latest_version": "3.6",
+    held[0].fulfill(json={"available": available, "current_version": CURRENT_VERSION, "latest_version": NEXT_VERSION,
                           "installation": "standalone", "last_check_succeeded": True,
-                          "update_url": "https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v3.6"})
+                          "update_url": NEXT_RELEASE_URL})
     expect(page.locator("#footerCheckUpdates")).to_have_attribute("aria-busy", "false")
     expect(menu).to_be_visible()
     expect(page.locator(f"#{focused}")).to_be_focused()
@@ -5698,5 +5703,5 @@ def test_manual_update_check_is_disabled_while_a_request_is_running(page):
     expect(check).to_have_text("Checking…")
     page.locator("#filter").fill("plug")
     assert len(held) == 1
-    held[0].fulfill(json={"available": False, "current_version": "3.5.0", "last_check_succeeded": True})
+    held[0].fulfill(json={"available": False, "current_version": CURRENT_VERSION, "last_check_succeeded": True})
     expect(check).to_be_enabled()
