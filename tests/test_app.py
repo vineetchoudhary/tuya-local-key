@@ -73,7 +73,8 @@ def test_update_status_uses_the_apps_existing_authentication(tmp_path, monkeypat
     client = module.app.test_client()
     assert client.get("/api/updates").status_code == 401
     assert client.get("/api/updates", auth=("admin", "secret")).status_code == 200
-    assert client.get("/api/updates", headers={"X-Ingress-Path": "/api/hassio_ingress/test"}).status_code == 200
+    assert client.get("/api/updates", headers={"X-Ingress-Path": "/api/hassio_ingress/test"},
+                      environ_overrides={"REMOTE_ADDR": "172.30.32.2"}).status_code == 200
     assert client.post("/api/updates/check").status_code == 401
     assert client.post("/api/updates/check", auth=("admin", "secret")).status_code == 200
 
@@ -193,7 +194,8 @@ def test_frontend_assets_follow_direct_and_ingress_authentication(tmp_path, monk
     assert client.get(path).status_code == 401
     assert client.get(path, auth=("admin", "wrong")).status_code == 401
     assert client.get(path, auth=("admin", "secret")).status_code == 200
-    assert client.get(path, headers={"X-Ingress-Path": "/api/hassio_ingress/test"}).status_code == 200
+    assert client.get(path, headers={"X-Ingress-Path": "/api/hassio_ingress/test"},
+                      environ_overrides={"REMOTE_ADDR": "172.30.32.2"}).status_code == 200
 
 
 def test_qr_scheme_defaults_to_smartlife(tmp_path, monkeypatch):
@@ -268,15 +270,29 @@ def test_auth_skipped_for_home_assistant_ingress(tmp_path, monkeypatch):
     app = _reload_app(monkeypatch, tmp_path, AUTH_USERNAME="admin", AUTH_PASSWORD="secret")
     client = app.app.test_client()
 
-    # Ingress requests carry Supervisor's X-Ingress-Path and no Basic Auth credentials
+    # Ingress requests come from Supervisor's proxy and carry X-Ingress-Path.
     ingress = client.get(
-        "/api/state", headers={"X-Ingress-Path": "/api/hassio_ingress/abc123"}
+        "/api/state", headers={"X-Ingress-Path": "/api/hassio_ingress/abc123"},
+        environ_overrides={"REMOTE_ADDR": "172.30.32.2"},
     )
     assert ingress.status_code == 200
     assert ingress.json == {"logged_in": False}
 
     # Direct-port access (no ingress header) still requires credentials.
     assert client.get("/api/state").status_code == 401
+    assert client.get("/api/state", environ_overrides={"REMOTE_ADDR": "172.30.32.2"}).status_code == 401
+
+
+@pytest.mark.parametrize("peer", ["127.0.0.1", "192.168.1.25", "172.30.32.3", "::1"])
+def test_ingress_headers_from_direct_clients_cannot_bypass_auth(tmp_path, monkeypatch, peer):
+    module = _reload_app(monkeypatch, tmp_path, AUTH_USERNAME="admin", AUTH_PASSWORD="secret")
+    headers = {"X-Ingress-Path": "/api/hassio_ingress/pretend",
+               "X-Forwarded-For": "172.30.32.2", "X-Real-IP": "172.30.32.2",
+               "Forwarded": "for=172.30.32.2"}
+    client = module.app.test_client()
+    assert client.get("/api/state", headers=headers, environ_overrides={"REMOTE_ADDR": peer}).status_code == 401
+    assert client.get("/api/state", headers=headers, environ_overrides={"REMOTE_ADDR": peer},
+                      auth=("admin", "secret")).status_code == 200
 
 
 def test_auth_reads_home_assistant_options(tmp_path, monkeypatch):

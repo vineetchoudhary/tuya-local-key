@@ -12,6 +12,18 @@ let actionsWidth = null;
 function layoutActions() {
   const bar = $("headerActions");
   if (bar.classList.contains("hidden")) return;
+  const menuWasOpen = !$("moreMenu").classList.contains("hidden");
+  const focused = document.activeElement;
+  const restoreFocus = () => {
+    if (menuWasOpen && !$("moreWrap").classList.contains("hidden")) {
+      openMoreMenu();
+      if ($("moreMenu").contains(focused)) focused.focus({ preventScroll: true });
+    } else if (ACTION_IDS.some(id => $(id) === focused) || focused === $("moreBtn")) {
+      const target = $("moreMenu").contains(focused) ? $("moreBtn")
+        : focused === $("moreBtn") && $("moreWrap").classList.contains("hidden") ? $(ACTION_IDS[0]) : focused;
+      target.focus({ preventScroll: true });
+    }
+  };
   closeMoreMenu();
   // Everything back on the bar, in order, so each button can be measured.
   for (const id of ACTION_IDS) {
@@ -29,7 +41,7 @@ function layoutActions() {
   const room = inner - title;
   const width = (ids) => ids.reduce((sum, id) => sum + $(id).offsetWidth, 0) +
     gap * Math.max(0, ids.length - 1);
-  if (width(ACTION_IDS) <= room) return;
+  if (width(ACTION_IDS) <= room) { restoreFocus(); return; }
   $("moreWrap").classList.remove("hidden");
   const more = $("moreWrap").offsetWidth;
   let kept = [...ACTION_IDS];
@@ -44,6 +56,7 @@ function layoutActions() {
     button.setAttribute("role", "menuitem");
     $("moreMenu").appendChild(button);
   }
+  restoreFocus();
 }
 
 function menuItems() { return [...$("moreMenu").querySelectorAll(".menu-item:not(:disabled)")]; }

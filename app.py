@@ -285,7 +285,8 @@ def _require_auth():
     if not (AUTH_USERNAME and AUTH_PASSWORD):
         return
 
-    if request.headers.get("X-Ingress-Path"):
+    # Trust Supervisor's proxy peer, never a client-supplied header alone.
+    if request.remote_addr == "172.30.32.2" and request.headers.get("X-Ingress-Path"):
         return
 
     auth = request.authorization

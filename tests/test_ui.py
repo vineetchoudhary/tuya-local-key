@@ -5638,6 +5638,57 @@ def test_failed_automatic_checks_also_keep_the_daily_cooldown(page):
     expect(page.locator("#footerCheckUpdates")).to_be_visible()
 
 
+def test_cached_home_assistant_release_appears_after_an_hour_without_another_check(page):
+    reset_update_check(page)
+    page.add_init_script("window.updateNow = 1800000000000; Date.now = () => window.updateNow;")
+    published = page.evaluate("new Date(1800000000000 - 3500000).toISOString()")
+    calls = []
+
+    def update(route):
+        calls.append(route.request)
+        route.fulfill(json={"available": False, "current_version": "3.5.0", "latest_version": "3.6",
+                            "installation": "home_assistant", "waiting_for_release": True,
+                            "published_at": published, "check_after_seconds": 86400})
+
+    page.route("**/api/updates", update)
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#updateBadge")).to_be_hidden()
+    page.evaluate("window.updateNow += 99999")
+    page.locator("#count").click()
+    expect(page.locator("#updateBadge")).to_be_hidden()
+    page.evaluate("window.updateNow += 1")
+    page.locator("#count").click()
+    expect(page.locator("#updateBadge")).to_be_visible()
+    expect(page.locator("#footerUpdateBadge")).to_have_attribute("href", "https://my.home-assistant.io/redirect/updates/")
+    expect(page.locator("#footerCheckUpdates")).to_be_hidden()
+    expect(page.locator("#updateDialog")).to_be_hidden()
+    assert len(calls) == 1, "showing the cached release must not trigger another update request"
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#updateBadge")).to_be_visible()
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_background_update_reply_preserves_the_open_header_menu_and_focus(page, available):
+    reset_update_check(page)
+    held = []
+    page.route("**/api/updates", lambda route: held.append(route))
+    page.reload(wait_until="domcontentloaded")
+    expect(row(page, PLUG)).to_be_visible()
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.wait_for_function("!!document.querySelector('#moreMenu #logoutBtn')")
+    page.locator("#moreBtn").click()
+    menu = page.locator("#moreMenu")
+    expect(menu).to_be_visible()
+    focused = page.evaluate("document.activeElement.id")
+    held[0].fulfill(json={"available": available, "current_version": "3.5.0", "latest_version": "3.6",
+                          "installation": "standalone", "last_check_succeeded": True,
+                          "update_url": "https://github.com/vineetchoudhary/tuya-local-key/releases/tag/v3.6"})
+    expect(page.locator("#footerCheckUpdates")).to_have_attribute("aria-busy", "false")
+    expect(menu).to_be_visible()
+    expect(page.locator(f"#{focused}")).to_be_focused()
+
+
 def test_manual_update_check_is_disabled_while_a_request_is_running(page):
     held = []
     page.route("**/api/updates/check", lambda route: held.append(route))

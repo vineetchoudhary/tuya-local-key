@@ -27,6 +27,17 @@ function readState() {
   } catch (error) { /* The server also enforces the cooldown if storage is unavailable. */ }
   const version = document.querySelector("[data-app-version]").dataset.appVersion;
   if (state.result && state.result.current_version !== version) state.result = null;
+  const result = state.result;
+  const published = result && typeof result.published_at === "string" ? Date.parse(result.published_at) : NaN;
+  // A known release can finish its HA waiting period without another request.
+  if (result && result.available === false && result.waiting_for_release === true &&
+      result.installation === "home_assistant" && Number.isFinite(published) && Date.now() >= published + 3600000) {
+    state.result = { ...result, available: true, waiting_for_release: false,
+      update_url: "https://my.home-assistant.io/redirect/updates/" };
+    saveState();
+    return true;
+  }
+  return false;
 }
 
 function saveState() {
@@ -35,6 +46,7 @@ function saveState() {
 
 function renderUpdates() {
   const body = state.result || {}, url = body.available === true && updateLink(body.update_url);
+  const wasAvailable = !$("updateBadge").classList.contains("hidden");
   for (const id of ["updateBadge", "footerUpdateBadge"]) {
     const badge = $(id);
     badge.classList.toggle("hidden", !url);
@@ -52,7 +64,7 @@ function renderUpdates() {
   check.disabled = pending;
   check.setAttribute("aria-busy", String(pending));
   check.textContent = pending ? "Checking…" : "Check for updates";
-  layoutActions();
+  if (wasAvailable !== !!url) layoutActions();
 }
 
 function showUpdateResult(body, valid) {
@@ -82,7 +94,7 @@ function showUpdateResult(body, valid) {
 
 async function checkUpdates(manual = false) {
   if (pending || document.hidden) return;
-  readState();
+  if (readState()) renderUpdates();
   if (!manual && Date.now() < state.nextAutomaticAt) return;
   pending = true;
   // Reserve the window before networking. Errors also wait for user activity

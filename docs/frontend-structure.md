@@ -4,7 +4,7 @@ The web UI uses Flask/Jinja, CSS, and native JavaScript modules. It runs directl
 
 ## HTML and styles
 
-`templates/index.html` is the document shell. The files in `templates/partials/` contain the header, footer, login/QR/loading screens, device list, scan form, device panel, and logout dialog. The footer version uses the same project metadata as support reports. Data-dependent markup stays in the JavaScript renderer for its feature.
+`templates/index.html` is the document shell. The files in `templates/partials/` contain the header, footer, login/QR/loading screens, device list, scan form, device panel, and dialogs. The footer version uses the same project metadata as support reports. Data-dependent markup stays in the JavaScript renderer for its feature.
 
 Styles live in `static/css/`. Load them in the order listed in the main template: base, header, footer, auth, devices, panel, setup, network, troubleshoot, values, then utilities. Base styles define the light/dark theme and shared controls. Footer styles keep the page at least as tall as the viewport, with the footer following the content. Utilities load last so `.hidden` keeps its precedence. Keep fixed styles in CSS classes. Only calculated popover coordinates are set from JavaScript.
 

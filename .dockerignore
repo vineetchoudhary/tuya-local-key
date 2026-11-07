@@ -19,6 +19,12 @@ setup.sh
 docker-compose.yml
 .gitignore
 .dockerignore
+docs/
+tests/
+tools/
+test-results/
+.pytest_cache/
+.coverage
 
 # Local artifacts / secrets
 tuya-login-qr.png
@@ -27,6 +33,8 @@ session.json
 *session*.json
 devices.cache
 lan.cache
+device-preferences.json
+update-check.json
 .env
 .env.*
 *.pem
