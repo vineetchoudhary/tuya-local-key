@@ -52,7 +52,7 @@ async function refreshLan() {
 }
 
 // Local IP and protocol version from the LAN scan, and a check for this device.
-function lanSection(d) {
+function lanSection(d, summaryOnly = false) {
   const sub = isSubDevice(d), gateway = isGateway(d);
   const s = setupConnection(d), display = sub && s.local.id ? s.local : d;
   // A gateway Tuya lists without a key is checked with its sub-devices' keys.
@@ -68,6 +68,11 @@ function lanSection(d) {
       lan_checked_at: localTime(display.epochs && display.epochs.lan_checked_at) || display.lan_checked_at };
     html += fieldList(values, keys, sub
       ? { lan_status: "Last result", local_ip: "Gateway IP", protocol_version: "Gateway protocol" } : { lan_status: "Last result" });
+  }
+  if (summaryOnly) {
+    const note = appState.panelCheck && appState.panelCheck.id === (sub ? s.gateway.id : d.id) ? appState.panelCheck : null;
+    return html + (sub && s.gateway ? `<p class="lan-note">Gateway: ${deviceLink(s.gateway)}.</p>` : "") +
+      (note && !note.kind ? `<p class="lan-note" aria-live="polite">${esc(note.text)}</p>` : "");
   }
   if (sub) {
     const id = gatewayIdOf(d);
@@ -141,14 +146,18 @@ function networkSection(d) {
       `<p>${label}</p><span class="muted">${detail}</span></div>`;
   }
   const busy = (appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending");
+  const complete = n.s.key && n.s.host && n.s.version && n.target && n.tone !== "attention" &&
+    ["ok", "via_gateway"].includes(n.r.status) && n.childOnline !== false;
   const refresh = !n.s.key || n.r.status === "key_mismatch" || (n.s.sub && !n.target);
   const refreshing = $("refreshBtn").disabled;
   return `<div class="network-card"><div class="network-summary" data-network-summary data-network-check="connection" ` +
     `data-state="${state}" data-tone="${n.tone}" role="status"><span class="network-symbol">${icon(symbol)}</span>` +
     `<div><h3>${esc(n.title)}</h3><p>${esc(n.note)}</p></div></div>` +
-    `${child}${lanSection(d)}<div class="network-actions">` +
-    `<button type="button" data-network-action="scan"${busy ? " disabled" : ""}>Scan network</button>` +
-    (refresh ? `<button type="button" data-network-action="refresh"${refreshing ? " disabled" : ""}>${refreshing ? "Refreshing…" : "Refresh devices"}</button>` : "") +
+    `${child}${lanSection(d, complete)}<div class="network-actions">` +
+    (complete ? `<button type="button" data-network-action="recheck"${busy || refreshing ? " disabled" : ""}>${busy ? "Checking…" : "Recheck connection"}</button>`
+      : `<button type="button" class="primary" data-network-action="fix">Fix connection</button>` +
+        `<button type="button" data-network-action="scan"${busy ? " disabled" : ""}>Scan network</button>` +
+        (refresh ? `<button type="button" data-network-action="refresh"${refreshing ? " disabled" : ""}>${refreshing ? "Refreshing…" : "Refresh devices"}</button>` : "")) +
     `</div></div>`;
 }
 
@@ -215,19 +224,44 @@ function watchScan(showBox) {
   const poll = async () => {
     const { ok, status, body } = await api("/api/lan/scan");
     if (watch !== lanWatch || session !== appState.accountGeneration || expectedAccount !== appState.accountId) return;
-    if (!ok && status === 401) { stopScanWatch(); return; }
+    if (!ok && status === 401) {
+      stopScanWatch();
+      const previous = appState.lanData.job;
+      if (previous) appState.lanData.job = { ...previous, state: "failed", error: "not_logged_in" };
+      if (previous && previous.kind === "device") appState.panelCheck = {
+        id: previous.device_id, kind: "error", error: "not_logged_in",
+        text: "The login is no longer available. Log in again to start a new check.", finishedAt: Date.now() / 1000,
+      };
+      renderPanel();
+      return;
+    }
     if (!ok) { next(); return; }      // a blip: ask again
     if (expectedAccount && body.account_id !== expectedAccount) {
       stopScanWatch(); loadDevices(); return;
     }
     const job = body.job;
-    if (!job) { stopScanWatch(); scanProgress(null); return; }
+    if (!job) {
+      stopScanWatch(); scanProgress(null);
+      const previous = appState.lanData.job;
+      if (previous) appState.lanData.job = { ...previous, state: "failed", error: "result_unavailable" };
+      if (previous && previous.kind === "device") appState.panelCheck = {
+        id: previous.device_id, kind: "error", text: "The check result is no longer available. Try again.", finishedAt: Date.now() / 1000,
+      };
+      renderPanel();
+      return;
+    }
     appState.lanData.job = job;
     if (job.kind === "scan") scanProgress(job);
-    if (job.state === "running") { next(); return; }
+    if (job.state === "running") {
+      if (appState.panelView === "fix") renderPanel();
+      next(); return;
+    }
     stopScanWatch();
-    if (job.kind === "device") appState.panelCheck = { ...checkMessage(job), finishedAt: job.finished_at };
-    await refreshLan();
+    if (job.kind === "device") appState.panelCheck = {
+      ...checkMessage(job), finishedAt: job.finished_at,
+      status: job.result && job.result.status, error: job.error,
+    };
+    if (!(await refreshLan())) renderPanel();
   };
   next();
 }
@@ -299,14 +333,19 @@ async function startScan(payload) {
 }
 
 async function checkDevice(id, ip) {
-  if ((appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending")) return;
-  const networkId = appState.panelView === "network" ? appState.selectedId : null;
+  if ((appState.lanData.job && appState.lanData.job.state === "running") || (appState.panelCheck && appState.panelCheck.kind === "pending")) {
+    return { ok: false, body: { error: "scan_running" } };
+  }
+  const session = appState.accountGeneration, expectedAccount = appState.accountId;
+  const checkView = ["network", "fix"].includes(appState.panelView) ? appState.panelView : null;
+  const networkId = checkView ? appState.selectedId : null;
+  const bodyId = checkView === "fix" ? "fixBody" : "networkBody";
   const keepNetworkFocus = () => {
     const active = document.activeElement;
     const lost = !active || active === document.body || !active.isConnected || active.disabled;
-    if (networkId && appState.selectedId === networkId && appState.panelView === "network" && lost) {
-      const input = $("networkBody").querySelector("[data-lan-check] input");
-      (input || $("networkBody")).focus({ preventScroll: true });
+    if (networkId && appState.selectedId === networkId && appState.panelView === checkView && lost) {
+      const input = $(bodyId).querySelector("[data-lan-check] input, [data-fix-heading]");
+      (input || $(bodyId)).focus({ preventScroll: true });
     }
   };
   appState.panelCheck = { id, text: "Checking…", kind: "pending" };
@@ -316,19 +355,41 @@ async function checkDevice(id, ip) {
   try { response = await startScan({ device_id: id, ip }); }
   catch (err) { response = { ok: false, body: {} }; }
   const { ok, body } = response;
-  if (body.error === "account_changed") return;
+  if (session !== appState.accountGeneration || expectedAccount !== appState.accountId || body.error === "account_changed") return response;
   if (!ok) {
-    appState.panelCheck = { id, kind: "error", text: scanFailure(body), finishedAt: Date.now() / 1000 };
+    appState.panelCheck = { id, kind: "error", text: scanFailure(body), error: body.error, finishedAt: Date.now() / 1000 };
     renderPanel();
     keepNetworkFocus();
-    return;
+    return response;
   }
   renderPanel();
   keepNetworkFocus();
   watchScan(false);
+  return response;
 }
 
 function isWatchingScan() { return !!lanPollTimer; }
+
+async function cancelScan() {
+  if (!appState.lanData.job || appState.lanData.job.state !== "running") return;
+  const jobId = appState.lanData.job.id;
+  appState.lanData.job = { ...appState.lanData.job, cancelling: true };
+  scanProgress(appState.lanData.job);
+  renderPanel();
+  const session = appState.accountGeneration, expectedAccount = appState.accountId;
+  const { ok, body } = await api("/api/lan/scan", {
+    method: "DELETE", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ account_id: expectedAccount }),
+  });
+  if (session !== appState.accountGeneration || expectedAccount !== appState.accountId) return;
+  if (body.error === "account_changed" || (ok && body.account_id !== expectedAccount)) { stopScanWatch(); loadDevices(); }
+  else if (!ok && appState.lanData.job && appState.lanData.job.id === jobId) {
+    appState.lanData.job = { ...appState.lanData.job, cancelling: false };
+    scanProgress(appState.lanData.job);
+    renderPanel();
+  }
+  return { ok, body };
+}
 
 let initialized = false;
 function initNetwork(actions = {}) {
@@ -352,15 +413,7 @@ function initNetwork(actions = {}) {
   });
   $("scanProgress").addEventListener("click", async (e) => {
     if (!e.target.closest("#scanCancel")) return;
-    // Say so straight away: the checks under way take a few seconds to finish.
-    if (appState.lanData.job) { appState.lanData.job = { ...appState.lanData.job, cancelling: true }; scanProgress(appState.lanData.job); }
-    const session = appState.accountGeneration, expectedAccount = appState.accountId;
-    const { ok, body } = await api("/api/lan/scan", {
-      method: "DELETE", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ account_id: expectedAccount }),
-    });
-    if (session !== appState.accountGeneration || expectedAccount !== appState.accountId) return;
-    if (body.error === "account_changed" || (ok && body.account_id !== expectedAccount)) { stopScanWatch(); loadDevices(); }
+    await cancelScan();
   });
   $("networkBody").addEventListener("submit", async (e) => {
     const form = e.target.closest("[data-lan-check]");
@@ -368,6 +421,14 @@ function initNetwork(actions = {}) {
     e.preventDefault();
     await checkDevice(form.dataset.lanCheck, form.elements.ip.value);
   });
+  $("networkBody").addEventListener("click", async e => {
+    const control = e.target.closest('[data-network-action="recheck"]');
+    if (!control || control.disabled) return;
+    const device = appState.deviceData.find(d => d.id === appState.selectedId);
+    if (!device) return;
+    const n = networkState(device);
+    if (n.target && n.s.host) await checkDevice(n.target.id, n.s.host);
+  });
 }
 
-export { initNetwork, isWatchingScan, loadLan, networkSection, resetLan, showScanBox, watchScan };
+export { cancelScan, checkDevice, initNetwork, isWatchingScan, loadLan, networkSection, resetLan, scanFailure, showScanBox, startScan, watchScan };

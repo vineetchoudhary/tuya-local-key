@@ -172,6 +172,7 @@ async function loadDevices(msg, inline, refresh) {
     if (appState.lanData.job && appState.lanData.job.state === "running" && !isWatchingScan()) {
       watchScan(appState.lanData.job.kind === "scan");
     }
+    return !body.refresh_failed && !body.stale;
   } catch (err) {
     if (generation !== appState.deviceLoadGeneration) return;
     if (inline) refreshStatus("Refresh failed.", "error");

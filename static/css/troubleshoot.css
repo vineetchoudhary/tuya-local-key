@@ -1,0 +1,39 @@
+/* Connection troubleshooting, inside the existing device panel. */
+.fix-body { padding-top: 16px; }
+.fix-steps { display: flex; gap: 8px; list-style: none; margin: 0 0 18px; padding: 0; }
+.fix-steps li { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; color: var(--muted); font-size: 12px; }
+.fix-steps span { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border: 1px solid var(--border); border-radius: 50%; }
+.fix-steps [aria-current=step] { color: var(--accent); font-weight: 650; }
+.fix-steps [aria-current=step] span { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.fix-card { border: 1px solid var(--border); border-radius: 10px; padding: 16px; font-size: 13px; overflow-wrap: anywhere; }
+.fix-card h3 { font-size: 15px; margin: 0 0 6px; font-weight: 650; }
+.fix-card h3:focus { outline: none; }
+.fix-card p { margin: 6px 0 12px; color: var(--muted); }
+.fix-details { display: grid; grid-template-columns: minmax(82px, 36%) 1fr; gap: 9px 12px; margin: 18px 0; }
+.fix-details dt { color: var(--muted); }
+.fix-details dd { margin: 0; }
+.fix-card .lan-check { flex-direction: column; }
+.fix-card .lan-check input, .fix-card .lan-check button { flex: none; width: 100%; }
+.fix-note { padding: 11px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; font-size: 13px; color: var(--muted); }
+.fix-body > .fix-note { margin-top: 0; }
+.fix-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.fix-actions button { flex: 1 1 130px; min-width: 0; font-size: 13px; padding: 9px 10px; }
+.fix-card .fix-alternative { margin: 14px 0 0; text-align: center; }
+.fix-alternative button { padding: 0; border: 0; background: none; color: var(--accent); font-size: 13px; }
+.fix-alternative button:hover { text-decoration: underline; }
+.fix-scan { margin-top: 10px; }
+.fix-scan input { font-size: 14px; }
+.fix-scan button { width: 100%; font-size: 13px; }
+.fix-result { padding-left: 12px; border-left: 3px solid var(--accent); }
+.fix-result[data-tone=ready] { border-color: var(--ok); }
+.fix-result[data-tone=attention] { border-color: var(--warn); }
+.fix-result .spinner { margin-bottom: 8px; }
+.fix-advice { margin: 16px 0; padding-left: 22px; }
+.fix-advice li + li { margin-top: 9px; }
+.fix-body dl.fields { font-size: 13px; margin-top: 16px; }
+.fix-body button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 359px) {
+  .fix-steps { gap: 5px; }
+  .fix-steps li { gap: 4px; font-size: 11px; }
+  .fix-card { padding: 12px; }
+}

@@ -9,7 +9,23 @@ Click **Scan network**, enter your IoT VLAN or subnet, the one your Tuya devices
 
 A first scan of a /24 takes about 30 seconds for a typical home. An account with many devices takes longer, up to a few minutes, because each address that answers is asked with every key not yet matched. The results are saved, so later visits show them straight away. The next scan checks each device at its last address first, so a device that hasn't moved is found in about a second, but the scan still starts by checking every address, which takes several seconds on a /24. A scan never runs on its own: Refresh only reloads the list from Tuya.
 
-For a device the scan missed, open its details panel and use **Check** with its IP address (for example `192.168.2.1`), which you can find in your router's client list. A Check that fails at an address the device wasn't known at only reports the result. It doesn't replace what the last scan saved.
+For a device the scan missed, open its **Local network** view and use **Check** with its IP address (for example `192.168.2.1`), which you can find in your router's client list. A Check that fails at an address the device wasn't known at only reports the result. It doesn't replace what the last scan saved. When connection details are complete and no failure needs attention, the view shows just **Recheck connection** to test the saved address again.
+
+### Fix Connection
+
+Open a device's **Local network** view and choose **Fix connection** for guided troubleshooting:
+
+1. **Details:** review the saved connection details and choose **Continue**. When the key or gateway is unavailable, the app offers a refresh or login instead. Key values stay hidden in the wizard.
+2. **Test:** enter the device's local IP from your router and choose **Test connection**. The full-width button sits below the IP field. If you do not know the address, choose **Don't know the IP? Find it** to open a separate network-range screen. Scans use all account devices, including excluded devices. A running check can be stopped.
+3. **Next steps:** read the result and take the suggested action, such as refreshing a rejected key, finding a missing device, or retrying a refused connection. A successful check offers **Open setup values**. The screen shows one main action instead of a list of unrelated options.
+
+Use the panel's **Back** button or Escape for the previous screen, including returning from a network scan to manual IP entry. The IP and network-range drafts are kept while navigating. A completed check can be tested again by going back to **Test**.
+
+Opening the wizard starts no network check or Tuya refresh. Tests and scans use the existing LAN checker and close their connections afterward. Refreshing from Tuya is a separate action. If Tuya cannot be reached or your login has expired, the wizard explains that it is using saved details and offers a new login when needed.
+
+For a sub-device, the wizard tests its identified gateway and displays the gateway's report of the sub-device separately. A checked gateway does not establish that the sub-device itself is responding. Unidentified gateways must be checked at the correct IP before proceeding. Protocol 3.1 remains **Device found, key not verified**, since its status reply cannot verify the local key.
+
+Changes to your Home Assistant integration remain a manual step through **Open setup values**.
 
 ### Networks and Firewalls
 

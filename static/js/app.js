@@ -12,6 +12,7 @@ import * as notices from "./features/notices.js";
 import * as panel from "./features/panel.js";
 import * as setup from "./features/setup.js";
 import * as shell from "./features/shell.js";
+import * as troubleshoot from "./features/troubleshoot.js";
 import { appState } from "./shared/state.js";
 
 export function render() {
@@ -58,7 +59,13 @@ export function initApp() {
   panel.registerPanelPage("network", {
     body: "networkBody", backLabel: "Back to local network",
     title: d => `Local network for “${d.name || d.id}”`, render: network.networkSection,
-    focus: "[data-lan-check] input",
+    focus: "[data-lan-check] input, [data-network-action='recheck']",
+  });
+  panel.registerPanelPage("fix", {
+    body: "fixBody", backLabel: "Back to fix connection",
+    title: d => `Fix connection for “${d.name || d.id}”`, render: troubleshoot.fixSection,
+    focus: "[data-fix-heading]",
+    back: troubleshoot.backFix, stepBackLabel: troubleshoot.fixBackLabel,
   });
   shell.initShell({
     closePanel: panel.closePanel,
@@ -136,6 +143,17 @@ export function initApp() {
     render,
     renderPanel: panel.renderPanel,
   });
+  troubleshoot.initTroubleshoot({
+    cancelScan: network.cancelScan,
+    checkDevice: network.checkDevice,
+    loadDevices: devices.loadDevices,
+    navigatePanel: panel.navigatePanel,
+    renderPanel: panel.renderPanel,
+    scanFailure: network.scanFailure,
+    show: shell.show,
+    startScan: network.startScan,
+    watchScan: network.watchScan,
+  });
   header.initHeader({ goHome });
   // Each eye controls only its own area, without repainting the other one.
   document.addEventListener("click", (e) => {
@@ -154,6 +172,7 @@ export function initApp() {
   copyOnClick($("panelBody"));
   copyOnClick($("setupBody"));
   copyOnClick($("networkBody"));
+  copyOnClick($("fixBody"));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("filtersPopover").classList.contains("hidden")) {
       e.preventDefault(); e.stopPropagation(); filters.closeFilters(true); return;

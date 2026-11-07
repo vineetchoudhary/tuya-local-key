@@ -19,6 +19,7 @@ import re
 import shutil
 import sys
 import threading
+import time
 import types
 from pathlib import Path
 from urllib.parse import quote
@@ -287,6 +288,14 @@ def test_modular_frontend_starts_and_navigates_at_root_and_ingress(browser, serv
         loaded.locator("#panelSetupOpen").click()
         expect(loaded.locator(".setup-card")).to_be_visible()
         loaded.locator("[data-setup-action='network']").click()
+        expect(loaded.locator(".network-card")).to_be_visible()
+        loaded.locator("[data-network-action='fix']").click()
+        expect(loaded.locator("#fixBody [data-fix-heading]")).to_have_text("Check the saved details")
+        loaded.locator("#fixBody [data-fix-action='test']").click()
+        expect(loaded.locator("#fixCheckIP")).to_be_focused()
+        loaded.locator("#panelBack").click()
+        expect(loaded.locator("#fixBody [data-fix-heading]")).to_have_text("Check the saved details")
+        loaded.locator("#panelBack").click()
         expect(loaded.locator(".network-card")).to_be_visible()
         loaded.locator("#panelBack").click()
         expect(loaded.locator(".setup-card")).to_be_visible()
@@ -1381,12 +1390,16 @@ def test_a_check_that_moves_a_gateways_key_says_so(page, running_app, monkeypatc
     _scans(running_app, monkeypatch, {   # as left by a check typed with the wrong IP
         ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.9", "3.4", key_from=WATER_TIMER.id),
         BLE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=VALVE.id),
+    }, {   # a recheck makes the stale, wrong address editable again
+        ZIGBEE_GATEWAY.id: _lan("busy", "192.168.2.9", "3.4", key_from=WATER_TIMER.id),
     }, {
         ZIGBEE_GATEWAY.id: _lan("ok", "192.168.2.8", "3.4", key_from=VALVE.id),
     })
     scanned(page)
 
     open_network(page, ZIGBEE_GATEWAY.name)
+    page.locator("#networkBody [data-network-action='recheck']").click()
+    expect(page.locator("#networkBody [data-lan-check] input")).to_be_visible()
     page.fill("#networkBody [data-lan-check] input", "192.168.2.8")
     page.click("#networkBody [data-lan-check] button")
     page.wait_for_selector("#networkBody :text('Found at 192.168.2.8')")
@@ -2421,6 +2434,8 @@ def test_network_only_encrypted_current_key_results_count_as_checked(page, runni
     scanned(page)
     open_network(page, PLUG.name)
     assert network_summary(page) == summary
+    assert page.locator("#networkBody [data-lan-check], #networkBody [data-network-action='fix'], #networkBody [data-network-action='scan']").count() == 0
+    expect(page.locator("#networkBody [data-network-action='recheck']")).to_have_text("Recheck connection")
     if version == "3.1":
         assert "do not verify the local key" in page.locator("#networkBody [data-network-summary]").inner_text()
     assert PLUG.local_key not in page.locator("#networkBody").inner_text()
@@ -2437,7 +2452,7 @@ def test_network_copies_its_ip_and_protocol_without_claiming_a_31_key_check(page
     open_network(page, ZIGBEE_GATEWAY.name)
 
     page.locator("#networkBody [data-lan-check] button").click()
-    page.wait_for_selector("#networkBody .lan-note:text('Found at 192.168.2.8')")
+    expect(page.locator("#networkBody [data-network-summary] h3")).to_have_text("Device found")
 
     assert network_summary(page) == "Device found"
     body = page.locator("#networkBody").inner_text()
@@ -2631,7 +2646,7 @@ def test_network_draft_ip_and_focus_survive_repaint_and_back_navigation(page):
 def test_network_pristine_discovered_ip_keeps_its_selection_on_repaint_and_accepts_new_results(
         page, running_app, monkeypatch):
     _scans(running_app, monkeypatch, {
-        PLUG.id: _lan("ok", "192.168.2.61", "3.4"),
+        PLUG.id: _lan("busy", "192.168.2.61", "3.4"),
     }, {
         PLUG.id: _lan("ok", "192.168.2.62", "3.5"),
     })
@@ -2646,8 +2661,8 @@ def test_network_pristine_discovered_ip_keeps_its_selection_on_repaint_and_accep
     expect(ip_input).to_be_focused()
     assert ip_input.evaluate("el => [el.selectionStart, el.selectionEnd]") == [2, 9]
     scanned(page)
-    assert ip_input.input_value() == "192.168.2.62"
-    assert ip_input.evaluate("el => el.defaultValue") == "192.168.2.62"
+    assert ip_input.count() == 0
+    assert field_value(page, "local_ip") == "192.168.2.62"
     assert field_value(page, "protocol_version") == "3.5"
 
 
@@ -4554,3 +4569,409 @@ def test_device_filters_layout_keyboard_and_chevron_spacing(page, running_app, m
         page.screenshot(path=SHOTS_DIR / f"device-filters-{width}-{theme}.png", full_page=False)
     page.keyboard.press("Escape")
     expect(page.locator("#filtersBtn")).to_be_focused()
+
+
+# --------------------------------------------------------------------------- #
+# Fix connection wizard
+# --------------------------------------------------------------------------- #
+def open_fix(page, name=PLUG.name):
+    open_network(page, name)
+    page.locator("#networkBody [data-network-action='fix']").click()
+    expect(page.locator("#fixBody")).to_be_visible()
+
+
+def fix_action(page, action):
+    return page.locator(f"#fixBody [data-fix-action='{action}']")
+
+
+def fix_heading(page):
+    return page.locator("#fixBody [data-fix-heading]")
+
+
+def fresh_scans(app, monkeypatch, *rounds):
+    """Wizard success requires results produced during the requested job."""
+    calls = _scans(app, monkeypatch, *rounds)
+    original = app.lan_scan.scan
+
+    def scan(*args, **kwargs):
+        outcome = original(*args, **kwargs)
+        for result in outcome["results"].values():
+            result["checked_at"] = time.time()
+        return outcome
+
+    monkeypatch.setattr(app.lan_scan, "scan", scan)
+    return calls
+
+
+def fix_test(page, ip="192.168.2.61"):
+    if not page.locator("#fixCheckIP").count():
+        fix_action(page, "test").click()
+    page.locator("#fixCheckIP").fill(ip)
+    page.locator("#fixBody [data-lan-check] button").click()
+
+
+def test_fix_connection_starts_without_requests_and_preserves_navigation_and_drafts(page):
+    requests = []
+    page.on("request", lambda request: requests.append(request))
+    open_fix(page)
+    expect(fix_heading(page)).to_have_text("Check the saved details")
+    assert page.locator("#fixBody .fix-actions button").count() == 1
+    assert page.locator("#fixBody [aria-current='step']").inner_text() == "1\nDetails"
+    assert "Find it in the next step" in page.locator("#fixBody").inner_text()
+    assert PLUG.ip not in page.locator("#fixBody").inner_text(), "the cloud IP is not a LAN address"
+    fix_action(page, "test").click()
+    assert fix_action(page, "details").count() == 0
+    ip = page.locator("#fixCheckIP")
+    expect(ip).to_be_focused()
+    ip.fill("192.168.2.200")
+    repaint(page)
+    expect(ip).to_have_value("192.168.2.200")
+    expect(ip).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(fix_heading(page)).to_have_text("Check the saved details")
+    fix_action(page, "test").click()
+    expect(ip).to_have_value("192.168.2.200")
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    expect(page.locator("#networkBody [data-network-action='fix']")).to_be_focused()
+    page.locator("#networkBody [data-network-action='fix']").click()
+    fix_action(page, "test").click()
+    expect(ip).to_have_value("192.168.2.200")
+    assert not [request for request in requests if request.method == "POST"]
+    assert PLUG.local_key not in page.locator("#fixBody").inner_text()
+
+
+def test_fix_connection_checks_a_manual_address_and_opens_the_verified_setup_values(page, running_app, monkeypatch):
+    calls = fresh_scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", "3.4")})
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("Connection checked")
+    assert page.locator("#fixBody .fix-actions button").count() == 1
+    assert calls[0]["only"] == [PLUG.id]
+    assert calls[0]["targets"] == ["192.168.2.61"]
+    assert "192.168.2.61" in page.locator("#fixBody").inner_text()
+    assert PLUG.local_key not in page.locator("#fixBody").inner_text()
+    fix_action(page, "setup").click()
+    expect(page.locator("#setupBody")).to_be_visible()
+    assert setup_value(page, "host") == "192.168.2.61"
+    assert setup_value(page, "protocol_version") == "3.4"
+    page.keyboard.press("Escape")
+    expect(fix_heading(page)).to_have_text("Connection checked")
+    expect(fix_action(page, "setup")).to_be_focused()
+
+
+@pytest.mark.parametrize("status, title, guidance", [
+    ("busy", "The connection was refused", "Resume the integration after the test"),
+    ("key_mismatch", "The key was not accepted", "A different device may have taken its old address"),
+    ("unreachable", "No device reply", "TCP port 6668"),
+    ("not_found", "No device reply", "correct IoT VLAN"),
+])
+def test_fix_connection_explains_failed_attempts_at_an_unsaved_ip(
+        page, running_app, monkeypatch, status, title, guidance):
+    fresh_scans(running_app, monkeypatch, {PLUG.id: _lan(status, "192.168.2.61", "3.4")})
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text(title)
+    assert guidance in page.locator("#fixBody").inner_text()
+    assert "Connection checked" not in page.locator("#fixBody").inner_text()
+    assert "Tested IP" in page.locator("#fixBody").inner_text()
+    assert page.locator("#fixBody dt[title='protocol_version']").count() == 0
+
+
+def test_fix_connection_refreshes_a_rejected_key_and_retests_with_current_details(page, running_app, monkeypatch):
+    fresh_scans(running_app, monkeypatch,
+                {PLUG.id: _lan("key_mismatch", "192.168.2.61", "3.4")},
+                {PLUG.id: _lan("ok", "192.168.2.61", "3.4")})
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("The key was not accepted")
+    _serves(running_app, monkeypatch, _with_rotated_key("FIX-NEW-KEY-1234"))
+    fix_action(page, "refresh").click()
+    expect(fix_heading(page)).to_have_text("Test the device connection")
+    expect(page.locator("#fixBody")).to_contain_text("Device list refreshed")
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("Connection checked")
+    assert "Tuya supplied a changed local key" in page.locator("#fixBody").inner_text()
+    assert "FIX-NEW-KEY-1234" not in page.locator("#fixBody").inner_text()
+    fix_action(page, "setup").click()
+    assert setup_field(page, "local_key").locator("button.setup-copy").get_attribute("data-copy") == "FIX-NEW-KEY-1234"
+
+
+def test_fix_connection_scans_inside_the_wizard_and_explains_changed_settings(page, running_app, monkeypatch):
+    calls = fresh_scans(running_app, monkeypatch,
+                        {PLUG.id: _lan("unreachable", "192.168.2.61", "3.4")},
+                        {PLUG.id: _lan("ok", "192.168.2.62", "3.5")})
+    scanned(page)
+    open_fix(page)
+    fix_action(page, "test").click()
+    fix_action(page, "scan").click()
+    page.locator("#fixTargets").fill("192.168.2.61,192.168.2.62")
+    repaint(page)
+    expect(page.locator("#fixTargets")).to_have_value("192.168.2.61,192.168.2.62")
+    page.locator("#fixBody [data-fix-scan] button").click()
+    expect(fix_heading(page)).to_have_text("Connection checked")
+    assert page.locator("#panel").get_attribute("aria-hidden") == "false"
+    assert calls[1]["targets"] == ["192.168.2.61", "192.168.2.62"]
+    assert calls[1]["only"] is None
+    body = page.locator("#fixBody").inner_text()
+    assert "IP changed from 192.168.2.61 to 192.168.2.62" in body
+    assert "protocol changed from 3.4 to 3.5" in body
+
+
+def test_fix_connection_distinguishes_a_checked_gateway_from_an_offline_child(page, running_app, monkeypatch):
+    gateway = copy.deepcopy(ZIGBEE_GATEWAY)
+    gateway.local_key = VALVE.local_key
+    child = _named_sub(VALVE, gateway)
+    _with_gateways(page, running_app, monkeypatch, gateway, child)
+    calls = fresh_scans(running_app, monkeypatch, {
+        gateway.id: _lan("ok", "192.168.2.8", "3.4"),
+        child.id: _lan("via_gateway", "192.168.2.8", "3.4", gateway_id=gateway.id, sub_online=False),
+    })
+    open_fix(page, child.name)
+    fix_test(page, "192.168.2.8")
+    expect(fix_heading(page)).to_have_text("Gateway works, sub-device reported offline")
+    assert calls[0]["only"] == [gateway.id]
+    body = page.locator("#fixBody").inner_text()
+    assert "checks the gateway connection only" in body
+    assert "Gateway IP" in body
+    assert child.local_key not in body
+
+
+@pytest.mark.parametrize("device, explanation", [(BARE, "Tuya has not supplied a usable local key"),
+                                                 (SENSOR, "gateway is missing from the device list")])
+def test_fix_connection_handles_missing_keys_and_missing_gateways(page, device, explanation):
+    open_fix(page, device.name)
+    assert explanation in page.locator("#fixBody").inner_text()
+    assert fix_action(page, "test").count() == 0
+    assert page.locator("#fixBody [data-lan-check]").count() == 0
+    expect(fix_action(page, "refresh")).to_be_enabled()
+
+
+def test_fix_connection_does_not_guess_an_unidentified_gateway(page, running_app, monkeypatch):
+    _with_gateways(page, running_app, monkeypatch, ZIGBEE_GATEWAY, BLE_GATEWAY, VALVE, WATER_TIMER)
+    open_fix(page, VALVE.name)
+    assert "gateway has not been identified" in page.locator("#fixBody").inner_text()
+    assert fix_action(page, "test").count() == 0
+    page.locator(f"#fixBody [data-open-device='{BLE_GATEWAY.id}']").click()
+    expect(page.locator("#panelTitle")).to_contain_text(BLE_GATEWAY.name)
+    expect(fix_action(page, "test")).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(page.locator("#panelTitle")).to_contain_text(VALVE.name)
+
+
+def test_fix_connection_keeps_protocol_31_key_verification_unconfirmed(page, running_app, monkeypatch):
+    fresh_scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", "3.1")})
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("Device found, key not verified")
+    assert page.locator("#fixBody .fix-result").get_attribute("data-tone") == "pending"
+
+
+def test_fix_connection_explains_an_unavailable_scanner(page, running_app, monkeypatch):
+    def unavailable():
+        raise running_app.lan_scan.ScannerUnavailable("unavailable")
+
+    monkeypatch.setattr(running_app.lan_scan, "require_scanner", unavailable)
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("The network checker is unavailable")
+    assert "Restart the app" in page.locator("#fixBody").inner_text()
+
+
+def test_fix_connection_failed_refresh_keeps_the_wizard_and_explains_the_saved_snapshot(page, running_app, monkeypatch):
+    fresh_scans(running_app, monkeypatch, {PLUG.id: _lan("key_mismatch", "192.168.2.61", "3.4")})
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("The key was not accepted")
+    _raises(running_app, monkeypatch, RuntimeError("offline"))
+    fix_action(page, "refresh").click()
+    expect(page.locator("#fixBody")).to_contain_text("The device list could not be refreshed")
+    assert "Tuya could not be reached" in page.locator("#fixBody").inner_text()
+    expect(fix_action(page, "refresh")).to_be_enabled()
+
+
+def test_fix_connection_refresh_preserves_a_control_focused_while_waiting(page, running_app, monkeypatch):
+    fresh_scans(running_app, monkeypatch, {PLUG.id: _lan("key_mismatch", "192.168.2.61", "3.4")})
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("The key was not accepted")
+    held = []
+    page.route("**/api/devices?refresh=1", lambda route: held.append(route))
+    fix_action(page, "refresh").click()
+    close = page.locator("#panelClose")
+    close.focus()
+    assert len(held) == 1
+    held[0].continue_()
+    expect(page.locator("#fixBody")).to_contain_text("Device list refreshed")
+    expect(close).to_be_focused()
+
+
+def test_fix_connection_expired_login_offers_relogin_without_clearing_saved_keys(page, running_app, monkeypatch):
+    class SessionExpired(Exception):
+        error_code = "-9999999"
+        error_message = "sign invalid"
+
+    fresh_scans(running_app, monkeypatch, {PLUG.id: _lan("key_mismatch", "192.168.2.61", "3.4")})
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("The key was not accepted")
+    _raises(running_app, monkeypatch, SessionExpired())
+    fix_action(page, "refresh").click()
+    expect(page.locator("#fixBody")).to_contain_text("Your Tuya login expired")
+    assert frontend_state(page, "deviceData")[0]["local_key"] == PLUG.local_key
+    fix_action(page, "login").click()
+    expect(page.locator("#login")).to_be_visible()
+    assert page.locator("#panel").get_attribute("aria-hidden") == "true"
+
+
+def test_fix_connection_can_stop_a_scan_and_never_reuses_an_old_success(page, running_app, monkeypatch):
+    fresh_scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", "3.4")})
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("Connection checked")
+    release = _held_scan(running_app, monkeypatch)
+    page.locator("#panelBack").click()
+    fix_action(page, "scan").click()
+    page.locator("#fixTargets").fill("192.168.2.0/30")
+    try:
+        page.locator("#fixBody [data-fix-scan] button").click()
+        expect(fix_heading(page)).to_have_text("Scanning the network")
+        fix_action(page, "cancel").click()
+        expect(fix_action(page, "cancel")).to_be_disabled()
+        release.set()
+        expect(fix_heading(page)).to_have_text("Check stopped")
+        assert "Connection checked" not in page.locator("#fixBody").inner_text()
+    finally:
+        release.set()
+
+
+def test_fix_connection_does_not_claim_success_when_final_results_cannot_be_loaded(page, running_app, monkeypatch):
+    fresh_scans(running_app, monkeypatch,
+                {PLUG.id: _lan("ok", "192.168.2.61", "3.4")},
+                {PLUG.id: _lan("ok", "192.168.2.61", "3.4")})
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("Connection checked")
+    page.locator("#panelBack").click()
+    page.route("**/api/lan", lambda route: route.abort())
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("A new test is needed")
+    assert "Connection checked" not in page.locator("#fixBody").inner_text()
+
+
+def test_fix_connection_can_retry_a_failed_stop_request(page, running_app, monkeypatch):
+    release = _held_scan(running_app, monkeypatch)
+
+    def fail_stop(route):
+        if route.request.method == "DELETE":
+            route.abort()
+        else:
+            route.continue_()
+
+    page.route("**/api/lan/scan", fail_stop)
+    open_fix(page)
+    fix_action(page, "test").click()
+    fix_action(page, "scan").click()
+    page.locator("#fixTargets").fill("192.168.2.0/30")
+    try:
+        page.locator("#fixBody [data-fix-scan] button").click()
+        expect(fix_heading(page)).to_have_text("Scanning the network")
+        fix_action(page, "cancel").click()
+        expect(page.locator("#fixBody")).to_contain_text("The stop request failed")
+        expect(fix_action(page, "cancel")).to_be_enabled()
+        page.unroute("**/api/lan/scan", fail_stop)
+        fix_action(page, "cancel").click()
+        release.set()
+        expect(fix_heading(page)).to_have_text("Check stopped")
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("missing_session", [True, False])
+def test_fix_connection_stops_waiting_when_the_poll_loses_its_login_or_job(page, running_app, monkeypatch,
+                                                                       missing_session):
+    fresh_scans(running_app, monkeypatch, {PLUG.id: _lan("ok", "192.168.2.61", "3.4")})
+    account = frontend_state(page, "accountId")
+
+    def lose_result(route):
+        if route.request.method != "GET":
+            route.continue_()
+        elif missing_session:
+            route.fulfill(status=401, json={"error": "not_logged_in"})
+        else:
+            route.fulfill(json={"account_id": account, "job": None})
+
+    page.route("**/api/lan/scan", lose_result)
+    open_fix(page)
+    fix_test(page)
+    expect(fix_heading(page)).to_have_text("Log in again" if missing_session else "The check could not finish")
+    assert page.locator("#fixBody [aria-busy='true']").count() == 0
+    if missing_session:
+        expect(fix_action(page, "login")).to_be_enabled()
+
+
+@pytest.mark.parametrize("width, scheme", [(1440, "light"), (390, "dark"), (320, "light"), (320, "dark")])
+def test_fix_connection_is_accessible_on_small_screens(page, width, scheme):
+    page.set_viewport_size({"width": width, "height": 640})
+    page.emulate_media(color_scheme=scheme)
+    open_fix(page)
+    close_box = page.locator("#panelClose").bounding_box()
+    fix_action(page, "test").press("Enter")
+    expect(page.locator("#fixCheckIP")).to_be_focused()
+    fix_action(page, "scan").click()
+    expect(page.locator("#fixTargets")).to_be_focused()
+    page.locator("#fixTargets").fill("")
+    repaint(page)
+    expect(page.locator("#fixTargets")).to_have_value("")
+    page.locator("#fixBody [data-fix-scan] button").scroll_into_view_if_needed()
+    assert page.locator("#fixBody").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator("#panel").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator("#panelClose").bounding_box() == pytest.approx(close_box, abs=0.5)
+
+
+@pytest.mark.parametrize("child", [False, True])
+def test_network_complete_connection_rechecks_saved_details_and_restores_troubleshooting_on_failure(
+        page, running_app, monkeypatch, child):
+    gateway = copy.deepcopy(ZIGBEE_GATEWAY)
+    gateway.local_key = VALVE.local_key
+    device = _named_sub(VALVE, gateway) if child else PLUG
+    target = gateway if child else PLUG
+    if child:
+        _with_gateways(page, running_app, monkeypatch, gateway, device)
+    calls = fresh_scans(running_app, monkeypatch,
+                        {target.id: _lan("ok", "192.168.2.61", "3.4")},
+                        {target.id: _lan("key_mismatch", "192.168.2.61", "3.4")})
+    scanned(page)
+    open_network(page, device.name)
+    assert page.locator("#networkBody .network-actions button").count() == 1
+    assert page.locator("#networkBody [data-lan-check]").count() == 0
+    recheck = page.locator("#networkBody [data-network-action='recheck']")
+    expect(recheck).to_have_text("Recheck connection")
+    recheck.click()
+    expect(page.locator("#networkBody [data-network-action='fix']")).to_be_visible()
+    assert calls[1]["only"] == [target.id]
+    assert calls[1]["targets"] == ["192.168.2.61"]
+    assert page.locator("#networkBody [data-lan-check]").get_attribute("data-lan-check") == target.id
+
+
+def test_fix_connection_back_steps_keep_ip_and_scan_drafts_without_duplicate_controls(page):
+    open_fix(page)
+    fix_action(page, "test").click()
+    ip = page.locator("#fixCheckIP")
+    ip.fill("192.168.2.200")
+    fix_action(page, "scan").click()
+    expect(page.locator("#panelBack")).to_have_text("Back to IP address")
+    assert page.locator("#fixCheckIP").count() == 0
+    page.locator("#fixTargets").fill("192.168.2.0/24")
+    assert page.locator("#fixBody form button").count() == 1
+    page.locator("#panelBack").click()
+    expect(ip).to_have_value("192.168.2.200")
+    expect(ip).to_be_focused()
+    fix_action(page, "scan").click()
+    expect(page.locator("#fixTargets")).to_have_value("192.168.2.0/24")
+    page.keyboard.press("Escape")
+    expect(ip).to_have_value("192.168.2.200")
+    page.keyboard.press("Escape")
+    expect(fix_heading(page)).to_have_text("Check the saved details")
+    page.keyboard.press("Escape")
+    expect(page.locator("#networkBody")).to_be_visible()

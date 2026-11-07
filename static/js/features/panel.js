@@ -21,6 +21,9 @@ function copyPanelState(state) {
     draft: state.draft ? { ...state.draft } : null,
     selection: state.selection ? { ...state.selection } : null,
     setup: state.setup ? { ...state.setup } : null,
+    // A running operation contains only job metadata. Keep its completion
+    // shared when returning to a wizard page through panel history.
+    fix: state.fix ? { ...state.fix } : null,
   };
 }
 
@@ -40,7 +43,7 @@ function panelFocusSelector(el) {
   const body = $(PANEL_PAGES[appState.panelView].body);
   if (!body.contains(el)) return null;
   // Stable control attributes avoid storing copy values, which can be keys.
-  for (const attr of ["data-setup-action", "data-network-action", "data-setup-tool", "data-open-device", "data-localtuya-edition", "data-key-toggle"]) {
+  for (const attr of ["data-setup-action", "data-network-action", "data-fix-action", "data-setup-tool", "data-open-device", "data-localtuya-edition", "data-key-toggle"]) {
     if (el.hasAttribute(attr)) return `#${body.id} [${attr}="${CSS.escape(el.getAttribute(attr))}"]`;
   }
   return panelNodeSelector(el, body);
@@ -133,6 +136,8 @@ function openNetwork(opener = document.activeElement) { if (appState.selectedId)
 function backPanel() {
   if (!appState.panelPage) return;
   capturePanelPage();
+  const definition = PANEL_PAGES[appState.panelView];
+  if (appState.deviceData.some(d => d.id === appState.selectedId) && definition.back && definition.back()) return;
   while (appState.panelHistory.length) {
     const page = appState.panelHistory.pop();
     // Refreshes can remove earlier devices. Never restore an old device record.
@@ -187,9 +192,10 @@ function renderPanel(capture = true) {
     : [statusBadge(d), esc(d.product_name), esc(d.category)]
       .filter(part => part && part !== "-").join("<span>·</span>");
   const previous = appState.panelHistory[appState.panelHistory.length - 1];
-  $("panelNav").classList.toggle("hidden", !previous);
-  $("panelBack").innerHTML = `${icon("chevron")}${esc(previous ? PANEL_PAGES[previous.view].backLabel || "Back" : "Back")}`;
-  $("panelBack").setAttribute("aria-controls", previous ? PANEL_PAGES[previous.view].body : "panelBody");
+  const stepBack = page.stepBackLabel && page.stepBackLabel();
+  $("panelNav").classList.toggle("hidden", !previous && !stepBack);
+  $("panelBack").innerHTML = `${icon("chevron")}${esc(stepBack || (previous ? PANEL_PAGES[previous.view].backLabel || "Back" : "Back"))}`;
+  $("panelBack").setAttribute("aria-controls", stepBack ? page.body : previous ? PANEL_PAGES[previous.view].body : "panelBody");
   $("panelSetupEntry").classList.toggle("hidden", actionView);
   for (const [view, definition] of Object.entries(PANEL_PAGES)) {
     const content = $(definition.body);
@@ -215,6 +221,7 @@ function renderPanel(capture = true) {
 
 function panelAction(action, opener) {
   if (!appState.selectedId) return;
+  if (action === "fix") { navigatePanel(appState.selectedId, "fix", opener); return; }
   if (action === "network") { openNetwork(opener); return; }
   if (action === "edition") { appState.localTuyaEdition = "xzetsubou"; repaintSetup("[data-localtuya-edition]"); return; }
   if (action === "refresh") {

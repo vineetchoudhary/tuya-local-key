@@ -88,7 +88,9 @@ Timestamps in the web UI use your browser's timezone, so the same list reads dif
 
 Choose **Set up in…** at the top of a device's details panel to open a separate setup view for tuya-local, localtuya and tinytuya.
 
-The separate **Local network** view shows connection problems, the last local result, and an IP address you can edit and check. **Connection checked** means the device answered with the current local key; **Gateway checked** applies only to a sub-device's gateway. The gateway's report of the sub-device is shown separately. Protocol 3.1 status replies do not verify the key, so they show **Device found**. Older saved scans and results from before a key change need another check.
+The separate **Local network** view shows connection problems and the last local result. When the connection details are complete and no failure needs attention, it shows **Recheck connection** instead of an IP form, repair button, or scan button. **Connection checked** means the device answered with the current local key; **Gateway checked** applies only to a sub-device's gateway. The gateway's report of the sub-device is shown separately. Protocol 3.1 status replies do not verify the key, so they show **Device found**. Older saved scans and results from before a key change need another check.
+
+When details are missing or a connection fails, choose **Fix connection** for a [guided connection check](network-scanning.md#fix-connection). It walks through the saved details, an IP check or network scan, and suggested recovery steps. Each screen offers the relevant next action. Use the panel's **Back** button or Escape to return through the steps.
 
 ## Bluetooth Devices
 
