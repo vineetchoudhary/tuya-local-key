@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.0
+- Redesigned the device panel with simpler navigation and setup pages.
+- Added **Fix connection** for guided local troubleshooting.
+- Added **Current values** to read device data over LAN and compare it with the saved cloud snapshot.
+- Added redacted support report downloads.
+- Added bug report and feature request forms.
+- Added in-app update checks with `CHECK_FOR_UPDATES=false` to disable them.
+- Restricted the Home Assistant authentication exception to trusted ingress requests.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v3.5...v4.0
+
 ## 3.5
 - Added **Room** filters for the selected home, including **No room** for unassigned devices and **Unknown room** when room information is unavailable.
 - Added **Status** filters for cloud status and saved LAN results.
