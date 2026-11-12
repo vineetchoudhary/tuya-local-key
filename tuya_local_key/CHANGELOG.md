@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.1
+- Updated TinyTuya to 1.21.1 from 1.20.
+- CLI and source installations now require Python 3.10 or newer.
+- Fixed unwanted focus borders in device options and setup, and table overlap in Current values.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v4.0...v4.1
+
 ## 4.0
 - Redesigned the device panel with simpler navigation and setup pages.
 - Added **Fix connection** for guided local troubleshooting.
