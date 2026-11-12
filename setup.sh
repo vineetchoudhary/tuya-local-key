@@ -6,6 +6,10 @@ cd "$(dirname "$0")"
 PY="${PYTHON:-python3}"
 VENV=".venv"
 
+"$PY" -c 'import sys
+if sys.version_info < (3, 10):
+    sys.exit("Python 3.10 or newer is required. Select it with PYTHON=python3.12 ./setup.sh.")'
+
 echo "==> Creating virtualenv in $VENV"
 "$PY" -m venv "$VENV"
 

@@ -308,11 +308,12 @@ def test_a_v34_reply_that_fails_the_hmac_check_is_not_a_match(monkeypatch):
     assert outcome["match"] is False and outcome["error"] == "key"
 
 
-def test_the_session_key_check_follows_real_tinytuya():
+@pytest.mark.parametrize("version", ["3.4", "3.5"])
+def test_the_session_key_check_follows_real_tinytuya(version):
     """Pins the tinytuya behaviour the 3.4/3.5 match relies on. No network: an
     address and a version are given, so the constructor connects to nothing."""
     tinytuya = pytest.importorskip("tinytuya")
-    device = tinytuya.Device("id", address="192.168.2.1", local_key="k" * 16, version=3.4)
+    device = tinytuya.Device("id", address="192.168.2.1", local_key="k" * 16, version=float(version))
     try:
         assert not lan_scan._session_key_installed(device)
         device.remote_nonce = b"r" * 16   # what tinytuya sets before its HMAC check

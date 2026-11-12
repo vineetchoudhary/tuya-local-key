@@ -1,5 +1,7 @@
 # CLI
 
+Install Python 3.10 or newer before setting up the local environment.
+
 Set up the local environment:
 
 ```bash

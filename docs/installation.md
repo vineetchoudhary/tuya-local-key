@@ -55,6 +55,8 @@ Then open `http://localhost:8000`.
 
 ## Web UI from Source
 
+Python 3.10 or newer is required by TinyTuya 1.21.1. Home Assistant and Docker installations already use Python 3.12.
+
 Set up the local environment, then add the web dependencies:
 
 ```bash
