@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_BIN="${PYTHON_BIN:-}"
 IMAGE_NAME="${IMAGE_NAME:-tuya-local-key}"
 CONTAINER_NAME="${CONTAINER_NAME:-tuya-local-key}"
 HOST_PORT="${HOST_PORT:-8000}"
@@ -28,8 +28,14 @@ Options:
   --no-update-check  Disable all update checks in the Docker container.
   -h, --help         Show this help message.
 
+Python:
+  Requires Python 3.10 or newer. Uses a compatible .venv first, then looks
+  for python3 or a versioned Python. Base interpreters get a test environment
+  under .venv-test/. Set PYTHON_BIN to choose an interpreter explicitly.
+
 Examples:
   ./tests/test.sh
+  PYTHON_BIN=python3.12 ./tests/test.sh
   ./tests/test.sh --skip-tests
   ./tests/test.sh --skip-tests --auth
   ./tests/test.sh --skip-tests --auth --no-update-check
@@ -81,6 +87,43 @@ require_command() {
   fi
 }
 
+supports_python() {
+  command -v "$1" >/dev/null 2>&1 &&
+    "$1" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1
+}
+
+select_python() {
+  local candidate
+  if [[ -n "$PYTHON_BIN" ]]; then
+    require_command "$PYTHON_BIN"
+    if ! supports_python "$PYTHON_BIN"; then
+      printf 'Python 3.10 or newer is required by TinyTuya 1.21.1. PYTHON_BIN=%s is not compatible.\n' "$PYTHON_BIN" >&2
+      exit 1
+    fi
+    return
+  fi
+
+  for candidate in "$ROOT_DIR/.venv/bin/python" python3 python3.12 python3.13 python3.14 python3.15 python3.11 python3.10; do
+    if supports_python "$candidate"; then
+      PYTHON_BIN="$candidate"
+      return
+    fi
+  done
+  printf 'Python 3.10 or newer is required by TinyTuya 1.21.1. Install it and rerun with PYTHON_BIN=python3.12 ./tests/test.sh.\n' >&2
+  exit 1
+}
+
+prepare_test_python() {
+  local python_version test_venv
+  if ! "$PYTHON_BIN" -c 'import sys; sys.exit(sys.prefix == sys.base_prefix)'; then
+    python_version="$("$PYTHON_BIN" -c 'import sys; print("%s.%s" % sys.version_info[:2])')"
+    test_venv="$ROOT_DIR/.venv-test/$python_version"
+    run "$PYTHON_BIN" -m venv "$test_venv"
+    PYTHON_BIN="$test_venv/bin/python"
+  fi
+  log "Using $("$PYTHON_BIN" --version) at $PYTHON_BIN"
+}
+
 open_browser() {
   if command -v open >/dev/null 2>&1; then
     open "$APP_URL"
@@ -110,13 +153,14 @@ wait_for_app() {
 cd "$ROOT_DIR"
 
 if [[ "$SKIP_TESTS" == 0 ]]; then
-  require_command "$PYTHON_BIN"
+  select_python
 fi
 require_command docker
 
 if [[ "$SKIP_TESTS" == 1 ]]; then
   log "Skipping local dependency installation and tests"
 else
+  prepare_test_python
   run "$PYTHON_BIN" -m pip install -r requirements-dev.txt -r requirements-web.txt
   run "$PYTHON_BIN" -m pytest \
     --cov=app \

@@ -4,6 +4,7 @@
 
 # Python / local env
 .venv/
+.venv-test/
 __pycache__/
 *.pyc
 *.egg-info/
