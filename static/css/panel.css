@@ -64,6 +64,7 @@ body.panel-open .panel { transition-delay: 0s; }
 .device-menu-item:focus-visible::after { content: ""; position: absolute; inset: 3px; border: 2px solid var(--accent); pointer-events: none; }
 .device-menu > li:first-child .device-menu-item:focus-visible::after { border-top-left-radius: 8px; border-top-right-radius: 8px; }
 .device-menu > li:last-child .device-menu-item:focus-visible::after { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+.panel.pointer-navigation .device-menu-item:focus-visible::after { content: none; }
 @media (forced-colors: active) {
   .device-menu-item:focus-visible::after { border-color: Highlight; }
 }

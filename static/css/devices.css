@@ -68,7 +68,9 @@
 .table-scroll { overflow-x: auto; border:1px solid var(--border); border-radius:12px; }
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; white-space: nowrap; }
 th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
-th { position: sticky; top: 0; background: var(--card); font-weight: 600; color: var(--muted); }
+th { background: var(--card); font-weight: 600; color: var(--muted); }
+/* Only the device list has sticky headings; panel tables scroll as whole rows. */
+.table-scroll th { position: sticky; top: 0; }
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--fg); }
 th.active { color: var(--fg); }

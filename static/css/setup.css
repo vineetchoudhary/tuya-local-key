@@ -10,6 +10,7 @@
 .setup-tabs button:focus-visible, .setup-copy:focus-visible {
   outline: 2px solid var(--accent); outline-offset: -2px;
 }
+.panel.pointer-navigation .setup-tabs button:focus-visible { outline: none; }
 .setup-content { padding: 12px; font-size: 13px; }
 .setup-note { margin: 0 0 12px; color: var(--muted); overflow-wrap: anywhere; }
 .setup-field + .setup-field { margin-top: 12px; }

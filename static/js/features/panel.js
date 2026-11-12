@@ -241,6 +241,10 @@ function initPanel(actions = {}) {
   if (initialized) return;
   initialized = true;
   ({ loadDevices, repaintSetup, saveExclusions, showScanBox, resetSupport = () => {} } = actions);
+  // Programmatic focus can inherit :focus-visible even after a row is tapped.
+  // Keep the focused control for navigation, and show its frame on keyboard use.
+  document.addEventListener("pointerdown", () => $("panel").classList.add("pointer-navigation"), true);
+  document.addEventListener("keydown", () => $("panel").classList.remove("pointer-navigation"), true);
   // Device links stay in the current view, including a gateway's setup view.
   $("panel").addEventListener("click", (e) => {
     const entry = e.target.closest("[data-panel-page]");

@@ -5179,6 +5179,89 @@ def test_current_values_layout_and_keyboard_navigation(page, running_app, monkey
 # --------------------------------------------------------------------------- #
 # Device directory and dedicated information pages
 # --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("width,scheme,touch", [(1440, "light", False), (390, "dark", True), (320, "light", True)])
+@pytest.mark.parametrize("view", ["menu", "setup"])
+def test_panel_pointer_navigation_only_shows_focus_frames_after_keyboard_input(browser, server, gallery, width, scheme, touch, view):
+    with browser.new_context(viewport={"width": width, "height": 640}, color_scheme=scheme, has_touch=touch) as context:
+        page = context.new_page()
+        page.goto(server, wait_until="networkidle")
+
+        def activate(control):
+            if touch:
+                control.tap()
+            else:
+                control.click()
+
+        def has_focus_frame(control):
+            return control.evaluate("""el => {
+                const outline = getComputedStyle(el), frame = getComputedStyle(el, '::after');
+                return (outline.outlineStyle !== 'none' && parseFloat(outline.outlineWidth) > 0) ||
+                    (!['none', 'normal'].includes(frame.content) && frame.borderTopStyle !== 'none' &&
+                        parseFloat(frame.borderTopWidth) > 0);
+            }""")
+
+        activate(page.locator(f"#rows tr:has-text('{PLUG.name}') td.name-col"))
+        page.wait_for_function("document.getElementById('panel').getBoundingClientRect().right <= innerWidth + 0.5")
+        if view == "setup":
+            activate(page.locator("#panelSetupOpen"))
+        control = page.locator("#panelSetupOpen" if view == "menu" else "[data-setup-tool='tuya-local']")
+        expect(control).to_be_focused()
+        assert not has_focus_frame(control), "automatic focus after a click or tap must not draw a keyboard frame"
+        repaint(page)
+        expect(control).to_be_focused()
+        assert not has_focus_frame(control), "a background repaint must preserve pointer focus styling"
+        if SHOTS_ENABLED:
+            page.screenshot(path=SHOTS_DIR / f"pointer-navigation-{view}-{width}-{scheme}.png", full_page=False)
+
+        page.keyboard.press("Tab")
+        page.keyboard.press("Shift+Tab")
+        expect(control).to_be_focused()
+        assert has_focus_frame(control), "Tab navigation must retain a visible focus indicator"
+        if view == "menu":
+            page.keyboard.press("Enter")
+            control = page.locator("[data-setup-tool='tuya-local']")
+            expect(control).to_be_focused()
+            assert has_focus_frame(control)
+        page.keyboard.press("ArrowRight")
+        control = page.locator("[data-setup-tool='localtuya']")
+        expect(control).to_be_focused()
+        assert has_focus_frame(control), "arrow-key tab navigation must remain visible"
+        activate(page.locator("[data-setup-tool='tinytuya']"))
+        assert not has_focus_frame(page.locator("[data-setup-tool='tinytuya']"))
+        activate(page.locator("#panelBack"))
+        expect(page.locator("#panelSetupOpen")).to_be_focused()
+        assert not has_focus_frame(page.locator("#panelSetupOpen"))
+
+
+@pytest.mark.parametrize("width,scheme", [(1440, "light"), (390, "dark"), (320, "light")])
+def test_current_values_headers_and_row_labels_scroll_with_their_values(page, running_app, monkeypatch, width, scheme):
+    devices = copy.deepcopy(DEVICES)
+    device = devices[demo_devices.PLUG]
+    for dp in range(2, 26):
+        code = f"switch_{dp}"
+        device.status[code] = bool(dp % 2)
+        device.local_strategy[dp] = {"value_convert": "raw", "status_code": code, "config_item": {}}
+    _serves(running_app, monkeypatch, devices)
+    refreshed(page, "#rows")
+    values_ready(page, running_app, monkeypatch)
+    page.set_viewport_size({"width": width, "height": 640})
+    page.emulate_media(color_scheme=scheme)
+    open_values(page)
+    values_read(page).click()
+    expect(values_read(page)).to_have_text("Read again")
+    body = page.locator("#valuesBody")
+    row = body.locator(".values-table tbody tr").first
+    column_heading = body.locator(".values-table thead th").nth(1)
+    original = row.locator("td").first.bounding_box()
+    scroll = original["y"] - body.bounding_box()["y"] + original["height"] / 2
+    assert body.evaluate("(el, scroll) => { el.scrollTop = scroll; return el.scrollTop; }", scroll) == pytest.approx(scroll, abs=1)
+    label = row.locator("th").bounding_box()
+    value = row.locator("td").first.bounding_box()
+    heading = column_heading.bounding_box()
+    assert label["y"] == pytest.approx(value["y"], abs=1), "data point labels must stay aligned with their row values"
+    assert heading["y"] + heading["height"] <= value["y"] + 1, "values must not scroll above a floating column heading"
+
+
 @pytest.mark.parametrize("width, scheme", [(1440, "light"), (1440, "dark"), (390, "light"), (390, "dark"),
                                           (320, "light"), (320, "dark")])
 def test_device_menu_only_shows_options_and_navigates_every_page(page, width, scheme):
