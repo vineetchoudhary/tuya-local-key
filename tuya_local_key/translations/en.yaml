@@ -1,4 +1,12 @@
 configuration:
+  CHANGE_HISTORY:
+    name: Change history
+    description: >-
+      Record encrypted configuration changes from fresh device refreshes and network checks. Setting to off deletes saved history and its key. History is temporary when Device cache is off. Logging out or switching accounts deletes history.
+  HISTORY_RETENTION_DAYS:
+    name: History retention (days)
+    description: >-
+      Keep history for 1 to 3650 days (default 90), subject to the 10000-entry limit. Older entries may be removed sooner when storage limits are reached.
   CHECK_FOR_UPDATES:
     name: Check for updates
     description: Enable update checks and notifications.

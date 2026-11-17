@@ -21,6 +21,9 @@ Endpoints (JSON unless noted):
   DELETE /api/lan/scan      -> {"ok": true}
   POST /api/lan/read        -> {"device_id", "status", "dps"?, "read_at"?}
   POST /api/support-report  -> {"report", "account_id"} for {"device_id", "account_id"?}
+  GET  /api/history         -> saved events, filtered by device, change, source and dates
+  DELETE /api/history      -> clear {"device_id", "account_id", "epoch"}, preserving other devices
+  POST /api/history/reset  -> confirmed recovery of an unreadable journal
 """
 
 import base64
@@ -32,11 +35,13 @@ import os
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
 
 import device_cache
+import change_history
 import device_preferences
 import device_values
 import lan_scan
@@ -96,6 +101,16 @@ MAX_EXCLUSION_BATCH = 2000
 DEVICE_CACHE_PERSIST = _setting("DEVICE_CACHE", "on").lower() not in {
     "off", "0", "false", "no",
 }
+_HISTORY_SETTING = _setting("CHANGE_HISTORY", "on").strip().lower()
+CHANGE_HISTORY = _HISTORY_SETTING not in {"off", "0", "false", "no"}
+try:
+    HISTORY_RETENTION_DAYS = int(_setting("HISTORY_RETENTION_DAYS", "90"))
+except ValueError:
+    HISTORY_RETENTION_DAYS = 0  # reported by the store; never erase on bad configuration
+if _HISTORY_SETTING not in {"", "on", "off", "0", "1", "false", "true", "no", "yes"}:
+    HISTORY_RETENTION_DAYS = 0
+HISTORY_FILE = os.environ.get("HISTORY_FILE", os.path.join(_SESSION_DIR, "change-history.enc"))
+HISTORY_KEY_FILE = os.environ.get("HISTORY_KEY_FILE", os.path.join(_SESSION_DIR, "history.key"))
 SESSION_INVALID_ERROR_CODES = {
     "1002",  # access_token is null
     "1010",  # token is expired
@@ -124,6 +139,12 @@ _devices_fetch_lock = threading.Lock()
 _account_lock = threading.Lock()
 _account_generation = 0
 _device_preferences = device_preferences.PreferenceStore(DEVICE_PREFERENCES_FILE)
+_history = change_history.HistoryStore(
+    HISTORY_FILE, HISTORY_KEY_FILE, enabled=CHANGE_HISTORY,
+    persist=DEVICE_CACHE_PERSIST, retention_days=HISTORY_RETENTION_DAYS,
+    forbidden_paths=(SESSION_FILE, DEVICE_CACHE_FILE, DEVICE_CACHE_KEY_FILE, LAN_CACHE_FILE,
+                     DEVICE_PREFERENCES_FILE, UPDATE_CACHE_FILE, OPTIONS_FILE))
+_history_reset_secret = os.urandom(32)
 # LAN scan results, stored like the device list and cleared with it. One scan
 # job at a time, on its own thread; _lan_lock guards both.
 _lan_cache = None
@@ -222,7 +243,59 @@ def _devices_response(body, session):
         # Old/incomplete sessions can still report their existing device error;
         # the preferences endpoint explicitly asks them to log in again.
         return jsonify(body)
-    return jsonify(dict(body, account_id=digest))
+    response = dict(body, account_id=digest)
+    if CHANGE_HISTORY and _history.error:
+        response["history_error"] = _history.error
+    return jsonify(response)
+
+
+def _history_epoch(session):
+    try:
+        return _history.epoch(device_preferences.account_id(session))
+    except (change_history.HistoryError, device_preferences.AccountIdentityError, OSError):
+        return "unavailable"
+
+
+def _record_cloud_history(session, listed, operation, epoch, previous):
+    try:
+        account = device_preferences.account_id(session)
+    except device_preferences.AccountIdentityError:
+        return
+    if not CHANGE_HISTORY:
+        return
+    try:
+        # Upgrade baseline: use only the matching cache, with its original date.
+        if previous and _history.view(account, limit=1)["last_cloud_at"] is None:
+            _history.observe_cloud(account, previous["body"].get("devices", []),
+                                   "seed:" + operation, epoch=epoch,
+                                   observed_at=previous["cached_at"], seed=True)
+        _history.observe_cloud(account, listed, operation, epoch=epoch)
+    except change_history.HistoryError as error:
+        _history.error = str(error)
+    except OSError:
+        # A history failure must not discard successfully fetched device data.
+        if CHANGE_HISTORY and _history.error is None:
+            _history.error = "history_save_failed"
+
+
+def _purge_history():
+    try:
+        _history.purge()
+        return None
+    except change_history.HistoryError:
+        return "history_delete_failed"
+
+
+def _history_reset_token(account):
+    stamps = []
+    for path in (Path(HISTORY_FILE), Path(HISTORY_KEY_FILE)):
+        try:
+            stat = path.stat()
+            stamps.append([stat.st_ino, stat.st_size, stat.st_mtime_ns])
+        except OSError:
+            stamps.append(None)
+    return hmac.new(_history_reset_secret, json.dumps(
+        [account, _account_generation, stamps]).encode(), hashlib.sha256).hexdigest()
 
 
 def _is_session_invalid_error(error):
@@ -320,6 +393,13 @@ def _json_object():
 
 @app.get("/api/state")
 def state():
+    with _account_lock:
+        session = core.load_session(SESSION_FILE)
+        if session:
+            try:
+                _history.activate(device_preferences.account_id(session))
+            except device_preferences.AccountIdentityError:
+                pass
     return jsonify({"logged_in": os.path.isfile(SESSION_FILE)})
 
 
@@ -365,11 +445,18 @@ def login_poll():
             with _lock:
                 if generation != _account_generation or token not in _pending:
                     return jsonify({"status": "expired"}), 409
+            old_session = core.load_session(SESSION_FILE)
             try:
                 core.save_session(SESSION_FILE, session)
             except Exception as e:
                 return jsonify({"error": f"session_save_failed: {e}"}), 500
             _account_generation += 1
+            try:
+                same_account = bool(old_session) and device_preferences.account_id(old_session) == device_preferences.account_id(session)
+            except device_preferences.AccountIdentityError:
+                same_account = False
+            if not same_account:
+                _purge_history()
             with _lock:
                 _pending.pop(token, None)
             _clear_devices_cache()
@@ -410,6 +497,8 @@ def devices():
                 if cached:
                     return _devices_response(cached, session)
             previous = cache
+        history_epoch = _history_epoch(session)
+        history_operation = "cloud:" + uuid.uuid4().hex
 
         try:
             devs = core.devices_from_session(session, SESSION_FILE)
@@ -459,6 +548,8 @@ def devices():
             "cached_at": now,
             "session_key": _session_cache_key(session),
         }
+        with _account_lock:
+            _record_cloud_history(session, listed, history_operation, history_epoch, previous)
         with _devices_cache_lock:
             _devices_cache = entry
             _devices_cache_loaded = True
@@ -542,13 +633,109 @@ def logout():
     with _devices_fetch_lock, _account_lock:
         try:
             os.remove(SESSION_FILE)
-        except OSError:
+        except FileNotFoundError:
             pass
+        except OSError:
+            return jsonify({"error": "logout_failed"}), 503
         _account_generation += 1
         with _lock:
             _pending.clear()
         _clear_devices_cache()
+        history_error = _purge_history()
+    if history_error:
+        return jsonify({"ok": True, "history_error": history_error}), 207
     return jsonify({"ok": True})
+
+
+@app.get("/api/history")
+def history_list():
+    with _account_lock:
+        session, account, error = _preference_account()
+        if error:
+            return error
+        if request.args.get("account_id", account) != account:
+            return jsonify({"error": "account_changed"}), 409
+        if not CHANGE_HISTORY:
+            return jsonify({"account_id": account, "enabled": False,
+                            "events": [], "recording_error": _history.error})
+        try:
+            result = _history.view(
+                account, limit=int(request.args.get("limit", "50")),
+                cursor=request.args.get("cursor"), device_id=request.args.get("device_id", ""),
+                kind=request.args.get("kind", ""), source=request.args.get("source", ""),
+                query=request.args.get("q", ""),
+                since=float(request.args["since"]) if "since" in request.args else None,
+                until=float(request.args["until"]) if "until" in request.args else None)
+        except (ValueError, OverflowError):
+            return jsonify({"error": "invalid_history_query"}), 400
+        except change_history.HistoryError as exc:
+            code = str(exc)
+            status = 400 if code == "invalid_history_query" else 409 if code in {"account_changed", "history_cursor_expired"} else 503
+            failure = {"error": code, "account_id": account}
+            if code in {"history_invalid", "history_version", "history_key_unavailable", "history_delete_failed"}:
+                failure["reset_token"] = _history_reset_token(account)
+            return jsonify(failure), status
+        return jsonify(result)
+
+
+@app.delete("/api/history")
+def history_clear():
+    data = _history_payload()
+    if data is None:
+        return jsonify({"error": "invalid_history_request"}), 400
+    with _account_lock:
+        _, account, error = _preference_account()
+        if error:
+            return error
+        if data.get("account_id") != account:
+            return jsonify({"error": "account_changed"}), 409
+        if not CHANGE_HISTORY:
+            return jsonify({"error": "history_disabled"}), 409
+        device_id = data.get("device_id")
+        if not device_preferences.valid_device_id(device_id):
+            return jsonify({"error": "invalid_device"}), 400
+        try:
+            _history.clear(account, data.get("epoch"), device_id=device_id)
+        except change_history.HistoryError as exc:
+            code = str(exc)
+            status = 409 if code == "history_cursor_expired" else 404 if code == "unknown_device" else 503
+            return jsonify({"error": code}), status
+        return jsonify({"ok": True, "account_id": account, "device_id": device_id})
+
+
+@app.post("/api/history/reset")
+def history_reset():
+    data = _history_payload()
+    if data is None:
+        return jsonify({"error": "invalid_history_request"}), 400
+    with _account_lock:
+        _, account, error = _preference_account()
+        if error:
+            return error
+        if data.get("account_id") != account:
+            return jsonify({"error": "account_changed"}), 409
+        supplied = data.get("reset_token")
+        if (data.get("confirm_reset") is not True or not isinstance(supplied, str)
+                or not hmac.compare_digest(supplied, _history_reset_token(account))):
+            return jsonify({"error": "history_cursor_expired"}), 409
+        error = _purge_history()
+        if error:
+            return jsonify({"error": error}), 503
+        return jsonify({"ok": True, "account_id": account})
+
+
+def _history_payload():
+    """Bound JSON even for chunked requests without a Content-Length."""
+    if not request.is_json or request.content_length is not None and request.content_length > 2048:
+        return None
+    payload = request.stream.read(2049)
+    if len(payload) > 2048:
+        return None
+    try:
+        value = json.loads(payload)
+    except (ValueError, UnicodeError, RecursionError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 # --------------------------------------------------------------------------- #
@@ -823,6 +1010,48 @@ def _merge_lan(job, outcome, current):
             if any(changes.values()) or not body.get("changes_at"):
                 body["changes_at"] = now   # something new: show the notice again
     _save_lan(key, body)
+    # History accepts only the part of this outcome that is supported by the
+    # same keys, relationships and actual scan coverage at commit time.
+    accepted = {}
+    coverage = outcome.get("coverage", {})
+    for dev_id, result in results.items():
+        dependencies = {dev_id}
+        gateway = result.get("gateway_id") or (current.get(dev_id) or {}).get("gateway_id")
+        if gateway:
+            dependencies.add(gateway)
+        source = result.get("key_from") or (merged.get(gateway) or {}).get("key_from")
+        if source:
+            dependencies.add(source)
+        if any(dep not in current
+               or job["key_digests"].get(dep) != _key_digest(current[dep].get("local_key"))
+               or job["device_links"].get(dep) != _device_link(current[dep])
+               for dep in dependencies):
+            continue
+        positive = result.get("status") == lan_scan.OK
+        child_report = result.get("status") == lan_scan.VIA_GATEWAY and type(result.get("sub_online")) is bool
+        if not positive and not child_report:
+            ip = result.get("ip")
+            if (outcome["summary"].get("cancelled") or not coverage.get(dev_id)
+                    or not ip or ip != (previous.get(dev_id) or {}).get("ip")):
+                continue
+        accepted[dev_id] = result
+    try:
+        session = core.load_session(SESSION_FILE)
+        account = device_preferences.account_id(session)
+        # On upgrade, the displayed reachable result may predate LAN history.
+        # Import its original observation only when its saved key/relationship
+        # evidence still matches. Use the cache from before this outcome, not
+        # the new failure that has just replaced it in the displayed results.
+        prior_evidence = stored.get("key_evidence") or {}
+        trusted = {dev_id: result for dev_id, result in previous.items()
+                   if _lan_key_current(result, prior_evidence.get(dev_id), current)}
+        _history.seed_lan_cache(account, trusted, list(current.values()), epoch=job.get("history_epoch"))
+        _history.observe_lan(account, accepted, list(current.values()),
+                             "lan:" + job["id"] + ":" + (job.get("device_id") or "scan"),
+                             epoch=job.get("history_epoch"))
+    except (change_history.HistoryError, device_preferences.AccountIdentityError, OSError):
+        if CHANGE_HISTORY and _history.error is None:
+            _history.error = "history_save_failed"
 
 
 def _run_lan_job(job, targets, devices, known, only, routers):
@@ -874,15 +1103,15 @@ def _save_lan_outcome(job, outcome, device_id=None):
     """Merge an outcome into the stored results, unless the session it belongs
     to is gone. Returns False, and marks the job discarded, if it is. With
     device_id, it is merged as a check of that device."""
-    session, session_key = _lan_session()
-    current = {d.get("id"): d for d in (_session_devices(session) or [])} if session else {}
-    with _lan_lock:
-        if _lan_job is not job or session_key != job["session_key"]:
-            # Logged out, or logged in again, while it ran: the results belong
-            # to a device list that is gone.
-            job.update(state="discarded", finished_at=time.time())
-            return False
-        _merge_lan(dict(job, device_id=device_id) if device_id else job, outcome, current)
+    with _account_lock:
+        session, session_key = _lan_session()
+        current = {d.get("id"): d for d in (_session_devices(session) or [])} if session else {}
+        with _lan_lock:
+            if _lan_job is not job or session_key != job["session_key"]:
+                # Logged out or reauthenticated while it ran.
+                job.update(state="discarded", finished_at=time.time())
+                return False
+            _merge_lan(dict(job, device_id=device_id) if device_id else job, outcome, current)
     return True
 
 
@@ -1025,6 +1254,7 @@ def lan_scan_start():
         "result": None,
         "error": None,
         "session_key": session_key,
+        "history_epoch": _history_epoch(session),
         "key_digests": {d.get("id"): _key_digest(d.get("local_key")) for d in devices},
         "device_links": {d.get("id"): _device_link(d) for d in devices},
         "cancel": threading.Event(),

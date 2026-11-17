@@ -946,7 +946,16 @@ class _Scan:
             "cancelled": cancelled,
             "finished_at": checked_at,
         }
-        return {"results": results, "summary": summary}
+        # A finished job may still have skipped devices or exhausted an
+        # address budget. Only tested remembered endpoints support negative
+        # history transitions; positive matches speak for themselves.
+        coverage = {}
+        for dev_id in results:
+            ip = (self.known.get(dev_id) or {}).get("ip")
+            coverage[dev_id] = bool(
+                ip in self.ips and ip in self.labels and ip not in self.out_of_budget
+                and (self.labels.get(ip) != OPEN or (ip, dev_id) in self.asked))
+        return {"results": results, "summary": summary, "coverage": coverage}
 
     def _name_unclaimed(self):
         """{unclaimed pool id: gateway id}, for each unclaimed key that answered

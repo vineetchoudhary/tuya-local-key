@@ -42,6 +42,7 @@ async function loadLan() {
     results: body.results || {}, summary: body.summary || null, changes: body.changes || null,
     changes_at: body.changes_at || null, targets: body.targets || "", job: body.job || null,
   };
+  appState.historyError = body.history_error || null;
   return true;
 }
 

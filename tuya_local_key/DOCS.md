@@ -22,6 +22,8 @@ Set these options on the app's Configuration page:
 | `QR_SCHEME` | `smartlife` | Use `tuyaSmart` if QR login fails. |
 | `DEVICE_CACHE` | `on` | Keep devices across restarts. Set to `off` to keep the list in memory only. |
 | `CHECK_FOR_UPDATES` | `on` | Turn off **Check for updates** to disable all update checks and notifications. |
+| `CHANGE_HISTORY` | `on` | Keep encrypted change history. Setting to `off` deletes saved history and its key. With `DEVICE_CACHE=off`, history is temporary. |
+| `HISTORY_RETENTION_DAYS` | `90` | Days of history to retain (1–3,650), subject to the 10,000-entry limit. |
 | `LAN_SUBNET` | _(unset)_ | Prefill Scan network with your IoT subnet. Separate multiple subnets with commas. |
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | _(unset)_ | Optional login for direct port access. Set both. |
 
@@ -30,6 +32,8 @@ Set these options on the app's Configuration page:
 Ingress access uses Home Assistant authentication. The direct `8000/tcp` port is disabled by default. If you enable it, set both `AUTH_USERNAME` and `AUTH_PASSWORD`. These credentials apply only to direct access and are **ignored through Home Assistant ingress**.
 
 Login data and cached device keys are stored in `/data`. Treat app backups as sensitive and restrict access to trusted Home Assistant users.
+
+Open **Change history** after **Current values** in a device's options. History opens for that device in the side panel with **Filters** collapsed. Filter by Changes, Source (All Sources, Cloud, Local), From, and Through. History survives same-account QR renewal, restarts and updates. Logging out or switching accounts deletes it. **Clear history** clears only the open device's history, preserving other devices' entries and all comparison baselines. Raw local keys and device readings are excluded from history.
 
 ## Documentation
 

@@ -256,6 +256,421 @@ def clipboard(page):
     return page.evaluate("navigator.clipboard.readText()")
 
 
+def clear_device_history(page, device_id=PLUG.id):
+    initial = page.request.get(page.url + "api/history").json()
+    assert page.request.delete(page.url + "api/history", data={
+        "account_id": initial["account_id"], "epoch": initial["epoch"], "device_id": device_id}).ok
+    return initial["account_id"]
+
+
+@pytest.mark.parametrize("ingress,width,scheme", [(False, 1440, "light"), (True, 1440, "dark"),
+                                                 (False, 320, "dark"), (True, 390, "light")])
+def test_change_history_device_filters_clear_and_ingress(page, server, running_app, monkeypatch, ingress, width, scheme):
+    clear_device_history(page)
+    clear_device_history(page, LAMP.id)
+    devices = copy.deepcopy(DEVICES)
+    name = PLUG.name + " <img src=x onerror=window.__history_xss=1>"
+    devices[demo_devices.PLUG].name = name
+    devices[demo_devices.LAMP].name = "Other device changed"
+    _serves(running_app, monkeypatch, devices)
+    refreshed(page, "#changesNotice")
+    target = server + (INGRESS_PREFIX.lstrip("/") + "/" if ingress else "")
+    page.set_viewport_size({"width": width, "height": 800})
+    page.emulate_media(color_scheme=scheme)
+    page.goto(target, wait_until="networkidle")
+    page.wait_for_selector("#rows tr")
+    requests, errors = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("request", lambda request: requests.append(request.url))
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#history")).to_be_visible()
+    expect(page.locator("#panel")).to_be_visible()
+    expect(page.locator("#devices")).to_be_visible()
+    expect(page.locator("#panelTitle")).to_have_text("Change history")
+    expect(page.locator("#historyQuery, #historyDevice, #historyExport, #historyBtn")).to_have_count(0)
+    assert not page.locator("#historyFilterOptions").evaluate("el => el.open")
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    expect(page.locator("#panelSub")).to_have_text(name)
+    page.locator(".history-entry summary").click()
+    expect(page.locator(".history-entry")).to_contain_text(name)
+    assert page.locator("#historyEntries img").count() == 0
+    assert page.evaluate("window.__history_xss") is None
+    assert page.evaluate("document.documentElement.scrollWidth") <= width
+    assert not any("api/devices" in url or "api/lan" in url for url in requests)
+    assert all(url.startswith(target) for url in requests)
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"change-history-{width}-{scheme}.png", full_page=False)
+    assert all("device_id=" + PLUG.id in url for url in requests if "/api/history?" in url)
+    page.locator("#historyFilterOptions .history-filter-label").click()
+    page.locator("#historyKind").select_option("removed")
+    expect(page.locator("#historyEntries")).to_contain_text("No entries match")
+    page.locator("#historyKind").select_option("")
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    page.locator("#historyClear").click()
+    expect(page.locator("#historyClearText")).to_contain_text(name)
+    expect(page.locator("#historyClearText")).to_contain_text("Other devices' history is kept")
+    page.locator("#historyClearDialog button[value=cancel]").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    page.locator("#historyClear").click()
+    page.locator("#historyClearDialog button[value=clear]").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(0)
+    expect(page.locator("#historyEntries")).to_contain_text("No changes recorded for this device")
+    other = page.request.get(target + "api/history?device_id=" + LAMP.id).json()
+    assert len(other["events"]) == 1
+    assert other["events"][0]["name"] == "Other device changed"
+    page.locator("#panelBack").click()
+    expect(page.locator("#panelHistoryOpen")).to_be_focused()
+    page.locator("#panelClose").click()
+    expect(page.locator("#devices")).to_be_visible()
+    assert errors == []
+
+
+def test_change_history_discards_late_filter_response(page, running_app):
+    page.evaluate("async id => (await import('./static/js/features/history.js')).openHistory(id)", PLUG.id)
+    expect(page.locator("#historyStatus")).to_contain_text("Tracking since")
+    page.locator("#historyFilterOptions .history-filter-label").click()
+    held = []
+    def delay(route):
+        if "kind=renamed" in route.request.url:
+            held.append(route)
+        else:
+            route.continue_()
+    page.route("**/api/history?*", delay)
+    with page.expect_request(lambda request: "kind=renamed" in request.url):
+        page.locator("#historyKind").select_option("renamed")
+    with page.expect_response(lambda response: "kind=removed" in response.url):
+        page.locator("#historyKind").select_option("removed")
+    expect(page.locator("#historyEntries")).to_contain_text("No entries match")
+    response = page.request.get(page.url + "api/history").json()
+    response["events"] = [{"sequence": 999, "device_id": PLUG.id, "name": "Stale result",
+        "source": "cloud", "observed_at": time.time(), "previous_observed_at": None,
+        "changes": [{"kind": "added"}], "related_device_ids": []}]
+    for route in held:
+        route.fulfill(json=response)
+    page.wait_for_timeout(100)
+    expect(page.locator("#historyEntries")).not_to_contain_text("Stale result")
+
+
+@pytest.mark.parametrize("problem", ["ciphertext", "missing_cloud_at", "room"])
+def test_change_history_unreadable_data_requires_confirmed_reset(page, running_app, problem):
+    path = Path(running_app.HISTORY_FILE)
+    if problem == "ciphertext":
+        damaged = b"broken history"
+    else:
+        from cryptography.fernet import Fernet
+        cipher = Fernet(Path(running_app.HISTORY_KEY_FILE).read_bytes())
+        document = json.loads(cipher.decrypt(path.read_bytes()))
+        if problem == "missing_cloud_at":
+            del document["cloud_at"]
+        else:
+            document["cloud"][PLUG.id]["room"] = []
+        damaged = cipher.encrypt(json.dumps(document).encode())
+    path.write_bytes(damaged)
+    page.evaluate("async id => (await import('./static/js/features/history.js')).openHistory(id)", PLUG.id)
+    expect(page.locator("#historyStatus")).to_contain_text("could not be read")
+    expect(page.locator("#historyClear")).to_have_text("Reset saved history")
+    page.locator("#historyClear").click()
+    expect(page.locator("#historyClearTitle")).to_have_text("Reset saved history?")
+    page.locator("#historyClearDialog button[value=cancel]").click()
+    assert path.read_bytes() == damaged
+    page.locator("#historyClear").click()
+    page.locator("#historyClearDialog button[value=clear]").click()
+    expect(page.locator("#historyStatus")).to_contain_text("Tracking since")
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("width,scheme", [(1440, "light"), (390, "dark"), (320, "light")])
+def test_change_history_compact_device_drawer_has_four_filters_in_requested_rows(page, width, scheme):
+    clear_device_history(page)
+    page.set_viewport_size({"width": width, "height": 800})
+    page.emulate_media(color_scheme=scheme)
+    table = page.locator("#table").element_handle()
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#panel")).to_be_visible()
+    expect(page.locator("#panelSub")).to_have_text(PLUG.name)
+    expect(page.locator("#historyEntries")).to_have_text("No changes recorded for this device yet.")
+    assert frontend_state(page, "selectedId") == PLUG.id
+    assert table.evaluate("el => el === document.getElementById('table')")
+    expect(page.locator("#historyFilters")).to_be_hidden()
+    expect(page.locator("#historyQuery, #historyDevice, #historyExport, #historyBtn")).to_have_count(0)
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"history-empty-drawer-{width}-{scheme}.png", full_page=False)
+    page.locator("#historyFilterOptions .history-filter-label").click()
+    expect(page.locator("#historyFilters")).to_be_visible()
+    assert page.locator("#historyFilters label").all_inner_texts() == ["Changes", "Source", "From", "Through"]
+    assert page.locator("#historySource option").all_inner_texts() == ["All Sources", "Cloud", "Local"]
+    boxes = {name: page.locator("#" + name).bounding_box() for name in (
+        "historyKind", "historySource", "historySince", "historyUntil")}
+    assert boxes["historyKind"]["y"] == pytest.approx(boxes["historySource"]["y"], abs=1)
+    assert boxes["historySince"]["y"] == pytest.approx(boxes["historyUntil"]["y"], abs=1)
+    assert boxes["historyKind"]["x"] == pytest.approx(boxes["historySince"]["x"], abs=1)
+    assert boxes["historySource"]["x"] == pytest.approx(boxes["historyUntil"]["x"], abs=1)
+    assert boxes["historySince"]["y"] > boxes["historyKind"]["y"]
+    expect(page.locator("#historyResetFilters")).to_have_count(0)
+    expect(page.locator("#historyClearFilters")).to_be_disabled()
+    page.locator("#historySource").select_option("cloud")
+    expect(page.locator("#historyFilterCount")).to_have_text("1")
+    page.locator("#historyFilterOptions .history-filter-label").click()
+    expect(page.locator("#historyFilters")).to_be_hidden()
+    expect(page.locator("#historyFilterCount")).to_be_visible()
+    expect(page.locator("#historyClearFilters")).to_be_visible()
+    expect(page.locator("#historyEntries")).to_have_text("No entries match these filters.")
+    assert page.locator("#historyBody").evaluate("el => el.scrollWidth <= el.clientWidth")
+    if SHOTS_ENABLED:
+        page.screenshot(path=SHOTS_DIR / f"history-filters-drawer-{width}-{scheme}.png", full_page=False)
+    page.locator("#historyClearFilters").click()
+    expect(page.locator("#historyFilters")).to_be_hidden()
+    expect(page.locator("#historyFilterCount")).to_be_hidden()
+    expect(page.locator("#historyClearFilters")).to_be_disabled()
+    expect(page.locator("#historySource")).to_have_value("")
+    expect(page.locator("#panelSub")).to_have_text(PLUG.name)
+    page.keyboard.press("Escape")
+    expect(page.locator("#panelHistoryOpen")).to_be_focused()
+    page.locator("#panelClose").click()
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyFilters")).to_be_hidden()
+    expect(page.locator("#panelSub")).to_have_text(PLUG.name)
+    page.locator("#panelClose").click()
+    expect(page.locator("#devices")).to_be_visible()
+
+
+@pytest.mark.parametrize("field_id,bound", [("historySince", "since"), ("historyUntil", "until")])
+@pytest.mark.parametrize("existing", [False, True], ids=["new-date", "edit-year"])
+def test_history_dates_accept_full_year_from_keyboard(page, field_id, bound, existing):
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyStatus")).to_contain_text("Tracking since")
+    page.locator("#historyFilterOptions .history-filter-label").click()
+    field = page.locator("#" + field_id)
+    if existing:
+        field.fill("2025-11-11")
+        expect(page.locator("#historyEntries")).to_have_attribute("aria-busy", "false")
+    field.focus()
+    # Chromium's date segments use the browser locale. Start at the first
+    # segment, then either enter a fresh date or replace the existing year.
+    for _ in range(3):
+        page.keyboard.press("ArrowLeft")
+    if existing:
+        page.keyboard.press("ArrowRight")
+        page.keyboard.press("ArrowRight")
+        page.keyboard.press("Backspace")
+    else:
+        page.keyboard.type("1111")
+    urls = []
+    page.on("request", lambda request: urls.append(request.url) if "/api/history?" in request.url else None)
+    for index, digit in enumerate("2026", 1):
+        page.keyboard.press(digit)
+        expect(field).to_have_value(f"{int('2026'[:index]):04d}-11-11")
+        expect(page.locator("#historyEntries")).to_have_attribute("aria-busy", "false")
+        expect(field).to_be_focused()
+    expected = page.evaluate("""bound => {
+        const date = new Date(2026, 10, bound === 'until' ? 12 : 11);
+        return String(date.getTime() / 1000 - (bound === 'until' ? 0.001 : 0));
+    }""", bound)
+    assert f"{bound}={expected}" in urls[-1]
+    expect(page.locator("#historyStatus")).to_contain_text("Tracking since")
+    expect(page.locator("#historyFilterCount")).to_have_text("1")
+
+
+@pytest.mark.parametrize("key", ["Enter", "Space"])
+def test_history_clear_all_from_closed_filters_keeps_entries_and_disclosure_state(page, running_app, monkeypatch, key):
+    clear_device_history(page)
+    devices = copy.deepcopy(DEVICES)
+    devices[demo_devices.PLUG].name = PLUG.name + " renamed"
+    _serves(running_app, monkeypatch, devices)
+    refreshed(page, "#changesNotice")
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    page.locator("#historyFilterOptions .history-filter-label").click()
+    page.locator("#historyKind").select_option("renamed")
+    page.locator("#historySource").select_option("cloud")
+    expect(page.locator("#historyFilterCount")).to_have_text("2")
+    page.locator("#historyFilterOptions .history-filter-label").click()
+    expect(page.locator("#historyFilters")).to_be_hidden()
+    expect(page.locator("#historyFilterCount")).to_be_visible()
+    before = page.request.get(page.url + "api/history?device_id=" + PLUG.id).json()["events"]
+    clear = page.locator("#historyClearFilters")
+    clear.focus()
+    clear.press(key)
+    expect(page.locator("#historyFilterCount")).to_be_hidden()
+    expect(page.locator("#historyFilters")).to_be_hidden()
+    expect(page.locator("#historyKind")).to_have_value("")
+    expect(page.locator("#historySource")).to_have_value("")
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    after = page.request.get(page.url + "api/history?device_id=" + PLUG.id).json()["events"]
+    assert before == after
+
+
+@pytest.mark.parametrize("width,scheme", [(1440, "light"), (390, "dark"), (320, "light")])
+def test_history_cards_show_changes_without_expanding_and_wrap_long_values(page, width, scheme):
+    page.set_viewport_size({"width": width, "height": 900})
+    page.emulate_media(color_scheme=scheme)
+    response = page.request.get(page.url + "api/history").json()
+    now = time.time()
+    name = 'Bedroom "Plug" <img src=x onerror=window.__history_xss=1>'
+    previous_ip = "2001:db8::1"
+    current_ip = "2001:db8:1234:5678:90ab:cdef:1234:5678"
+    base = {"device_id": PLUG.id, "name": PLUG.name, "observed_at": now,
+            "previous_observed_at": now - 60, "related_device_ids": [], "operation_id": "layout"}
+    response.update(next_cursor=None, total=3, events=[
+        {**base, "sequence": 103, "source": "lan", "changes": [
+            {"kind": "ip_changed", "before": previous_ip, "after": current_ip, "previous_observed_at": now - 120},
+            {"kind": "protocol_changed", "before": {"version": "3.3", "device22": False},
+             "after": {"version": "3.1", "device22": False}},
+            {"kind": "connection_changed", "before": "unreachable", "after": "ok", "key_authenticated": False},
+        ]},
+        {**base, "sequence": 102, "source": "cloud", "changes": [
+            {"kind": "renamed", "before": PLUG.name, "after": name},
+            {"kind": "home_changed", "before": [{"id": "one", "name": "Home & Garden"}],
+             "after": [{"id": "two", "name": "Home " + "North" * 25}]},
+            {"kind": "room_changed", "before": {"state": "assigned", "id": "room", "name": "Patio"},
+             "after": {"state": "unassigned"}},
+            {"kind": "node_changed", "before": None, "after": "0123456789abcdef" * 4},
+            {"kind": "role_changed", "before": False, "after": True},
+        ]},
+        {**base, "sequence": 101, "source": "cloud", "changes": [{"kind": "key_changed"}]},
+    ])
+    page.route("**/api/history?*", lambda route: route.fulfill(json=response))
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    cards = page.locator("#historyEntries .history-entry")
+    expect(cards).to_have_count(3)
+    assert page.locator("#historyEntries .history-entry-header .badge").all_text_contents() == ["Local", "Cloud", "Cloud"]
+    expect(page.locator("#historyEntries .history-entry-header").first.locator("time")).to_have_attribute("datetime", re.compile(r".*Z$"))
+    expect(page.locator("#historyEntries button, #historyEntries img")).to_have_count(0)
+    expect(page.locator("#historyEntries")).not_to_contain_text(PLUG.id)
+    assert all(PLUG.name not in header for header in page.locator(".history-entry-header").all_text_contents())
+    assert page.locator("#historyEntries details[open]").count() == 0
+    ip = cards.first.locator(".history-change").filter(has=page.get_by_role("heading", name="Local IP", exact=True))
+    expect(ip.locator(".history-before dd")).to_have_text(previous_ip)
+    expect(ip.locator(".history-after dd")).to_have_text(current_ip)
+    expect(ip.locator(".history-values")).to_be_visible()
+    expect(cards.first.locator(".history-change-note")).to_contain_text("does not authenticate the key")
+    expect(cards.nth(1).locator(".history-after dd")).to_have_text([
+        name, "Home " + "North" * 25, "No room", "0123456789abcdef" * 4, "sub-device"])
+    expect(cards.last.get_by_role("heading")).to_have_text("Local key changed")
+    expect(cards.last.locator(".history-values")).to_have_count(0)
+    assert page.evaluate("window.__history_xss") is None
+    assert page.locator("#historyBody").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator(".history-values").evaluate_all("els => els.every(el => el.scrollWidth <= el.clientWidth)")
+    observation = cards.first.locator(".history-observation")
+    observation.locator("summary").focus()
+    observation.locator("summary").press("Enter")
+    assert observation.evaluate("el => el.open")
+    expect(observation).to_contain_text("Previous observation")
+    expect(observation).to_contain_text("Local IP last known")
+
+
+def test_history_inherited_change_identifies_gateway_without_device_navigation_buttons(page, running_app):
+    account = clear_device_history(page)
+    snapshot = [running_app.core.web_dict(d) for d in DEVICES]
+    snapshot[demo_devices.PLUG].update(sub=True, gateway_id=LAMP.id)
+    running_app._history.observe_lan(account, {LAMP.id: {"status": "ok", "ip": "10.0.0.1", "version": "3.3"}},
+                                     snapshot, "history-gateway-before")
+    clear_device_history(page)
+    running_app._history.observe_lan(account, {LAMP.id: {"status": "ok", "ip": "10.0.0.2", "version": "3.3"}},
+                                     snapshot, "history-gateway-after")
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    card = page.locator("#historyEntries .history-entry")
+    expect(card).to_have_count(1)
+    expect(card.locator(".history-context")).to_have_text("Gateway change " + LAMP.name)
+    expect(card.locator(".history-after dd")).to_have_text("10.0.0.2")
+    expect(card.locator("button")).to_have_count(0)
+    expect(page.locator("#panelSub")).to_have_text(PLUG.name)
+    page.locator("#panelBack").click()
+    expect(page.locator("#panelHistoryOpen")).to_be_focused()
+    expect(page.locator("#menuBody")).to_be_visible()
+    assert frontend_state(page, "selectedId") == PLUG.id
+
+
+def test_change_history_reopening_restores_filters_older_entries_observation_details_and_scroll(page, running_app):
+    account_id = clear_device_history(page)
+    snapshot = [running_app.core.web_dict(d) for d in DEVICES]
+    for i in range(55):
+        snapshot[demo_devices.PLUG]["name"] = f"History lamp {i}"
+        running_app._history.observe_cloud(account_id, snapshot, f"panel-history-{i}")
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(50)
+    page.locator("#historyFilterOptions .history-filter-label").click()
+    page.locator("#historyKind").select_option("renamed")
+    expect(page.locator("#historyFilterCount")).to_have_text("1")
+    with page.expect_response(lambda response: "/api/history?" in response.url and "source=cloud" in response.url) as filtered:
+        page.locator("#historySource").select_option("cloud")
+    filtered.value.finished()
+    assert filtered.value.json()["next_cursor"]
+    expect(page.locator("#historyFilterCount")).to_have_text("2")
+    expect(page.locator("#historyMore")).to_be_enabled()
+    with page.expect_response(lambda response: "/api/history?" in response.url) as older:
+        page.locator("#historyMore").click()
+    assert "cursor=" in older.value.url
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(55)
+    last = page.locator("#historyEntries .history-entry").last
+    observation = last.locator(".history-observation")
+    observation.locator("summary").click()
+    observation.scroll_into_view_if_needed()
+    scroll = page.locator("#historyBody").evaluate("el => el.scrollTop")
+    page.locator("#panelBack").click()
+    expect(page.locator("#menuBody")).to_be_visible()
+    expect(page.locator("#panelHistoryOpen")).to_be_focused()
+    assert frontend_state(page, "selectedId") == PLUG.id
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(55)
+    expect(page.locator("#historyKind")).to_have_value("renamed")
+    expect(page.locator("#historySource")).to_have_value("cloud")
+    assert page.locator("#historyFilterOptions").evaluate("el => el.open")
+    assert observation.evaluate("el => el.open")
+    expect(page.locator("[data-history-current]")).to_have_count(0)
+    assert page.locator("#historyBody").evaluate("el => el.scrollTop") == pytest.approx(scroll, abs=1)
+    page.keyboard.press("Escape")
+    expect(page.locator("#panelHistoryOpen")).to_be_focused()
+
+
+def test_change_history_removed_device_remains_browsable_in_drawer(page, running_app, monkeypatch):
+    clear_device_history(page)
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyStatus")).to_contain_text("Tracking since")
+    devices = [copy.deepcopy(d) for d in DEVICES if d.id != PLUG.id]
+    _serves(running_app, monkeypatch, devices)
+    refreshed(page, "#rows")
+    page.locator("#historyRefresh").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    expect(page.locator("#panelSub")).to_have_text(PLUG.name + " · no longer listed")
+    page.locator(".history-entry summary").click()
+    expect(page.locator("#historyEntries .history-change h3")).to_have_text("No longer listed in Tuya")
+    expect(page.locator("[data-history-current]")).to_have_count(0)
+    page.keyboard.press("Escape")
+    expect(page.locator("#panel")).to_be_hidden()
+    page.locator(f"#notices [data-history-device='{PLUG.id}']").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    expect(page.locator("#panelSub")).to_have_text(PLUG.name + " · no longer listed")
+    expect(page.locator("#historyDevice, #historyQuery")).to_have_count(0)
+
+
+def test_change_history_leaving_drawer_ignores_delayed_results(page):
+    response = page.request.get(page.url + "api/history").json()
+    held = []
+    page.route("**/api/history?*", lambda route: held.append(route))
+    open_panel(page, PLUG.name)
+    with page.expect_request(lambda request: "/api/history?" in request.url):
+        page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyStatus")).to_have_text("Loading history…")
+    page.locator("#panelBack").click()
+    expect(page.locator("#panelHistoryOpen")).to_be_focused()
+    for route in held:
+        route.fulfill(json=response)
+    page.wait_for_timeout(100)
+    expect(page.locator("#historyBody")).to_be_hidden()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(0)
+    expect(page.locator("#menuBody")).to_be_visible()
+
+
 def frontend_state(page, field):
     return page.evaluate("""async field => {
         const { appState } = await import(new URL('static/js/shared/state.js', document.baseURI).href);
@@ -1905,7 +2320,7 @@ def test_setup_view_has_its_own_content_and_returns_to_details(page, width, sche
     open_panel(page, PLUG.name)
     close_box = page.locator("#panelClose").bounding_box()
     expect(page.locator("#menuBody")).to_be_visible()
-    assert page.locator("#menuBody [data-panel-page]").count() == 5
+    assert page.locator("#menuBody [data-panel-page]").count() == 6
     assert page.locator("#menuBody [data-support-report]").count() == 1
     assert page.locator("#menuBody dl.fields, #menuBody ul.dps, #menuBody pre").count() == 0
     assert page.locator("#panelSetupEntry").count() == 0
@@ -5273,6 +5688,7 @@ def test_device_menu_only_shows_options_and_navigates_every_page(page, width, sc
     entries = [("panelSetupOpen", "setupBody", "Set up in…"),
                ("panelNetworkOpen", "networkBody", "Local network"),
                ("panelValuesOpen", "valuesBody", "Current values"),
+               ("panelHistoryOpen", "historyBody", "Change history"),
                ("panelInfoOpen", "panelBody", "Device information"),
                ("panelRawOpen", "rawBody", "Raw JSON")]
     menu = page.locator("#menuBody")

@@ -56,6 +56,7 @@ Select a device to open its options:
 | Device information | Identity, keys, connectivity, and timestamps. |
 | Raw JSON | View or copy the saved device record. |
 | Download a support report | Save diagnostics for a bug report. |
+| Change history | Browse saved configuration changes for the device and its gateway. |
 
 Use **Back** or Escape to return to the previous page. Local keys are hidden by default and can still be copied while hidden.
 
@@ -84,6 +85,10 @@ Open **Current values > Read from device** to compare the saved cloud snapshot w
 Local reads use the saved IP, protocol, and key. If these are missing, open **Local network** first. Sub-devices also need an identified gateway and a Node ID.
 
 Reads are manual and do not change device settings. **Read again** takes another snapshot. Local readings are cleared when you refresh the device list, reload the page, or log out.
+
+### Browse Change History
+
+Open **Change history** after **Current values** in a device's options. History opens for that device in the side panel with **Filters** collapsed. Expand Filters to narrow entries by **Changes**, **Source** (**All Sources**, **Cloud**, or **Local**), **From**, and **Through**. The active-filter badge remains visible when collapsed. **Clear all** next to Filters removes those limits without deleting entries. **Clear history** affects only the open device, preserving other devices' history. Viewing history uses saved data. See [Persistent Change History](caching-and-changes.md#persistent-change-history) for event rules, retention, logout, and recovery behavior.
 
 ## Bluetooth Devices
 

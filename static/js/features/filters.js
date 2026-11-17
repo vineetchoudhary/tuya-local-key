@@ -278,6 +278,7 @@ function resetExclusions() {
   appState.roomsLoaded = false; appState.selectedRoom = appState.preferredRoom = "";
   appState.selectedStatus = appState.selectedCategory = "";
   appState.exclusionsLoaded = false; appState.exclusionRevision = -1; appState.accountId = null;
+  appState.historyError = null;
   appState.exclusionBusy = false; appState.exclusionFailure = ""; appState.pendingExclusionSave = null;
 }
 

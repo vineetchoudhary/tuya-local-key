@@ -167,6 +167,7 @@ else
     --cov=tuya_devices \
     --cov=lan_scan \
     --cov=device_cache \
+    --cov=change_history \
     --cov-report=term-missing \
     --cov-report=html:htmlcov
   log "Coverage HTML report: ${ROOT_DIR}/htmlcov/index.html"

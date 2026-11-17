@@ -18,6 +18,7 @@ Retrieve local keys for your Smart Life / Tuya devices with QR-code login. No Tu
 - View and copy local keys, device details, Node IDs, and data points.
 - Find local IP addresses and protocol versions, including across VLANs.
 - Detect changed keys, IP addresses, protocol versions, and devices.
+- Keep encrypted per-device change history across restarts, with change, source, and date filters.
 - Search, filter or exclude devices, export CSV, and keep an encrypted cache across restarts.
 - Get setup values for tuya-local, localtuya, and tinytuya.
 - Troubleshoot local connections with a guided check, network scan, and suggested next steps.

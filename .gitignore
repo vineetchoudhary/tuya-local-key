@@ -30,3 +30,8 @@ update-check.json
 .coverage
 test-results/
 plans/
+change-history.enc
+change-history.enc.lock
+history.key
+.history-*.tmp
+.history-key-*.tmp

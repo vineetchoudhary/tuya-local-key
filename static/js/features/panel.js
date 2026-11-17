@@ -15,12 +15,18 @@ function registerPanelPage(name, definition) { PANEL_PAGES[name] = definition; }
 
 function panelPageKey(id, view) { return JSON.stringify([id, view]); }
 
+function panelDevice(id, view) {
+  return appState.deviceData.find(d => d.id === id) ||
+    (PANEL_PAGES[view] && PANEL_PAGES[view].context ? PANEL_PAGES[view].context(id) : null);
+}
+
 function copyPanelState(state) {
   return { ...state,
     disclosures: (state.disclosures || []).map(item => ({ ...item })),
     draft: state.draft ? { ...state.draft } : null,
     selection: state.selection ? { ...state.selection } : null,
     setup: state.setup ? { ...state.setup } : null,
+    history: state.history ? { ...state.history, expanded: [...(state.history.expanded || [])] } : null,
     // A running operation contains only job metadata. Keep its completion
     // shared when returning to a wizard page through panel history.
     fix: state.fix ? { ...state.fix } : null,
@@ -50,10 +56,11 @@ function panelFocusSelector(el) {
 }
 
 function capturePanelPage() {
-  if (!appState.panelPage || $("panel").dataset.deviceId !== appState.selectedId || $("panel").dataset.view !== appState.panelView) return;
-  const body = $(PANEL_PAGES[appState.panelView].body), state = appState.panelPage.state;
+  if (!appState.panelPage || $("panel").dataset.deviceId !== (appState.selectedId || "") || $("panel").dataset.view !== appState.panelView) return;
+  const definition = PANEL_PAGES[appState.panelView];
+  const body = $(definition.body), state = appState.panelPage.state;
   state.scroll = body.scrollTop;
-  state.disclosures = [...body.querySelectorAll("details")].map(el => {
+  state.disclosures = definition.capture ? [] : [...body.querySelectorAll("details")].map(el => {
     const classes = [...el.classList].map(name => CSS.escape(name)).join(".");
     const unique = classes && body.querySelectorAll(`details.${classes}`).length === 1;
     return { selector: unique ? `details.${classes}` : panelNodeSelector(el, body), open: el.open };
@@ -70,6 +77,7 @@ function capturePanelPage() {
   } : null;
   state.selection = input ? { id: input.form.dataset.lanCheck,
     start: input.selectionStart, end: input.selectionEnd } : null;
+  if (definition.capture) definition.capture(state);
   panelPageCache.set(panelPageKey(appState.selectedId, appState.panelView), copyPanelState(state));
 }
 
@@ -81,6 +89,7 @@ function newPanelPage(id, view) {
 }
 
 function activatePanelPage(page) {
+  if (appState.panelPage && PANEL_PAGES[appState.panelView].leave) PANEL_PAGES[appState.panelView].leave();
   if (appState.selectedId !== page.id) {
     appState.panelKeyVisible = false;
     resetSupport();
@@ -91,6 +100,7 @@ function activatePanelPage(page) {
     appState.localTuyaEdition = page.state.setup.edition;
     appState.setupAdvancedOpen = page.state.setup.advanced;
   }
+  if (PANEL_PAGES[page.view].enter) PANEL_PAGES[page.view].enter(page);
 }
 
 function focusPanelPage(selector) {
@@ -107,7 +117,7 @@ function focusPanelPage(selector) {
 
 // Table and notice links start a new panel visit. Links inside it use navigatePanel.
 function openPanel(id, view = "menu") {
-  if (!PANEL_PAGES[view] || !appState.deviceData.some(d => d.id === id)) return;
+  if (!PANEL_PAGES[view] || !panelDevice(id, view)) return;
   resetSupport();
   const row = appState.panelOpener && appState.panelOpener.closest("#rows tr[data-id]");
   appState.panelOpenerSelector = row ? `#${CSS.escape(row.id)} [data-open]`
@@ -124,7 +134,7 @@ function openPanel(id, view = "menu") {
 }
 
 function navigatePanel(id, view, opener = document.activeElement) {
-  if (!appState.panelPage || !PANEL_PAGES[view] || !appState.deviceData.some(d => d.id === id)) return;
+  if (!appState.panelPage || !PANEL_PAGES[view] || !panelDevice(id, view)) return;
   if (id === appState.selectedId && view === appState.panelView) return;
   capturePanelPage();
   appState.panelHistory.push({ ...appState.panelPage, state: copyPanelState(appState.panelPage.state), returnFocus: panelFocusSelector(opener) });
@@ -143,7 +153,7 @@ function backPanel() {
   while (appState.panelHistory.length) {
     const page = appState.panelHistory.pop();
     // Refreshes can remove earlier devices. Never restore an old device record.
-    if (!PANEL_PAGES[page.view] || !appState.deviceData.some(d => d.id === page.id)) continue;
+    if (!PANEL_PAGES[page.view] || !panelDevice(page.id, page.view)) continue;
     activatePanelPage(page);
     if (!renderPanel(false)) return;
     focusPanelPage(page.returnFocus); markSelectedRow();
@@ -153,7 +163,8 @@ function backPanel() {
 }
 
 function closePanel() {
-  if (!appState.selectedId) return;
+  if (!appState.panelPage) return;
+  if (PANEL_PAGES[appState.panelView].leave) PANEL_PAGES[appState.panelView].leave();
   resetSupport();
   appState.selectedId = null; appState.panelPage = null; appState.panelView = "menu";
   appState.panelKeyVisible = false;
@@ -164,7 +175,8 @@ function closePanel() {
   markSelectedRow();
   const original = appState.panelOpener && appState.panelOpener.isConnected && appState.panelOpener.matches("button, a, [tabindex]") ? appState.panelOpener : null;
   const opener = original || (appState.panelOpenerSelector && document.querySelector(appState.panelOpenerSelector));
-  if (opener && !opener.disabled && opener.getClientRects().length) opener.focus();
+  if (opener && opener.closest("#moreMenu") && $("moreBtn").getClientRects().length) $("moreBtn").focus();
+  else if (opener && !opener.disabled && opener.getClientRects().length) opener.focus();
   else if ($("filter").getClientRects().length) $("filter").focus();
   appState.panelOpener = null; appState.panelOpenerSelector = null;
 }
@@ -178,30 +190,32 @@ function markSelectedRow() {
 // Regenerate content from current device/LAN data; history stores only UI state.
 function renderPanel(capture = true) {
   if (!appState.panelPage) return false;
-  const d = appState.deviceData.find(dev => dev.id === appState.selectedId);
+  const d = panelDevice(appState.selectedId, appState.panelView);
   if (!d) { backPanel(); return false; }
   const page = PANEL_PAGES[appState.panelView], body = $(page.body);
   const active = document.activeElement;
   const focus = capture && body.contains(active) ? panelFocusSelector(active) : null;
   if (capture) capturePanelPage();
   const state = appState.panelPage.state, actionView = appState.panelView !== "menu";
-  $("panel").dataset.deviceId = d.id;
+  $("panel").dataset.deviceId = d.id || "";
   $("panel").dataset.view = appState.panelView;
   $("panelTitle").textContent = page.title(d);
   $("panelTitle").classList.toggle("setup-title", actionView);
   $("panelTitle").title = $("panelTitle").textContent;
-  $("panelSub").innerHTML = actionView ? esc(d.name || d.id)
+  $("panelSub").innerHTML = page.subtitle ? esc(page.subtitle(d)) : actionView ? esc(d.name || d.id)
     : [statusBadge(d), esc(d.product_name), esc(d.category)]
       .filter(part => part && part !== "-").join("<span>·</span>");
   const previous = appState.panelHistory[appState.panelHistory.length - 1];
   const stepBack = page.stepBackLabel && page.stepBackLabel();
   $("panelContext").classList.toggle("hidden", !!previous || !!stepBack);
+  $("panelContext").textContent = page.contextLabel || "Device";
   $("panelNav").classList.toggle("hidden", !previous && !stepBack);
   $("panelBack").innerHTML = `${icon("chevron")}${esc(stepBack || (previous ? PANEL_PAGES[previous.view].backLabel || "Back" : "Back"))}`;
   $("panelBack").setAttribute("aria-controls", stepBack ? page.body : previous ? PANEL_PAGES[previous.view].body : "panelBody");
   for (const [view, definition] of Object.entries(PANEL_PAGES)) {
     const content = $(definition.body);
     content.classList.toggle("hidden", view !== appState.panelView);
+    if (definition.staticBody) continue;
     const excludedNote = view !== "menu" && appState.excludedIds.has(d.id) ? `<div class="excluded-panel-note" data-excluded-note>` +
       `<span class="badge muted">Excluded</span> Hidden from the main device list. ` +
       `<button type="button" class="link-btn" data-restore-device="${esc(d.id)}"${appState.exclusionBusy ? " disabled" : ""}>Restore device</button></div>` : "";
@@ -217,7 +231,9 @@ function renderPanel(capture = true) {
     else state.draft = null;
   }
   body.scrollTop = state.scroll || 0;
-  if (focus) focusPanelPage(focus);
+  // Static panel controls keep their native editing state. Refocusing a date
+  // input, even when it still has focus, restarts its current year segment.
+  if (focus && document.activeElement !== active) focusPanelPage(focus);
   return true;
 }
 

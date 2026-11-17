@@ -1,0 +1,26 @@
+<section id="history" class="history" aria-label="Saved change history">
+  <p class="history-intro">Changes detected during device refreshes and local network checks.</p>
+  <p id="historyStatus" class="history-status" role="status" aria-live="polite"></p>
+  <details id="historyFilterOptions" class="history-filter-options">
+    <summary><span class="history-filter-label">Filters <span id="historyFilterCount" class="badge muted hidden" aria-live="polite"></span></span><span class="history-filter-reset">(<button id="historyClearFilters" class="link-btn" type="button" disabled>Clear all</button>)</span></summary>
+    <form id="historyFilters" class="history-filters">
+      <div><label for="historyKind">Changes</label><select id="historyKind"><option value="">All changes</option></select></div>
+      <div><label for="historySource">Source</label><select id="historySource"><option value="">All Sources</option><option value="cloud">Cloud</option><option value="lan">Local</option></select></div>
+      <div><label for="historySince">From</label><input id="historySince" type="date"></div>
+      <div><label for="historyUntil">Through</label><input id="historyUntil" type="date"></div>
+    </form>
+  </details>
+  <div class="history-actions">
+    <button id="historyRefresh" type="button">Reload history</button>
+    <button id="historyClear" type="button">Clear history</button>
+  </div>
+  <div id="historyEntries" class="history-entries" aria-busy="false"></div>
+  <button id="historyMore" class="hidden" type="button">Load older entries</button>
+</section>
+<dialog id="historyClearDialog" class="confirm" aria-labelledby="historyClearTitle" aria-describedby="historyClearText">
+  <form method="dialog">
+    <h2 id="historyClearTitle">Clear this device's history?</h2>
+    <p id="historyClearText">This clears history for the open device only. Other devices' history is kept.</p>
+    <div class="confirm-actions"><button value="cancel" autofocus>Cancel</button><button value="clear" class="danger">Clear history</button></div>
+  </form>
+</dialog>

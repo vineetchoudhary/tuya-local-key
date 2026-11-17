@@ -24,6 +24,7 @@ const appState = {
   exclusionsLoaded: false,
   exclusionRevision: -1,
   accountId: null,
+  historyError: null,
   exclusionBusy: false,
   exclusionFailure: "",
   pendingExclusionSave: null,

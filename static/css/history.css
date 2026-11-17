@@ -1,0 +1,45 @@
+/* Device history uses four filters and a clear action in the disclosure header. */
+.history { min-width: 0; }
+.history-intro { margin: 0 0 12px; font-size: 14px; color: var(--muted); }
+.history-status { color: var(--muted); font-size: 13px; white-space: pre-line; }
+.history-status.error { color: var(--off); }
+.history-filter-options { margin: 18px 0 14px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.history-filter-options > summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+.history-filter-label { display: inline-flex; align-items: center; gap: 6px; }
+.history-filter-reset { margin-left: 8px; font-size: 13px; font-weight: 400; white-space: nowrap; }
+.history-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.history-filters input, .history-filters select { width: 100%; min-width: 0; border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 8px; padding: 9px 10px; font: inherit; }
+.history-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.history-actions button { font-size: 13px; padding: 8px 10px; }
+.history-entries { display: grid; gap: 12px; }
+.history-entry { min-width: 0; border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); overflow-wrap: anywhere; }
+.history-entry-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.history-entry-header time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.history-entry-header .badge { flex: 0 0 auto; }
+.history-context { display: grid; gap: 2px; margin: 0 0 12px; font-size: 12px; color: var(--muted); }
+.history-context strong { font-weight: 500; color: var(--fg); }
+.history-change-list { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
+.history-change { min-width: 0; }
+.history-change + .history-change { border-top: 1px solid var(--border); padding-top: 14px; }
+.history-change h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.history-values { display: grid; grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr); align-items: start; gap: 8px; margin-top: 8px; }
+.history-values dl { min-width: 0; margin: 0; padding: 8px 10px; border-radius: 7px; background: var(--bg); }
+.history-values dt { font-size: 11px; color: var(--muted); }
+.history-values dd { margin: 3px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.history-before dd { color: var(--muted); }
+.history-after dd { font-weight: 600; }
+.history-value-arrow { align-self: center; color: var(--muted); text-align: center; }
+.history-change-note { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.history-observation { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; font-size: 12px; color: var(--muted); }
+.history-observation summary { cursor: pointer; }
+.history-observation summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+.history-observation dl { display: grid; gap: 3px; margin: 12px 0 0; }
+.history-observation dt { margin-top: 8px; }
+.history-observation dt:first-child { margin-top: 0; }
+.history-observation dd { margin: 0; color: var(--fg); font-variant-numeric: tabular-nums; }
+.history-observation p { margin: 12px 0 0; }
+.history-empty { padding: 25px 0; color: var(--muted); }
+#historyMore { margin-top: 14px; }
+@media (max-width: 700px) {
+  .history-filters { gap: 10px; }
+}

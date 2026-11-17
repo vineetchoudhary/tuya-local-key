@@ -8,6 +8,7 @@ const OPTIONS = [
   { page: "setup", id: "panelSetupOpen", body: "setupBody", icon: "setup", label: "Set up in…", note: "Connection settings for your local integration" },
   { page: "network", id: "panelNetworkOpen", body: "networkBody", icon: "network", label: "Local network", note: "IP address, protocol and connection checks" },
   { page: "values", id: "panelValuesOpen", body: "valuesBody", icon: "activity", label: "Current values", note: "Read from the device and compare saved values" },
+  { page: "history", id: "panelHistoryOpen", body: "historyBody", icon: "activity", label: "Change history", note: "Saved changes for this device and its gateway" },
   { page: "details", id: "panelInfoOpen", body: "panelBody", icon: "information", label: "Device information", note: "Identity, keys, connectivity, account and timeline" },
   { page: "raw", id: "panelRawOpen", body: "rawBody", icon: "code", label: "Raw JSON", note: "View or copy the complete device record" },
   { action: "support-report", id: "panelSupportDownload", icon: "report", label: "Download a support report", note: "Save diagnostics with private information removed" },

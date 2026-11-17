@@ -8,7 +8,7 @@ import { unnamedLeft } from "../shared/model.js";
 import { appState } from "../shared/state.js";
 
 // Cross-feature actions are connected by app.js.
-let inCurrentView, openPanel, show;
+let inCurrentView, openPanel, show, openHistory;
 
 const CHANGES_DISMISSED_KEY = "tuya-local-key.changes-dismissed";
 
@@ -35,12 +35,12 @@ function changeBadge(id) {
 }
 
 function storedNumber(key) {
-  try { return Number(localStorage.getItem(key)) || 0; }
+  try { return Number(localStorage.getItem(`${key}.${appState.accountId || "unknown"}`)) || 0; }
   catch (e) { return 0; }   // private mode / storage blocked: just keep showing it
 }
 
 function storeNumber(key, value) {
-  try { localStorage.setItem(key, String(value || 0)); }
+  try { localStorage.setItem(`${key}.${appState.accountId || "unknown"}`, String(value || 0)); }
   catch (e) {}
 }
 
@@ -106,7 +106,8 @@ function changeItems() {
     items.push(`<li>${plural(c.added.length, "device")} added: ${links(c.added)}.</li>`);
   if ((c.removed || []).length)
     items.push(`<li>${plural(c.removed.length, "device")} removed: ` +
-      `${c.removed.map(e => esc(e.name || e.id)).join(", ")}.</li>`);
+      `${c.removed.map(e => `<button type="button" class="link-btn" data-history-device="${esc(e.id)}" ` +
+        `aria-label="Change history for ${esc(e.name || e.id)}">${esc(e.name || e.id)}</button>`).join(", ")}.</li>`);
   if ((c.renamed || []).length)
     items.push(`<li>${plural(c.renamed.length, "device")} renamed: ` +
       `${c.renamed.map(e => `${deviceLink(e)} <span class="muted">(was ${esc(e.was)})</span>`)
@@ -180,6 +181,7 @@ function lanSummaryNotice() {
 
 function renderNotices() {
   const parts = [];
+  if (appState.historyError) parts.push('<div class="notice warn" role="status">Change history could not be saved. Current device information is still available. Open Change history in a device’s options for details.</div>');
   if (appState.snapshotReason) parts.push(snapshotNotice());
   const cloud = cloudChangesShown(), lan = lanChangesShown();
   const items = changeItems();
@@ -200,8 +202,10 @@ let initialized = false;
 function initNotices(actions = {}) {
   if (initialized) return;
   initialized = true;
-  ({ inCurrentView, openPanel, show } = actions);
+  ({ inCurrentView, openPanel, show, openHistory } = actions);
   $("notices").addEventListener("click", (e) => {
+    const history = e.target.closest("[data-history-device]");
+    if (history) { openHistory(history.dataset.historyDevice); return; }
     if (e.target.closest("[data-dismiss-changes]")) { dismissChanges(); return; }
     if (e.target.closest("[data-dismiss-lan-summary]")) { dismissLanSummary(); return; }
     // Re-login without logging out: the saved list stays put if the scan is abandoned.

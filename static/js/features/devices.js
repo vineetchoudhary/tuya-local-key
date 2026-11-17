@@ -149,6 +149,7 @@ async function loadDevices(msg, inline, refresh) {
     appState.deviceChanges = body.changes || null;
     appState.snapshotReason = body.stale ? (body.stale_reason || "fetch_failed") : null;
     appState.devicesCachedAt = body.cached_at || Date.now() / 1000;
+    appState.historyError = body.history_error || null;
     // Revalidate proof against the device list just fetched. Invalidate it first
     // so a failed LAN reload cannot preserve proof for a key that has changed.
     for (const result of Object.values(appState.lanData.results || {})) result.key_current = false;

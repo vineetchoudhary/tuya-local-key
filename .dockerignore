@@ -36,6 +36,10 @@ devices.cache
 lan.cache
 device-preferences.json
 update-check.json
+change-history.enc
+change-history.enc.lock
+.history-*.tmp
+.history-key-*.tmp
 .env
 .env.*
 *.pem

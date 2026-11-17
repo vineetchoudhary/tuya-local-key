@@ -8,6 +8,7 @@ import * as devices from "./features/devices.js";
 import { $, initDom } from "./shared/dom.js";
 import * as filters from "./features/filters.js";
 import * as header from "./features/header.js";
+import * as history from "./features/history.js";
 import * as network from "./features/network.js";
 import * as notices from "./features/notices.js";
 import * as panel from "./features/panel.js";
@@ -30,7 +31,7 @@ export function render() {
 function goHome() {
   if ($("devices").classList.contains("hidden")) return;
   const excluded = appState.deviceView === "excluded";
-  if (!excluded && !appState.selectedId && !appState.selectionMode) return;
+  if (!excluded && !appState.panelPage && !appState.selectionMode) return;
   if ((excluded || appState.selectionMode) && (!appState.exclusionsLoaded || appState.exclusionBusy)) return;
   panel.closePanel();
   if (excluded) filters.setDeviceView("active");
@@ -84,11 +85,21 @@ export function initApp() {
     title: () => "Current values", render: values.valuesSection,
     focus: "[data-values-action]",
   });
+  panel.registerPanelPage("history", {
+    body: "historyBody", backLabel: "Back to change history", title: () => "Change history",
+    subtitle: history.historySubtitle, contextLabel: "History", context: history.historyContext,
+    staticBody: true, enter: history.enterHistory, leave: history.resetHistory,
+    capture: history.captureHistory,
+  });
   shell.initShell({
     closePanel: panel.closePanel,
     layoutActions: header.layoutActions,
     positionFiltersPopover: filters.positionFiltersPopover,
+    resetHistory: history.resetHistory,
   });
+  history.initHistory({ openPanel: panel.openPanel,
+    renderPanel: panel.renderPanel, focusPanelPage: panel.focusPanelPage,
+    renderNotices: notices.renderNotices, loadDevices: devices.loadDevices });
   auth.initAuth({
     banner: shell.banner,
     loadDevices: devices.loadDevices,
@@ -140,6 +151,7 @@ export function initApp() {
     inCurrentView: filters.inCurrentView,
     openPanel: panel.openPanel,
     show: shell.show,
+    openHistory: history.openHistory,
   });
   panel.initPanel({
     loadDevices: devices.loadDevices,
@@ -204,7 +216,7 @@ export function initApp() {
       e.preventDefault(); e.stopPropagation(); filters.closeFilters(true); return;
     }
     if (e.key === "Escape") {
-      if (appState.selectionMode && !appState.selectedId) { e.preventDefault(); filters.setSelectionMode(false); }
+      if (appState.selectionMode && !appState.panelPage) { e.preventDefault(); filters.setSelectionMode(false); }
       else panel.backPanel();
     }
   });

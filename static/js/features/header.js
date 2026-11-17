@@ -41,15 +41,17 @@ function layoutActions() {
   const room = inner - title;
   const width = (ids) => ids.reduce((sum, id) => sum + $(id).offsetWidth, 0) +
     gap * Math.max(0, ids.length - 1);
-  if (width(ACTION_IDS) <= room) { restoreFocus(); return; }
+  const visible = ACTION_IDS.filter(id => !$(id).classList.contains("hidden"));
+  if (width(visible) <= room) { restoreFocus(); return; }
   $("moreWrap").classList.remove("hidden");
   const more = $("moreWrap").offsetWidth;
-  let kept = [...ACTION_IDS];
+  let kept = [...visible];
   for (const id of OVERFLOW_FIRST) {
     if (width(kept) + (kept.length ? gap : 0) + more <= room) break;
     kept = kept.filter(k => k !== id);
   }
   for (const id of ACTION_IDS) {
+    if ($(id).classList.contains("hidden")) continue;
     if (kept.includes(id)) continue;
     const button = $(id);
     button.classList.add("menu-item");
@@ -59,7 +61,7 @@ function layoutActions() {
   restoreFocus();
 }
 
-function menuItems() { return [...$("moreMenu").querySelectorAll(".menu-item:not(:disabled)")]; }
+function menuItems() { return [...$("moreMenu").querySelectorAll(".menu-item:not(:disabled):not(.hidden)")]; }
 
 function openMoreMenu() {
   $("moreMenu").classList.remove("hidden");

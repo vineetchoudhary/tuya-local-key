@@ -29,8 +29,10 @@ function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = 
 
 async function logOut() {
   appState.deviceLoadGeneration++; resetExclusions();
-  await api("/api/logout", { method: "POST" });
+  const { ok, body } = await api("/api/logout", { method: "POST" });
+  if (!ok) { await loadDevices(); banner("Could not log out. Try again."); return; }
   appState.deviceData = []; resetLan(); $("usercode").value = ""; $("filter").value = ""; appState.filterText = ""; refreshStatus(""); stopCacheStatusTimer(); show("login");
+  if (body.history_error) banner("Logged out, but saved history could not be deleted. Check that the app can write to its data directory.");
 }
 
 let initialized = false;

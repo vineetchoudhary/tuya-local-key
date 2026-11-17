@@ -3,7 +3,7 @@ import { $, views } from "../shared/dom.js";
 import { appState } from "../shared/state.js";
 
 // Cross-feature actions are connected by app.js.
-let closePanel, layoutActions, positionFiltersPopover;
+let closePanel, layoutActions, positionFiltersPopover, resetHistory;
 
 function show(name) {
   for (const k in views) views[k].classList.toggle("hidden", k !== name);
@@ -15,6 +15,7 @@ function show(name) {
   // A refresh (devices -> loading -> devices) keeps the open device; losing the
   // session does not.
   if (name === "login" || name === "qr") {
+    resetHistory();
     closePanel(); appState.collapsedGateways.clear(); appState.filteredCollapsedGateways.clear();
   }
 }
@@ -29,7 +30,7 @@ let initialized = false;
 function initShell(actions = {}) {
   if (initialized) return;
   initialized = true;
-  ({ closePanel, layoutActions, positionFiltersPopover } = actions);
+  ({ closePanel, layoutActions, positionFiltersPopover, resetHistory } = actions);
 
 }
 

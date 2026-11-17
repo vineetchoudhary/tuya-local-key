@@ -28,10 +28,14 @@ options:
   QR_SCHEME: smartlife
   DEVICE_CACHE: "on"
   CHECK_FOR_UPDATES: true
+  CHANGE_HISTORY: "on"
+  HISTORY_RETENTION_DAYS: 90
 schema:
   QR_SCHEME: "list(smartlife|tuyaSmart)"
   DEVICE_CACHE: "list(on|off)"
   CHECK_FOR_UPDATES: bool
+  CHANGE_HISTORY: "list(on|off)"
+  HISTORY_RETENTION_DAYS: "int(1,3650)"
   AUTH_USERNAME: "str?"
   AUTH_PASSWORD: "password?"
   LAN_SUBNET: "str?"
