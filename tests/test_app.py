@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def webapp(tmp_path, monkeypatch):
     monkeypatch.setenv("SESSION_FILE", str(tmp_path / "session.json"))
     monkeypatch.setenv("CHECK_FOR_UPDATES", "true")
+    monkeypatch.setenv("CHANGE_HISTORY", "on")
     import app
 
     app = importlib.reload(app)
@@ -240,12 +241,21 @@ def test_frontend_asset_graph_loads_at_root_and_through_ingress(webapp, prefix):
     assert any("/shared/" in asset for asset in visited)
 
 
+@pytest.mark.parametrize("value,enabled", [("on", True), ("off", False), ("false", False), ("0", False)])
+def test_change_history_setting_is_passed_to_the_frontend(tmp_path, monkeypatch, value, enabled):
+    module = _reload_app(monkeypatch, tmp_path, CHANGE_HISTORY=value)
+    response = module.app.test_client().get("/")
+    assert response.status_code == 200
+    assert json.loads(_FrontendDocument(response.text).config)["changeHistory"] is enabled
+
+
 def test_frontend_configuration_is_serialized_as_inert_json(webapp, monkeypatch):
     categories = {"bridge", "gateway</script><script>alert(1)</script>"}
     monkeypatch.setattr(webapp.lan_scan, "GATEWAY_CATEGORIES", categories)
     response = webapp.app.test_client().get("/")
     document = _FrontendDocument(response.text)
-    assert json.loads(document.config) == {"gatewayCategories": sorted(categories), "checkForUpdates": True}
+    assert json.loads(document.config) == {"gatewayCategories": sorted(categories), "checkForUpdates": True,
+                                          "changeHistory": True}
     assert not document.inline_code
     assert "gateway</script>" not in response.text
 

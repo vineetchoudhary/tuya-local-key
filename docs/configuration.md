@@ -8,7 +8,7 @@
 | `AUTH_USERNAME` | _(unset)_ | Username for optional HTTP Basic Auth. Login is required only when **both** `AUTH_USERNAME` and `AUTH_PASSWORD` are set. Ignored under Home Assistant ingress. |
 | `AUTH_PASSWORD` | _(unset)_ | Password for optional HTTP Basic Auth. Ignored under Home Assistant ingress. |
 | `DEVICE_CACHE` | `on` | Set to `off` to keep the device list in memory only instead of storing it. See [Device List Cache](caching-and-changes.md#device-list-cache). |
-| `CHANGE_HISTORY` | `on` | Record configuration changes from fresh cloud refreshes and network checks. Setting this to `off` deletes saved history and its encryption key. |
+| `CHANGE_HISTORY` | `on` | Record configuration changes from fresh cloud refreshes and network checks. Setting this to `off` hides Change history from device options and notices, and deletes saved history and its encryption key. |
 | `HISTORY_RETENTION_DAYS` | `90` | Retain history for 1–3,650 days, subject to the 10,000-entry and file-size limits. |
 | `HISTORY_FILE` | `change-history.enc` beside `SESSION_FILE` | Encrypted history and comparison baseline. Must be separate from the other app data files. |
 | `HISTORY_KEY_FILE` | `history.key` beside `SESSION_FILE` | Encryption key dedicated to history. Keep it together with its matching encrypted file when backing up. |

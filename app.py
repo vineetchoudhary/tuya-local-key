@@ -332,7 +332,7 @@ def index():
     release_version = re.sub(r"^(\d+\.\d+)\.0$", r"\1", version)
     return render_template("index.html", gateway_categories=sorted(lan_scan.GATEWAY_CATEGORIES),
                            app_version=version, app_release_tag="v" + release_version,
-                           check_for_updates=CHECK_FOR_UPDATES)
+                           check_for_updates=CHECK_FOR_UPDATES, history_enabled=CHANGE_HISTORY)
 
 
 @app.get("/icon.png")

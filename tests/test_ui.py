@@ -71,6 +71,7 @@ def server(tmp_path_factory):
         mp.setenv("SESSION_FILE", str(session))
         mp.setenv("HASS_OPTIONS_FILE", str(tmp / "missing-options.json"))
         mp.setenv("CHECK_FOR_UPDATES", "true")
+        mp.setenv("CHANGE_HISTORY", "on")
         mp.delenv("AUTH_USERNAME", raising=False)
         mp.delenv("AUTH_PASSWORD", raising=False)
         import app
@@ -261,6 +262,56 @@ def clear_device_history(page, device_id=PLUG.id):
     assert page.request.delete(page.url + "api/history", data={
         "account_id": initial["account_id"], "epoch": initial["epoch"], "device_id": device_id}).ok
     return initial["account_id"]
+
+
+@pytest.mark.parametrize("ingress,width", [(False, 1440), (True, 320)])
+def test_disabled_history_hides_device_option_and_removed_device_links(page, server, running_app, monkeypatch, ingress, width):
+    monkeypatch.setattr(running_app, "CHANGE_HISTORY", False)
+    target = server + (INGRESS_PREFIX.lstrip("/") + "/" if ingress else "")
+    page.set_viewport_size({"width": width, "height": 800})
+    calls, errors = [], []
+    page.on("request", lambda request: calls.append(request.url) if "/api/history" in request.url else None)
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(target, wait_until="networkidle")
+    page.wait_for_selector("#rows tr")
+    open_panel(page, PLUG.name)
+    expect(page.locator("#panelHistoryOpen")).to_have_count(0)
+    assert page.locator("#menuBody .device-menu-label").all_inner_texts() == [
+        "Set up in…", "Local network", "Current values", "Device information", "Raw JSON", "Download a support report"]
+    page.locator("#panelValuesOpen").click()
+    expect(page.locator("#valuesBody")).to_be_visible()
+    page.locator("#panelBack").click()
+    page.evaluate("async id => (await import(new URL('static/js/features/history.js', document.baseURI))).openHistory(id)", PLUG.id)
+    expect(page.locator("#menuBody")).to_be_visible()
+    expect(page.locator("#historyBody")).to_be_hidden()
+    page.locator("#panelClose").click()
+    devices = [copy.deepcopy(device) for device in DEVICES if device.id != LAMP.id]
+    _serves(running_app, monkeypatch, devices)
+    if not page.locator("#refreshBtn").is_visible():
+        page.locator("#moreBtn").click()
+    refreshed(page, "#changesNotice")
+    expect(page.locator("#changesNotice")).to_contain_text(LAMP.name)
+    expect(page.locator("#notices [data-history-device]")).to_have_count(0)
+    assert calls == [] and errors == []
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+def test_open_tab_hides_history_option_when_server_disables_history(page, running_app, monkeypatch):
+    open_panel(page, PLUG.name)
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyStatus")).to_contain_text("Tracking since")
+    monkeypatch.setattr(running_app, "CHANGE_HISTORY", False)
+    calls = []
+    page.on("request", lambda request: calls.append(request.url) if "/api/history" in request.url else None)
+    page.locator("#historyRefresh").click()
+    expect(page.locator("#historyStatus")).to_have_text("Change history is disabled in configuration.")
+    expect(page.locator("#historyRefresh")).to_be_disabled()
+    page.locator("#panelBack").click()
+    expect(page.locator("#menuBody")).to_be_visible()
+    expect(page.locator("#panelHistoryOpen")).to_have_count(0)
+    page.evaluate("async id => (await import('./static/js/features/history.js')).openHistory(id)", PLUG.id)
+    expect(page.locator("#menuBody")).to_be_visible()
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("ingress,width,scheme", [(False, 1440, "light"), (True, 1440, "dark"),

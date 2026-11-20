@@ -51,6 +51,7 @@ export function initApp() {
   initDom();
   const config = JSON.parse($("app-config").textContent);
   appState.gatewayCategories = new Set(config.gatewayCategories);
+  appState.historyEnabled = config.changeHistory === true;
   panel.registerPanelPage("menu", {
     body: "menuBody", backLabel: "Back to device",
     title: d => d.name || "(unnamed)",
@@ -85,12 +86,14 @@ export function initApp() {
     title: () => "Current values", render: values.valuesSection,
     focus: "[data-values-action]",
   });
-  panel.registerPanelPage("history", {
-    body: "historyBody", backLabel: "Back to change history", title: () => "Change history",
-    subtitle: history.historySubtitle, contextLabel: "History", context: history.historyContext,
-    staticBody: true, enter: history.enterHistory, leave: history.resetHistory,
-    capture: history.captureHistory,
-  });
+  if (appState.historyEnabled) {
+    panel.registerPanelPage("history", {
+      body: "historyBody", backLabel: "Back to change history", title: () => "Change history",
+      subtitle: history.historySubtitle, contextLabel: "History", context: history.historyContext,
+      staticBody: true, enter: history.enterHistory, leave: history.resetHistory,
+      capture: history.captureHistory,
+    });
+  }
   shell.initShell({
     closePanel: panel.closePanel,
     layoutActions: header.layoutActions,

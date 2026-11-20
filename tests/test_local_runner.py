@@ -132,6 +132,23 @@ def test_skip_tests_needs_no_python(runner):
     assert any(call["args"][:1] == ["run"] for call in calls)
 
 
+@pytest.mark.parametrize("flags,environment,expected", [
+    ([], "", "on"),
+    ([], "off", "off"),
+    (["--no-change-history"], "", "off"),
+    (["--no-change-history"], "on", "off"),
+    (["--auth", "--no-update-check", "--no-change-history"], "on", "off"),
+])
+def test_change_history_setting_reaches_docker_and_flag_overrides_environment(runner, flags, environment, expected):
+    result, calls = run(runner, "--skip-tests", *flags, CHANGE_HISTORY=environment, CHECK_FOR_UPDATES="true")
+
+    assert result.returncode == 0, result.stderr
+    args = next(call["args"] for call in calls if call["kind"] == "docker" and call["args"][:1] == ["run"])
+    settings = [args[index + 1] for index, arg in enumerate(args) if arg == "-e"]
+    assert f"CHANGE_HISTORY={expected}" in settings
+    assert f"CHECK_FOR_UPDATES={'false' if '--no-update-check' in flags else 'true'}" in settings
+
+
 def test_failed_tests_leave_docker_untouched(runner):
     python_at(runner.project / ".venv" / "bin" / "python", venv=True)
 

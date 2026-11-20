@@ -30,7 +30,7 @@
 {% if check_for_updates %}{% include "partials/updates.html" %}{% endif %}
 {% include "partials/logout.html" %}
 {% include "partials/panel.html" %}
-<script id="app-config" type="application/json">{{ {"gatewayCategories": gateway_categories, "checkForUpdates": check_for_updates} | tojson }}</script>
+<script id="app-config" type="application/json">{{ {"gatewayCategories": gateway_categories, "checkForUpdates": check_for_updates, "changeHistory": history_enabled} | tojson }}</script>
 <script type="module" src="static/js/app.js"></script>
 </body>
 </html>

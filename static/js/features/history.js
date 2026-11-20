@@ -158,7 +158,7 @@ function setBusy(value) {
 }
 
 async function loadHistory(append = false, restore = null) {
-  if (!activePage) return;
+  if (!activePage || !appState.historyEnabled) return;
   if (!expectedAccount) {
     $("historyStatus").textContent = "Refresh devices to load your account before viewing history.";
     return;
@@ -196,7 +196,10 @@ async function loadHistory(append = false, restore = null) {
   appState.historyError = body.recording_error || null; renderNotices();
   $("historyClear").textContent = "Clear history";
   if (!body.enabled) {
+    appState.historyEnabled = false;
+    renderNotices();
     $("historyStatus").textContent = "Change history is disabled in configuration." + (body.recording_error ? " " + (ERRORS[body.recording_error] || "Saved history could not be deleted.") : "");
+    $("historyRefresh").disabled = true;
     $("historyClear").disabled = true;
     $("historyFilterOptions").classList.add("hidden");
     $("historyMore").classList.add("hidden"); return;
@@ -224,7 +227,7 @@ async function loadHistory(append = false, restore = null) {
 }
 
 function openHistory(deviceId) {
-  if (!deviceId) return;
+  if (!deviceId || !appState.historyEnabled) return;
   appState.panelOpener = document.activeElement;
   openPanel(deviceId, "history");
 }

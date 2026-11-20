@@ -106,8 +106,10 @@ function changeItems() {
     items.push(`<li>${plural(c.added.length, "device")} added: ${links(c.added)}.</li>`);
   if ((c.removed || []).length)
     items.push(`<li>${plural(c.removed.length, "device")} removed: ` +
-      `${c.removed.map(e => `<button type="button" class="link-btn" data-history-device="${esc(e.id)}" ` +
-        `aria-label="Change history for ${esc(e.name || e.id)}">${esc(e.name || e.id)}</button>`).join(", ")}.</li>`);
+      `${c.removed.map(e => appState.historyEnabled
+        ? `<button type="button" class="link-btn" data-history-device="${esc(e.id)}" ` +
+          `aria-label="Change history for ${esc(e.name || e.id)}">${esc(e.name || e.id)}</button>`
+        : esc(e.name || e.id)).join(", ")}.</li>`);
   if ((c.renamed || []).length)
     items.push(`<li>${plural(c.renamed.length, "device")} renamed: ` +
       `${c.renamed.map(e => `${deviceLink(e)} <span class="muted">(was ${esc(e.was)})</span>`)
@@ -181,7 +183,7 @@ function lanSummaryNotice() {
 
 function renderNotices() {
   const parts = [];
-  if (appState.historyError) parts.push('<div class="notice warn" role="status">Change history could not be saved. Current device information is still available. Open Change history in a device’s options for details.</div>');
+  if (appState.historyEnabled && appState.historyError) parts.push('<div class="notice warn" role="status">Change history could not be saved. Current device information is still available. Open Change history in a device’s options for details.</div>');
   if (appState.snapshotReason) parts.push(snapshotNotice());
   const cloud = cloudChangesShown(), lan = lanChangesShown();
   const items = changeItems();

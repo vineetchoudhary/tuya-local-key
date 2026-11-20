@@ -10,6 +10,7 @@ CONTAINER_NAME="${CONTAINER_NAME:-tuya-local-key}"
 HOST_PORT="${HOST_PORT:-8000}"
 QR_SCHEME="${QR_SCHEME:-smartlife}"
 CHECK_FOR_UPDATES="${CHECK_FOR_UPDATES:-true}"
+CHANGE_HISTORY="${CHANGE_HISTORY:-on}"
 SESSION_VOLUME="${SESSION_VOLUME:-tuya-session}"
 APP_URL="http://localhost:${HOST_PORT}"
 
@@ -18,15 +19,17 @@ AUTH_PASSWORD="${AUTH_PASSWORD:-tuya-local-key}"
 
 usage() {
   cat <<'EOF'
-Usage: ./tests/test.sh [--skip-tests] [--auth] [--no-update-check]
+Usage: ./tests/test.sh [--skip-tests] [--auth] [--no-update-check] [--no-change-history]
 
 Run tests, then build and start the local Docker image.
 
 Options:
-  --skip-tests       Skip local dependency installation and tests; build and run Docker directly.
-  --auth             Enable Basic Auth using AUTH_USERNAME and AUTH_PASSWORD.
-  --no-update-check  Disable all update checks in the Docker container.
-  -h, --help         Show this help message.
+  --skip-tests         Skip local dependency installation and tests; build and run Docker directly.
+  --auth               Enable Basic Auth using AUTH_USERNAME and AUTH_PASSWORD.
+  --no-update-check    Disable all update checks in the Docker container.
+  --no-change-history  Disable change history in the Docker container.
+                       Deletes saved history and its key from the data volume.
+  -h, --help           Show this help message.
 
 Python:
   Requires Python 3.10 or newer. Uses a compatible .venv first, then looks
@@ -39,6 +42,7 @@ Examples:
   ./tests/test.sh --skip-tests
   ./tests/test.sh --skip-tests --auth
   ./tests/test.sh --skip-tests --auth --no-update-check
+  ./tests/test.sh --skip-tests --no-update-check --no-change-history
 EOF
 }
 
@@ -58,6 +62,9 @@ for arg in "$@"; do
       ;;
     --no-update-check)
       CHECK_FOR_UPDATES=false
+      ;;
+    --no-change-history)
+      CHANGE_HISTORY=off
       ;;
     -h|--help)
       usage
@@ -192,6 +199,7 @@ run docker run -d \
   -v "${SESSION_VOLUME}:/data" \
   -e "QR_SCHEME=${QR_SCHEME}" \
   -e "CHECK_FOR_UPDATES=${CHECK_FOR_UPDATES}" \
+  -e "CHANGE_HISTORY=${CHANGE_HISTORY}" \
   ${DOCKER_AUTH_ARGS[@]+"${DOCKER_AUTH_ARGS[@]}"} \
   "$IMAGE_NAME"
 

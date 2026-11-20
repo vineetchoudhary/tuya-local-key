@@ -32,7 +32,8 @@ function menuSection(d) {
     `<span class="device-menu-icon">${icon("restore")}</span><span class="device-menu-text">` +
     `<span class="device-menu-label">Restore device</span><span class="device-menu-note">Excluded from the main device list</span></span>` +
     `<span class="device-menu-chevron">${icon("chevron")}</span></button></li>` : "";
-  return `<nav aria-label="Device options"><ul class="device-menu">${OPTIONS.map(option => menuRow(option, report)).join("")}${excluded}</ul></nav>` +
+  const options = OPTIONS.filter(option => option.page !== "history" || appState.historyEnabled);
+  return `<nav aria-label="Device options"><ul class="device-menu">${options.map(option => menuRow(option, report)).join("")}${excluded}</ul></nav>` +
     (report.notice ? `<p class="device-menu-message" role="${report.notice.failed ? "alert" : "status"}">${esc(report.notice.message)}</p>` : "");
 }
 
