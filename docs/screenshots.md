@@ -73,7 +73,7 @@ This preview shows a simulated update.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/details-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="screenshots/details-light.png">
-  <img alt="Device panel options list with setup, local network, current values, device information, raw JSON and support report download" src="screenshots/details-light.png" width="440">
+  <img alt="Device panel options list with setup, local network, current values, change history, device information, raw JSON and support report download" src="screenshots/details-light.png" width="440">
 </picture>
 
 ## Device Information

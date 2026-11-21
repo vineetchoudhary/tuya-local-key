@@ -20,19 +20,16 @@ If the QR code expires, start the login again.
 
 The device list is saved for 3 days. Use **Refresh** to fetch the latest details from Tuya. See [Caching and Changes](caching-and-changes.md).
 
-## Filtering by Home
+## Filtering
 
-Choose **Filter > Home** to show devices from one home. Filters combine with search. **Clear all** resets filters and search.
+Use **Filter** to narrow the list. Filters combine with search, and **Clear all** resets both.
 
-## Filtering by Room
+- **Home** shows devices from one home.
+- **Room** shows devices in a room of the selected home. **No room** means unassigned. **Unknown room** means room information could not be loaded. Room groups are not supported.
+- **Status** filters by cloud status or local network status. A cloud-offline device may still be reachable locally. See [network statuses](network-scanning.md#what-the-status-column-shows).
+- **Device category** filters by type of device.
 
-Choose **Filter > Room** to show devices in a room within the selected home. **No room** means unassigned, while **Unknown room** means room information could not be loaded. Room groups are not supported.
-
-Use **Refresh** after changing room assignments in Smart Life.
-
-## Filtering by Status and Device Category
-
-Use **Filter > Status** or **Filter > Device category** to narrow the list. Cloud status and local network status are separate, so a cloud-offline device may still be reachable locally. See [network statuses](network-scanning.md#what-the-status-column-shows).
+Use **Refresh** after changing homes or rooms in Smart Life.
 
 ## Excluding Devices
 
@@ -53,10 +50,10 @@ Select a device to open its options:
 | Set up in… | Connection settings for tuya-local, localtuya, and tinytuya. |
 | Local network | Local IP, protocol version, and connection checks. |
 | Current values | Saved cloud values, local readings, and data point definitions. |
+| Change history | Saved configuration changes for the device and its gateway. |
 | Device information | Identity, keys, connectivity, and timestamps. |
 | Raw JSON | View or copy the saved device record. |
 | Download a support report | Save diagnostics for a bug report. |
-| Change history | Browse saved configuration changes for the device and its gateway. |
 
 Use **Back** or Escape to return to the previous page. Local keys are hidden by default and can still be copied while hidden.
 
@@ -88,7 +85,7 @@ Reads are manual and do not change device settings. **Read again** takes another
 
 ### Browse Change History
 
-Open **Change history** after **Current values** in a device's options. History opens for that device in the side panel with **Filters** collapsed. Expand Filters to narrow entries by **Changes**, **Source** (**All Sources**, **Cloud**, or **Local**), **From**, and **Through**. The active-filter badge remains visible when collapsed. **Clear all** next to Filters removes those limits without deleting entries. **Clear history** affects only the open device, preserving other devices' history. Viewing history uses saved data. See [Persistent Change History](caching-and-changes.md#persistent-change-history) for event rules, retention, logout, and recovery behavior.
+Open **Change history** to see the changes recorded for the device and its gateway. Use **Filters** to narrow them by change, source, and date. **Clear history** clears this device's history only. See [Change History](caching-and-changes.md#change-history).
 
 ## Bluetooth Devices
 

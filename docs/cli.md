@@ -1,6 +1,6 @@
 # CLI
 
-Install Python 3.10 or newer before setting up the local environment.
+Requires Python 3.10 or newer.
 
 Set up the local environment:
 
@@ -14,24 +14,25 @@ Run the CLI:
 .venv/bin/python tuya_devices.py
 ```
 
-Install the CLI command into the virtualenv:
+Or install the `tuya-local-key` command into the virtualenv:
 
 ```bash
 .venv/bin/python -m pip install -e .
 .venv/bin/tuya-local-key
 ```
 
-First run prompts for your Smart Life user code, prints a QR code in the terminal, saves `tuya-login-qr.png` as a fallback, waits for confirmation, and then lists devices. The session is cached at `~/.config/tuya-smartlife/session.json`.
+The first run asks for your Smart Life user code, prints a QR code in the terminal, saves `tuya-login-qr.png` as a fallback, waits for confirmation, and lists your devices. The session is cached at `~/.config/tuya-smartlife/session.json`.
 
 | Flag | Description |
 |---|---|
-| `--user-code CODE` | Provide the Smart Life user code instead of being prompted. |
+| `--user-code CODE` | Smart Life user code, instead of being prompted. |
 | `--json` | Output raw JSON. |
 | `--csv PATH` | Also write results to a CSV file. |
-| `--scan TARGETS` | Also find each device's local IP and protocol version, using your IoT VLAN or subnet, e.g. `--scan 192.168.2.0/24`. Adds `local_ip`, `protocol_version`, `device22` and `lan_status` to every output. A sub-device also gets `lan_gateway_id`, the gateway whose IP and version it has, and `lan_sub_online` when that gateway reports whether it is online. A gateway Tuya lists without a key gets `local_key` and `local_key_from` from its sub-device. See [Protocol Version](network-scanning.md). |
+| `--scan TARGETS` | Also find local IPs and protocol versions on your IoT VLAN or subnet, or at device IPs, comma-separated, e.g. `--scan 192.168.2.0/24`. Adds `local_ip`, `protocol_version`, `device22`, and `lan_status`. Sub-devices also get `lan_gateway_id`, and `lan_sub_online` when their gateway reports it. A gateway Tuya lists without a key gets `local_key` and `local_key_from`. See [Network Scanning](network-scanning.md). |
 | `--relogin` | Ignore the cached session and scan a new QR code. |
 | `--logout` | Delete the cached session and exit. |
-| `--session PATH` | Use a different session-cache file. |
+| `--session PATH` | Use a different session cache file. |
+| `--qr-png PATH` | Where to save the QR code image. Defaults to `tuya-login-qr.png` in the current folder. |
 | `--scheme {tuyaSmart,smartlife}` | QR scheme prefix. |
 
 See [Finding Your User Code](usage.md#finding-your-user-code) and [Scanning the QR Code](usage.md#scanning-the-qr-code) for login help.

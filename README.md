@@ -51,7 +51,7 @@ Run the published Docker image:
 docker run -d --name tuya-local-key -p 8000:8000 -v tuya-session:/data ghcr.io/vineetchoudhary/tuya-local-key:latest
 ```
 
-Open [http://localhost:8000](http://localhost:8000), enter your [Smart Life user code](docs/usage.md#finding-your-user-code), then scan and confirm the QR code in the app.
+Open [http://localhost:8000](http://localhost:8000) and [log in](docs/usage.md#web-login-flow).
 
 The web UI has no authentication by default. For access beyond localhost, set both `AUTH_USERNAME` and `AUTH_PASSWORD` and read the [security guidance](docs/configuration.md#security).
 
@@ -68,14 +68,14 @@ Follow the QR login prompts. See the [CLI guide](docs/cli.md) for options.
 
 ## Documentation
 
-- [Installation](docs/installation.md) — Home Assistant, Docker, Docker Compose, and source setup.
-- [Using the app](docs/usage.md) — QR login, device details, local integrations, and Bluetooth devices.
-- [Network scanning](docs/network-scanning.md) — Local IPs, protocol versions, VLANs, gateways, and scan statuses.
-- [Caching and changes](docs/caching-and-changes.md) — Saved devices, offline snapshots, and change detection.
-- [Configuration](docs/configuration.md) — Environment variables and security.
-- [CLI](docs/cli.md) — Terminal setup, commands, and flags.
-- [Troubleshooting](docs/troubleshooting.md) — Common login, key, and connection issues.
-- [Screenshots](docs/screenshots.md) — Light and dark previews.
+- [Installation](docs/installation.md): Home Assistant, Docker, Docker Compose, and source setup.
+- [Using the app](docs/usage.md): QR login, filters, device details, local integrations, and Bluetooth devices.
+- [Network scanning](docs/network-scanning.md): Local IPs, protocol versions, VLANs, gateways, and scan statuses.
+- [Caching and changes](docs/caching-and-changes.md): Saved devices, offline snapshots, change detection, and change history.
+- [Configuration](docs/configuration.md): Environment variables and security.
+- [CLI](docs/cli.md): Terminal setup, commands, and flags.
+- [Troubleshooting](docs/troubleshooting.md): Common login, key, and connection issues.
+- [Screenshots](docs/screenshots.md): Light and dark previews.
 - [Frontend structure](docs/frontend-structure.md): Templates, stylesheets, JavaScript modules, and development checks.
 
 ## License

@@ -20,7 +20,7 @@ The app uses Home Assistant ingress by default. The direct `8000/tcp` port is di
 
 ## Web UI with Docker Compose
 
-The included [docker-compose.yml](../docker-compose.yml) runs the published GHCR image and stores the cached login session and device list in a named Docker volume.
+The included [docker-compose.yml](../docker-compose.yml) runs the published GHCR image and keeps its data in a named Docker volume.
 
 Start the app:
 
@@ -34,7 +34,7 @@ Open the web UI:
 http://localhost:8000
 ```
 
-If you prefer the `tuyaSmart` QR scheme instead of `smartlife`, edit `QR_SCHEME` in [docker-compose.yml](../docker-compose.yml).
+To use the `tuyaSmart` QR scheme, edit `QR_SCHEME` in [docker-compose.yml](../docker-compose.yml). Other settings are listed in [Configuration](configuration.md).
 
 ## Web UI with Docker
 
@@ -55,7 +55,7 @@ Then open `http://localhost:8000`.
 
 ## Web UI from Source
 
-Python 3.10 or newer is required by TinyTuya 1.21.1. Home Assistant and Docker installations already use Python 3.12.
+Requires Python 3.10 or newer.
 
 Set up the local environment, then add the web dependencies:
 
@@ -70,4 +70,4 @@ Serve it with waitress, the same server the Docker image uses:
 .venv/bin/waitress-serve --listen=127.0.0.1:8000 app:app
 ```
 
-Then open `http://localhost:8000`. It shares the CLI's saved login in `~/.config/tuya-smartlife/session.json`. To reach it from other devices, listen on `0.0.0.0:8000` instead, and read the security note under [Configuration](configuration.md) first.
+Then open `http://localhost:8000`. It shares the CLI's saved login in `~/.config/tuya-smartlife/session.json`. To reach it from other devices, listen on `0.0.0.0:8000` instead, and read the [security note](configuration.md#security) first.

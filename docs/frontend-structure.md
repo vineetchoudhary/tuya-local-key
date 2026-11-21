@@ -17,9 +17,9 @@ Styles live in `static/css/`. Load them in the order listed in the main template
 | `shell.js` | Top-level views and the error banner |
 | `auth.js` | QR login, login polling, and logout confirmation |
 | `devices.js` | Device loading and refresh, search indexing, table rendering, sorting, gateway grouping, row-click routing, selection highlighting, CSV export, and cache-age updates |
-| `filters.js` | Home filters, saved exclusions, selection state, and exclusion/restoration requests |
+| `filters.js` | Home, room, status, and category filters, saved exclusions, selection state, and exclusion/restoration requests |
 | `notices.js` | Cloud and LAN change notices, scan summaries, and dismissal preferences |
-| `panel.js` | Panel navigation, history, focus, scroll, and disclosure state |
+| `panel.js` | Panel navigation, back stack, focus, scroll, and disclosure state |
 | `device-menu.js` | The device options list, its six page entries and support report download action |
 | `details.js` | Device fields, shared data point definitions, and masked raw JSON |
 | `setup.js` | Integration tabs, setup values, snippets, and inline guidance |
@@ -37,9 +37,9 @@ Feature controllers import shared modules directly. Actions from other controlle
 
 To add a panel page, provide its renderer and register its body element, title, back label, and optional initial focus selector with `registerPanelPage` in `app.js`. Existing panel navigation and Back handling then apply to it. A page with internal steps can provide `back` and `stepBackLabel` callbacks so the same Back button and Escape key return through those steps before leaving the page. History uses a persistent `staticBody` with `enter`, `leave`, and `capture` hooks to preserve its form controls and load saved entries asynchronously. Its `context` hook also supports removed devices. This context is limited to history and does not restore old device records into setup pages.
 
-The initial panel page is `menu`, rendered in `menuBody`. Its buttons use `data-panel-page` and the panel's delegated click handler. Device information (`panelBody`) and raw JSON (`rawBody`) are independent pages alongside setup, network, troubleshooting and current values. Saved data points and their definitions are part of Current values (`valuesBody`). The header keeps the page title and device identity separate. Inactive page bodies are cleared, so the menu contains no hidden copies of device fields or local keys.
+The initial panel page is `menu`, rendered in `menuBody`. Its buttons use `data-panel-page` and the panel's delegated click handler. Device information (`panelBody`) and raw JSON (`rawBody`) are independent pages alongside setup, network, troubleshooting, current values and change history. Saved data points and their definitions are part of Current values (`valuesBody`). The header keeps the page title and device identity separate. Inactive page bodies are cleared, so the menu contains no hidden copies of device fields or local keys.
 
-The support report entry uses `data-support-report` to download directly without opening another page. `POST api/support-report` builds an allowlisted report from the server's account-scoped snapshots in `support_report.py`; the browser saves only the returned `report` object, not its account response envelope.
+The support report entry uses `data-support-report` to download directly without opening another page. `POST api/support-report` builds an allowlisted report from the server's account-scoped snapshots in `support_report.py`. The browser saves only the returned `report` object, not its account response envelope.
 
 ## URLs and configuration
 
@@ -49,4 +49,4 @@ Gateway categories come from Flask through the `app-config` JSON block. Static J
 
 ## Verification
 
-Run the existing suite with `.venv/bin/python -m pytest`. Browser tests require Playwright and a supported browser. They exercise the real app with fake device data, including startup through a simulated ingress prefix. Tests that inspect internal state import the owning module instead of relying on browser globals. Screenshot generation remains available through the existing tools described in [Tools](../tools/README.md).
+Install `requirements-dev.txt`, then run `.venv/bin/python -m pytest`. Browser tests also need Playwright and a supported browser, and skip themselves without one. They exercise the real app with fake device data, including startup through a simulated ingress prefix. Tests that inspect internal state import the owning module instead of relying on browser globals. To regenerate screenshots, see [Tools](../tools/README.md).

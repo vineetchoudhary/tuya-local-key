@@ -8,10 +8,11 @@ Retrieve Smart Life / Tuya device local keys using QR-code login. No Tuya IoT de
 2. Enter your Smart Life user code from **Me > Settings > Account and Security > User Code**.
 3. In Smart Life, tap **+ > Scan**, scan the QR code, and confirm login.
 4. View, copy, filter, or export your devices. Select a row for device details and local integration setup.
-5. Use **Scan network** with your IoT subnet (for example `192.168.2.0/24`) to find local IP addresses and protocol versions.
+5. Use **Scan network** with your IoT VLAN or subnet, for example `192.168.2.0/24`, to find local IP addresses and protocol versions.
 6. Use **Filter** to narrow the list by home, room, status, or device category. Use **Clear all** to reset filters and search.
+7. Open **Change history** in a device's options to see changes to its key, IP, protocol, and other settings.
 
-**Note:** The device list is cached for 3 days and kept across restarts. Click **Refresh** to fetch the latest list from Tuya.
+The device list is cached for 3 days and kept across restarts. Click **Refresh** to fetch the latest list from Tuya.
 
 ## Configuration
 
@@ -20,20 +21,18 @@ Set these options on the app's Configuration page:
 | Option | Default | Purpose |
 |---|---|---|
 | `QR_SCHEME` | `smartlife` | Use `tuyaSmart` if QR login fails. |
-| `DEVICE_CACHE` | `on` | Keep devices across restarts. Set to `off` to keep the list in memory only. |
+| `DEVICE_CACHE` | `on` | Keep devices, scan results, and change history across restarts. Set to `off` to keep them in memory only. |
 | `CHECK_FOR_UPDATES` | `on` | Turn off **Check for updates** to disable all update checks and notifications. |
-| `CHANGE_HISTORY` | `on` | Keep encrypted change history. Setting to `off` deletes saved history and its key. With `DEVICE_CACHE=off`, history is temporary. |
-| `HISTORY_RETENTION_DAYS` | `90` | Days of history to retain (1–3,650), subject to the 10,000-entry limit. |
-| `LAN_SUBNET` | _(unset)_ | Prefill Scan network with your IoT subnet. Separate multiple subnets with commas. |
+| `CHANGE_HISTORY` | `on` | Keep encrypted change history. Set to `off` to delete saved history and its key. |
+| `HISTORY_RETENTION_DAYS` | `90` | Days of history to keep, from 1 to 3,650, up to 10,000 entries. |
+| `LAN_SUBNET` | _(unset)_ | Prefill Scan network with your IoT VLAN or subnet. Separate several with commas. |
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | _(unset)_ | Optional login for direct port access. Set both. |
 
 ## Security
 
 Ingress access uses Home Assistant authentication. The direct `8000/tcp` port is disabled by default. If you enable it, set both `AUTH_USERNAME` and `AUTH_PASSWORD`. These credentials apply only to direct access and are **ignored through Home Assistant ingress**.
 
-Login data and cached device keys are stored in `/data`. Treat app backups as sensitive and restrict access to trusted Home Assistant users.
-
-Open **Change history** after **Current values** in a device's options. History opens for that device in the side panel with **Filters** collapsed. Filter by Changes, Source (All Sources, Cloud, Local), From, and Through. History survives same-account QR renewal, restarts and updates. Logging out or switching accounts deletes it. **Clear history** clears only the open device's history, preserving other devices' entries and all comparison baselines. Raw local keys and device readings are excluded from history.
+Login data, cached device keys, and change history are stored in `/data`. Treat app backups as sensitive and restrict access to trusted Home Assistant users. Logging out deletes them all.
 
 ## Documentation
 
@@ -41,7 +40,7 @@ Detailed guides are in the [docs folder](https://github.com/vineetchoudhary/tuya
 
 - [Device details, local integrations, and Bluetooth](https://github.com/vineetchoudhary/tuya-local-key/blob/main/docs/usage.md)
 - [Network scanning, VLANs, gateways, and scan statuses](https://github.com/vineetchoudhary/tuya-local-key/blob/main/docs/network-scanning.md)
-- [Caching, offline snapshots, and change detection](https://github.com/vineetchoudhary/tuya-local-key/blob/main/docs/caching-and-changes.md)
+- [Caching, change detection, and change history](https://github.com/vineetchoudhary/tuya-local-key/blob/main/docs/caching-and-changes.md)
 - [Configuration and security](https://github.com/vineetchoudhary/tuya-local-key/blob/main/docs/configuration.md)
 - [Troubleshooting](https://github.com/vineetchoudhary/tuya-local-key/blob/main/docs/troubleshooting.md)
 - [Screenshots](https://github.com/vineetchoudhary/tuya-local-key/blob/main/docs/screenshots.md)

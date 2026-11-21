@@ -46,7 +46,7 @@ python tools/screenshots.py setup-tuya-local setup-localtuya setup-tinytuya loca
 | `support-report` | `support-report-{light,dark}.png` | [Support Report](../docs/screenshots.md#support-report) |
 | `filter` | `filter-{light,dark}.png` | [Filtering](../docs/screenshots.md#filtering) |
 
-Device panel previews are cropped to the panel so their contents remain readable. Their height adapts to the content; Raw JSON keeps a scrollable viewport. Local network and the wizard result run a demo check. Current values uses a simulated local reply, and the support report preview exercises the real download with the fake account.
+Device panel previews are cropped to the panel so their contents remain readable. Their height adapts to the content, and Raw JSON keeps a scrollable viewport. Local network and the wizard result run a demo check. Current values uses a simulated local reply, and the support report preview exercises the real download with the fake account.
 
 ## Dependency Updates
 
