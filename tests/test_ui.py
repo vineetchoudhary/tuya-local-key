@@ -3748,6 +3748,7 @@ def test_exclusions_failed_background_read_preserves_the_last_saved_view(page):
         route.fulfill(status=503, json={"error": "preference_unavailable"})
 
     page.route("**/api/device-exclusions", fail_read)
+    # An error from the app itself is final, so it shows without quiet retries.
     page.evaluate("window.dispatchEvent(new Event('focus'))")
     expect(page.locator("#exclusionError")).to_be_visible()
     assert listed_ids(page) == [LAMP.id, SENSOR.id, BARE.id]
@@ -3755,6 +3756,127 @@ def test_exclusions_failed_background_read_preserves_the_last_saved_view(page):
     page.locator("#retryExclusions").click()
     expect(page.locator("#exclusionError")).to_be_hidden()
     assert listed_ids(page) == [LAMP.id, SENSOR.id, BARE.id]
+
+
+EXCLUSION_REFRESH_RETRIES = [2000, 5000, 15000, 30000, 60000]
+
+
+def ingress_session_expired(route):
+    """Answer as Home Assistant does until it renews an expired ingress session."""
+    route.fulfill(status=401, body="401: Unauthorized", content_type="text/plain")
+
+
+def watch_exclusion_error(page):
+    """Record whether the exclusions error is ever shown, even briefly."""
+    page.evaluate("""() => {
+        const error = document.getElementById('exclusionError');
+        window.exclusionErrorShown = !error.classList.contains('hidden');
+        new MutationObserver(() => {
+            if (!error.classList.contains('hidden')) window.exclusionErrorShown = true;
+        }).observe(error, { attributes: true, attributeFilter: ['class'] });
+    }""")
+
+
+def pause_timers(page):
+    """Stop the page's clock so the test runs each timer, and record the delays."""
+    page.clock.install()
+    page.clock.pause_at(time.time() + 5)
+    page.evaluate("""() => {
+        const schedule = window.setTimeout;
+        window.timerDelays = [];
+        window.setTimeout = (callback, delay, ...args) => {
+            window.timerDelays.push(delay);
+            return schedule(callback, delay, ...args);
+        };
+    }""")
+
+
+def timer_delays(page, count):
+    """Wait until the page has set `count` timers, then return their delays."""
+    deadline = time.monotonic() + 5
+    while len(delays := page.evaluate("window.timerDelays")) < count:
+        assert time.monotonic() < deadline, delays
+        page.wait_for_timeout(20)       # route handlers answer the page meanwhile
+    return delays
+
+
+def test_exclusions_refresh_on_wake_retries_quietly_until_home_assistant_renews_the_session(page):
+    account = page.request.get(page.url + "api/device-exclusions").json()["account_id"]
+    # Another device excludes the plug while this page sleeps.
+    assert page.request.patch(page.url + "api/device-exclusions",
+                              data={"exclude": [PLUG.id], "account_id": account}).ok
+    reads = []
+
+    def renewed_after_first_read(route):
+        reads.append(route.request)
+        if len(reads) == 1:
+            ingress_session_expired(route)
+        else:
+            route.continue_()
+
+    watch_exclusion_error(page)
+    pause_timers(page)
+    page.route("**/api/device-exclusions", renewed_after_first_read)
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    assert timer_delays(page, 1) == EXCLUSION_REFRESH_RETRIES[:1]
+    page.clock.run_for(EXCLUSION_REFRESH_RETRIES[0])
+    expect(row(page, PLUG)).to_have_count(0)
+    assert listed_ids(page) == [LAMP.id, SENSOR.id, BARE.id]
+    assert len(reads) == 2
+    assert page.evaluate("window.exclusionErrorShown") is False
+
+
+@pytest.mark.parametrize("failure", ["ingress_session_expired", "network_down"])
+def test_exclusions_refresh_on_wake_reports_a_failure_that_lasts(page, failure):
+    shown = listed_ids(page)
+    reads = []
+
+    def unreachable(route):
+        reads.append(route.request)
+        if failure == "network_down":
+            route.abort()
+        else:
+            ingress_session_expired(route)
+
+    watch_exclusion_error(page)
+    pause_timers(page)
+    page.route("**/api/device-exclusions", unreachable)
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    for count, delay in enumerate(EXCLUSION_REFRESH_RETRIES, 1):
+        assert timer_delays(page, count)[-1] == delay
+        assert page.evaluate("window.exclusionErrorShown") is False
+        page.clock.run_for(delay)
+    expect(page.locator("#exclusionError")).to_be_visible()
+    expect(page.locator("#exclusionErrorText")).to_have_text(
+        "Could not refresh device exclusions. Your last saved view is still shown.")
+    page.clock.run_for(600_000)
+    page.wait_for_timeout(200)
+    assert len(reads) == len(EXCLUSION_REFRESH_RETRIES) + 1
+    assert page.evaluate("window.timerDelays") == EXCLUSION_REFRESH_RETRIES
+    assert listed_ids(page) == shown
+
+
+def test_exclusions_refresh_on_wake_stops_retrying_while_the_page_is_hidden(page):
+    reads = []
+
+    def expired(route):
+        reads.append(route.request)
+        ingress_session_expired(route)
+
+    watch_exclusion_error(page)
+    pause_timers(page)
+    page.route("**/api/device-exclusions", expired)
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    assert timer_delays(page, 1) == EXCLUSION_REFRESH_RETRIES[:1]
+    page.evaluate("""() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        document.dispatchEvent(new Event('visibilitychange'));
+    }""")
+    page.clock.run_for(600_000)
+    page.wait_for_timeout(200)
+    assert len(reads) == 1
+    assert page.evaluate("window.timerDelays") == EXCLUSION_REFRESH_RETRIES[:1]
+    assert page.evaluate("window.exclusionErrorShown") is False
 
 
 def test_exclusions_late_older_read_cannot_undo_a_successful_save(page):

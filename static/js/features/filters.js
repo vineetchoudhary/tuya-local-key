@@ -394,12 +394,29 @@ function setSelectionMode(active) {
   (target && !target.disabled && target.getClientRects().length ? target : $("selectionDoneBtn")).focus();
 }
 
-async function refreshExclusions() {
+// Home Assistant ends an ingress session after 15 idle minutes. When the page
+// is shown again, it renews the session, or within a minute if that fails.
+// Until then, requests never reach the app. So a refresh on wake retries
+// quietly and reports only a failure that lasts.
+const REFRESH_RETRY_DELAYS = [2000, 5000, 15000, 30000, 60000];
+let refreshRetry = null;
+
+async function refreshExclusions(attempt = 0) {
+  clearTimeout(refreshRetry);
   if (!appState.exclusionsLoaded || appState.exclusionBusy) return;
   const generation = ++appState.exclusionLoadGeneration, session = appState.accountGeneration, expectedAccount = appState.accountId;
   const result = await api("/api/device-exclusions");
   if (generation !== appState.exclusionLoadGeneration || session !== appState.accountGeneration) return;
   if (!result.ok || !validExclusions(result.body)) {
+    // An error from the app itself is final. Other failures may not have reached it.
+    if (typeof result.body.error !== "string" && attempt < REFRESH_RETRY_DELAYS.length) {
+      // A newer load or save, or a hidden page, ends the retries.
+      refreshRetry = setTimeout(() => {
+        if (generation === appState.exclusionLoadGeneration && !document.hidden &&
+            !views.devices.classList.contains("hidden")) refreshExclusions(attempt + 1);
+      }, REFRESH_RETRY_DELAYS[attempt]);
+      return;
+    }
     exclusionError("Could not refresh device exclusions. Your last saved view is still shown.");
     return;
   }
