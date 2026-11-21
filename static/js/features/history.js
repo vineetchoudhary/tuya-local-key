@@ -249,12 +249,14 @@ function initHistory(actions) {
     updateFilterCount(); renderPanel(); loadHistory();
   };
   $("historyClear").onclick = () => {
-    if (busy || !saved) return;
+    const dialog = $("historyClearDialog");
+    if (busy || !saved || dialog.open) return;
+    dialog.returnValue = "";
     $("historyClearTitle").textContent = saved.reset_token ? "Reset saved history?" : "Clear this device's history?";
     $("historyClearText").textContent = saved.reset_token
       ? "This resets unreadable history for every device in this account and removes its encryption key. Recording starts again with a new baseline. Current device and network information remain available."
       : `This clears history for ${historySubtitle({ id: activePage.id })} only. Other devices' history is kept. Current device and network information remain available.`;
-    $("historyClearDialog").showModal();
+    dialog.showModal();
   };
   $("historyClearDialog").addEventListener("close", async () => {
     if ($("historyClearDialog").returnValue !== "clear" || !saved) return;

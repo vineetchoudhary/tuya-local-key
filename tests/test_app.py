@@ -369,6 +369,49 @@ def test_ingress_headers_from_direct_clients_cannot_bypass_auth(tmp_path, monkey
                       auth=("admin", "secret")).status_code == 200
 
 
+@pytest.mark.parametrize("headers", [
+    {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"},
+    {"Origin": "http://attacker.example"}, {"Origin": "null"}, {"Origin": "http://[::1"},
+])
+def test_other_websites_cannot_log_out_or_trigger_update_checks(webapp, monkeypatch, headers):
+    webapp.core.save_session(webapp.SESSION_FILE, {"user_code": "account"})
+    monkeypatch.setattr(webapp._update_checker, "status", lambda *a, **kw: pytest.fail("checked for updates"))
+    client = webapp.app.test_client()
+    for path in ("/api/logout", "/api/updates/check"):
+        response = client.post(path, headers=headers)
+        assert response.status_code == 403 and response.json == {"error": "cross_site_request"}
+    assert os.path.isfile(webapp.SESSION_FILE)
+
+
+@pytest.mark.parametrize("headers", [
+    {}, {"Sec-Fetch-Site": "same-origin"}, {"Sec-Fetch-Site": "none"}, {"Origin": "http://localhost"},
+])
+def test_the_page_itself_and_scripts_can_still_log_out(webapp, headers):
+    webapp.core.save_session(webapp.SESSION_FILE, {"user_code": "account"})
+    assert webapp.app.test_client().post("/api/logout", headers=headers).status_code == 200
+    assert not os.path.exists(webapp.SESSION_FILE)
+
+
+@pytest.mark.parametrize("method,path", [
+    ("POST", "/api/login/start"), ("POST", "/api/login/poll"), ("PATCH", "/api/device-exclusions"),
+    ("POST", "/api/lan/scan"), ("DELETE", "/api/lan/scan"), ("POST", "/api/lan/read"),
+    ("POST", "/api/support-report"), ("DELETE", "/api/history"), ("POST", "/api/history/reset"),
+])
+def test_cross_site_guard_covers_every_change(webapp, method, path):
+    response = webapp.app.test_client().open(path, method=method, json={}, headers={"Sec-Fetch-Site": "cross-site"})
+    assert response.status_code == 403
+
+
+def test_cross_site_guard_leaves_reads_and_home_assistant_ingress_alone(webapp):
+    client = webapp.app.test_client()
+    assert client.get("/api/state", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 200
+    # Through ingress, Home Assistant's session guards the request and its proxy may change Host.
+    ingress = {"X-Ingress-Path": "/api/hassio_ingress/abc123", "Origin": "http://homeassistant.local:8123"}
+    assert client.post("/api/logout", headers=ingress).status_code == 403
+    assert client.post("/api/logout", headers=ingress,
+                       environ_overrides={"REMOTE_ADDR": "172.30.32.2"}).status_code == 200
+
+
 def test_auth_reads_home_assistant_options(tmp_path, monkeypatch):
     options = tmp_path / "options.json"
     options.write_text('{"AUTH_USERNAME": "ha", "AUTH_PASSWORD": "ingress-pw"}')

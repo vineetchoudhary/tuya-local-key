@@ -164,6 +164,7 @@ def _valid_document(doc):
             or not isinstance(doc["cloud"], dict) or not isinstance(doc["lan"], dict)
             or not isinstance(doc["events"], list) or not isinstance(doc["operations"], list)
             or "lan_cache_seeded" in doc and type(doc["lan_cache_seeded"]) is not bool
+            or "clear_revision" in doc and (type(doc["clear_revision"]) is not int or doc["clear_revision"] < 0)
             or len(doc["operations"]) > 512 or any(not isinstance(op, str) or not 0 < len(op) <= 256
                                                  for op in doc["operations"])):
         return False
@@ -172,6 +173,8 @@ def _valid_document(doc):
             not _identifier(device_id) or not isinstance(marker, dict)
             or type(marker.get("through")) is not int
             or not 0 <= marker["through"] < doc["next_sequence"]
+            or "revision" in marker and (type(marker["revision"]) is not int
+                                         or not 0 < marker["revision"] <= doc.get("clear_revision", 0))
             or not _timestamp(marker.get("at")) for device_id, marker in clears.items()):
         return False
     for dev_id, device in doc["cloud"].items():
@@ -184,6 +187,7 @@ def _valid_document(doc):
                 or "sub" in device and type(device["sub"]) is not bool
                 or "key_owner" in device and not _identifier(device["key_owner"])
                 or "key_hash" in device and not _account(device["key_hash"])
+                or "owned_key_hash" in device and not _account(device["owned_key_hash"])
                 or "key_state" in device and device["key_state"] not in {"available", "unavailable"}
                 or device.get("key_state") == "available" and "key_hash" not in device
                 or "room" in device and not _room(device["room"])
@@ -255,7 +259,30 @@ def _new(account, now):
     return {"version": VERSION, "account_id": account, "epoch": uuid.uuid4().hex,
             "next_sequence": 1, "started_at": now, "cloud_at": None,
             "cloud": {}, "lan": {}, "events": [], "operations": [],
-            "pruned_through": 0, "clock_at": now, "device_clears": {}, "lan_cache_seeded": False}
+            "pruned_through": 0, "clock_at": now, "device_clears": {}, "clear_revision": 0,
+            "lan_cache_seeded": False}
+
+
+def _parse_epoch(value):
+    """(journal epoch, clear revision) of an epoch() token. A bare epoch is revision 0."""
+    journal, _, revision = str(value).partition(".")
+    try:
+        number = int(revision) if revision else 0
+    except ValueError:
+        number = 0
+    return journal, max(number, 0)
+
+
+def _key_view(record):
+    """Key fields to compare. A sub-device that uses its hub's key is compared
+    by the private fingerprint of the key Tuya lists for it."""
+    if not record.get("key_owner"):
+        return record
+    view = dict(record, key_state="available")
+    view.pop("key_hash", None)
+    if record.get("owned_key_hash"):
+        view["key_hash"] = record["owned_key_hash"]
+    return view
 
 
 def _event_visible(event, device_id, clears):
@@ -385,20 +412,30 @@ class HistoryStore:
         self._maintenance_account = None
         self._pending_delete = False
         self.error = None
+        # Lasts for this process: nothing prunes, clears or rewrites the
+        # journal with limits nobody configured.
+        self._config_error = None
         try:
             protected = {Path(p).resolve() for p in forbidden_paths}
             self._paths_safe = (self.path.resolve() != self.key_path.resolve()
                                 and self.path.resolve() not in protected and self.key_path.resolve() not in protected)
         except OSError:
             self._paths_safe = False
-        if (not self._paths_safe or type(retention_days) is not int or not 1 <= retention_days <= 3650
-                or type(max_events) is not int or not 1 <= max_events <= MAX_EVENTS):
-            self.error = "history_configuration"
+        limits_valid = (type(retention_days) is int and 1 <= retention_days <= 3650
+                        and type(max_events) is int and 1 <= max_events <= MAX_EVENTS)
+        if not self._paths_safe:
+            self._config_error = "history_configuration"
         elif not enabled or not persist:
+            # An explicit "off" removes saved history even with an invalid
+            # retention value: no retention applies to deleted files.
             try:
                 self.purge()
             except HistoryError as error:
                 self.error = str(error)
+        if self._paths_safe and enabled and not limits_valid:
+            self._config_error = "history_configuration"
+        if self._config_error:
+            self.error = self._config_error
 
     @contextmanager
     def _guard(self):
@@ -477,6 +514,8 @@ class HistoryStore:
         return copy.deepcopy(doc)
 
     def _prune(self, doc):
+        if self._config_error:
+            raise HistoryError(self._config_error)
         now = self.clock()
         # A backward clock correction must not expire events out of order.
         clock_at = doc.get("clock_at", now)
@@ -531,21 +570,28 @@ class HistoryStore:
     def _apply(self, account, operation, mutate, *, epoch=None):
         if not self.enabled:
             return None
-        if self.error == "history_configuration":
-            raise HistoryError(self.error)
+        if self._config_error:
+            raise HistoryError(self._config_error)
         if self.persist and self._pending_delete:
             raise HistoryError("history_delete_failed")
         try:
             with self._guard():
                 doc = self._read(account)
-                if epoch is not None and epoch != doc["epoch"]:
-                    return None  # a clear invalidates already-running observations
+                skip = set()
+                if epoch is not None:
+                    journal, revision = _parse_epoch(epoch)
+                    if journal != doc["epoch"]:
+                        return None  # a reset invalidates already-running observations
+                    # A device cleared after this observation began keeps its
+                    # earlier baseline. Only its part of the result is dropped.
+                    skip = {dev_id for dev_id, marker in doc.get("device_clears", {}).items()
+                            if marker.get("revision", 0) > revision}
                 if operation in doc["operations"]:
                     return doc["epoch"]
                 if not isinstance(operation, str) or not 0 < len(operation) <= 256:
                     raise HistoryError("invalid_observation")
                 self._prune(doc)
-                mutate(doc)
+                mutate(doc, skip)
                 doc["clock_at"] = max(self.clock(), doc.get("clock_at", 0))
                 doc["operations"] = (doc["operations"] + [operation])[-512:]
                 self._write(doc)
@@ -565,7 +611,7 @@ class HistoryStore:
     def observe_cloud(self, account, devices, operation, *, epoch=None, observed_at=None, seed=False):
         now = self.clock() if observed_at is None else observed_at
 
-        def mutate(doc):
+        def mutate(doc, skip):
             if not _timestamp(now):
                 raise HistoryError("invalid_observation")
             secret = self._cipher(create=True)[1] if self.persist else self._memory_secret
@@ -594,6 +640,11 @@ class HistoryStore:
                             "field_at": {**previous_gateway.get("field_at", {}),
                                          "key_hash": previous_source.get("field_at", {}).get(
                                              "key_hash", previous_source["observed_at"])}}
+            # Each gateway's key before this observation, to tell its own
+            # rotation from a sub-device moving onto it.
+            prior_keys = {gateway: {**(doc["cloud"].get(gateway) or {}),
+                                    **inherited_baselines.get(gateway, {})}.get("key_hash")
+                          for gateway in gateways}
             effective_keys = {}
             for gateway in gateways:
                 raw_key = (by_id.get(gateway) or {}).get("local_key")
@@ -610,15 +661,22 @@ class HistoryStore:
                 named = device.get("gateway_id")
                 owner = named if named in candidates else next(iter(candidates)) if len(candidates) == 1 and not named else None
                 if owner:
-                    projected_by_id[device["id"]].pop("key_hash", None)
-                    projected_by_id[device["id"]].pop("key_state", None)
-                    projected_by_id[device["id"]]["key_owner"] = owner
+                    child = projected_by_id[device["id"]]
+                    listed = child.pop("key_hash", None)
+                    child.pop("key_state", None)
+                    child["key_owner"] = owner
+                    if listed:
+                        # Private like key_hash: the key Tuya lists for it, so a
+                        # move to another hub is not taken for that hub's rotation.
+                        child["owned_key_hash"] = listed
                     owners.setdefault(owner, []).append(device["id"])
             initial = doc["cloud_at"] is None or seed
             previous = doc["cloud"]
             current_ids = {d["id"] for d in projected}
             for device in projected:
                 dev_id = device["id"]
+                if dev_id in skip:
+                    continue  # cleared after this observation began
                 before = {**(previous.get(dev_id) or {}), **inherited_baselines.get(dev_id, {})}
                 changes = []
                 if not initial:
@@ -627,7 +685,11 @@ class HistoryStore:
                     else:
                         if not before.get("present"):
                             changes.append(_change("reappeared"))
-                        changes.extend(_cloud_changes(before, device))
+                        changes.extend(_cloud_changes(_key_view(before), _key_view(device)))
+                        owner = device.get("key_owner")
+                        if owner and prior_keys.get(owner) and _key_view(before).get("key_hash") == prior_keys[owner]:
+                            # Its hub's own rotation: one entry on the hub, linked to this device.
+                            changes = [change for change in changes if change["kind"] != "key_changed"]
                 fields = {"renamed": "name", "key_changed": "key_hash", "key_available": "key_state",
                           "key_unavailable": "key_state", "home_changed": "home_ids", "room_changed": "room",
                           "room_renamed": "room_name", "gateway_changed": "gateway_id", "node_changed": "node_id",
@@ -644,18 +706,30 @@ class HistoryStore:
                 if device.get("key_owner"):
                     combined.pop("key_hash", None)
                     combined.pop("key_state", None)
+                    combined["field_at"].update(key_hash=now, key_state=now)
+                else:
+                    # A sub-device that no longer uses a hub's key keeps no stale owner.
+                    combined.pop("key_owner", None)
+                    combined.pop("owned_key_hash", None)
                 # An unknown optional room name cannot erase a known label.
                 if (before.get("room", {}).get("id") == device.get("room", {}).get("id")
                         and "room" in device):
                     combined["room"] = {**before.get("room", {}), **device["room"]}
                 combined.pop("removed_at", None)
                 _append(doc, combined, changes, "cloud", now, before.get("observed_at"), operation,
-                        owners.get(dev_id, ()))
+                        [i for i in owners.get(dev_id, ()) if i not in skip])
                 if any(c["kind"] in {"identity_changed", "gateway_changed", "node_changed", "role_changed"}
                        for c in changes):
                     doc["lan"].pop(dev_id, None)
+                    # Nor may a keyless gateway keep borrowing this device's key:
+                    # its next LAN check has to show which key it answers to.
+                    for result in doc["lan"].values():
+                        if result.get("key_from") == dev_id:
+                            del result["key_from"]
                 previous[dev_id] = combined
             for dev_id, device in previous.items():
+                if dev_id in skip:
+                    continue
                 if dev_id not in current_ids and device.get("present"):
                     if not initial:
                         _append(doc, device, [_change("removed")], "cloud", now,
@@ -675,7 +749,7 @@ class HistoryStore:
         current = {device["id"] for device in devices}
         now = self.clock()
 
-        def mutate(doc):
+        def mutate(doc, skip):
             if doc.get("lan_cache_seeded"):
                 return
             invalidated = {}
@@ -685,7 +759,7 @@ class HistoryStore:
                     invalidated[event["device_id"]] = max(invalidated.get(event["device_id"], 0), event["observed_at"])
             for dev_id, result in results.items():
                 observed_at = result.get("checked_at")
-                if (dev_id not in current or dev_id in doc["lan"]
+                if (dev_id in skip or dev_id not in current or dev_id in doc["lan"]
                         or not _timestamp(observed_at) or observed_at > now):
                     continue
                 dependencies = {dev_id, result.get("gateway_id"), result.get("key_from")} - {None}
@@ -717,10 +791,10 @@ class HistoryStore:
         by_id = {d["id"]: d for d in devices}
         gateways = lan_scan.gateway_ids(devices)
 
-        def mutate(doc):
+        def mutate(doc, skip):
             for dev_id, result in results.items():
                 device = by_id.get(dev_id)
-                if device is None:
+                if device is None or dev_id in skip:
                     continue
                 previous = doc["lan"].get(dev_id) or {}
                 status = result.get("status")
@@ -766,10 +840,13 @@ class HistoryStore:
                     after.update(ip=ip, protocol=protocol, confirmed_at=now)
                     if _identifier(result.get("key_from")):
                         after["key_from"] = result["key_from"]
+                    else:
+                        after.pop("key_from", None)  # it answered to a key of its own
                 # Inherited changes are linked to the gateway's one event.
                 related = [i for i, r in results.items()
                            if r.get("gateway_id") == dev_id] if dev_id in gateways else []
                 related += [d["id"] for d in devices if d.get("gateway_id") == dev_id]
+                related = [i for i in related if i not in skip]
                 _append(doc, device, changes, "lan", now, previous.get("observed_at"), operation, related)
                 doc["lan"][dev_id] = after
 
@@ -777,8 +854,8 @@ class HistoryStore:
 
     def view(self, account, *, limit=50, cursor=None, device_id="", kind="", source="",
              query="", since=None, until=None, export=False):
-        if self.error == "history_configuration":
-            raise HistoryError(self.error)
+        if self._config_error:
+            raise HistoryError(self._config_error)
         if self.persist and self._pending_delete:
             raise HistoryError("history_delete_failed")
         if (type(limit) is not int or not 1 <= limit <= 100 or kind and kind not in KINDS
@@ -843,21 +920,28 @@ class HistoryStore:
             raise HistoryError("history_unavailable") from None
 
     def epoch(self, account):
+        """The token an observation carries from its start. A reset drops the
+        whole observation, a device clear only that device's part."""
         if not self.enabled:
             return None
         with self._guard():
-            return self._read(account)["epoch"]
+            doc = self._read(account)
+            return f"{doc['epoch']}.{doc.get('clear_revision', 0)}"
 
     def clear(self, account, epoch, device_id=None):
+        if self._config_error:
+            raise HistoryError(self._config_error)
+        if self.persist and self._pending_delete:
+            raise HistoryError("history_delete_failed")
         with self._guard():
             doc = self._read(account)
-            if epoch != doc["epoch"]:
+            if _parse_epoch(epoch)[0] != doc["epoch"]:
                 raise HistoryError("history_cursor_expired")
             if device_id is None:
                 # Internal whole-journal reset, used for installation/test
                 # lifecycle only. The device UI/API always supplies an ID.
                 doc.update(events=[], operations=[], epoch=uuid.uuid4().hex, next_sequence=1,
-                           started_at=self.clock(), pruned_through=0, device_clears={})
+                           started_at=self.clock(), pruned_through=0, device_clears={}, clear_revision=0)
                 doc["cloud"] = {i: d for i, d in doc["cloud"].items() if d.get("present")}
                 doc["lan"] = {i: d for i, d in doc["lan"].items() if i in doc["cloud"]}
             else:
@@ -866,12 +950,15 @@ class HistoryStore:
                 if (device_id not in doc["cloud"] and device_id not in doc["lan"]
                         and not any(device_id in (e["device_id"], *e["related_device_ids"]) for e in doc["events"])):
                     raise HistoryError("unknown_device")
+                revision = doc.get("clear_revision", 0) + 1
+                doc["clear_revision"] = revision
                 doc.setdefault("device_clears", {})[device_id] = {
-                    "through": doc["next_sequence"] - 1, "at": self.clock()}
+                    "through": doc["next_sequence"] - 1, "at": self.clock(), "revision": revision}
                 # Shared gateway entries remain available to other devices.
                 # Remove an entry only once no device can still view it.
                 doc["events"] = [e for e in doc["events"] if _event_visible(e, "", doc["device_clears"])]
-                doc["epoch"] = uuid.uuid4().hex
+                # The epoch stays, so other devices' running observations still
+                # count. The revision makes them skip this device.
             try:
                 self._write(doc)
                 self.error = None
@@ -880,7 +967,7 @@ class HistoryStore:
 
     def maintain(self):
         """Local-only retention while the app is running, including idle periods."""
-        if not self.enabled or not self.persist or self._pending_delete:
+        if not self.enabled or not self.persist or self._pending_delete or self._config_error:
             return
         try:
             with self._guard():
@@ -896,7 +983,7 @@ class HistoryStore:
 
     def activate(self, account):
         """Resume retention after a restart without fetching from Tuya."""
-        if not self.enabled or not self.persist or not self.path.exists():
+        if not self.enabled or not self.persist or self._config_error or not self.path.exists():
             return
         with self._lock:
             self._maintenance_account = account
@@ -920,7 +1007,8 @@ class HistoryStore:
                 except OSError:
                     failed = True
             self._memory_secret = os.urandom(32)
-            self.error = "history_delete_failed" if failed else None
+            # A logout deletes history on request. A configuration error still stands.
+            self.error = "history_delete_failed" if failed else self._config_error
             self._pending_delete = failed
             if failed:
                 raise HistoryError(self.error)

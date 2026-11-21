@@ -160,6 +160,54 @@ def test_clear_during_cloud_refresh_prevents_late_history_write(environment, mon
     assert history(client)["events"] == []
 
 
+def test_clear_during_cloud_refresh_keeps_other_devices_changes(environment, monkeypatch):
+    module, client, state = environment
+    other_key = "secret-key-00002"
+    state["devices"].append(SimpleNamespace(id="other", name="Other", local_key=other_key, category="cz"))
+    refresh(client)
+    before = history(client)
+    entered, release = threading.Event(), threading.Event()
+    def fetch(*args):
+        entered.set()
+        assert release.wait(5)
+        return [SimpleNamespace(id="lamp", name="Late lamp", local_key=KEY, category="cz"),
+                SimpleNamespace(id="other", name="Other renamed", local_key=other_key, category="cz")]
+    monkeypatch.setattr(module.core, "devices_from_session", fetch)
+    replies = []
+    thread = threading.Thread(target=lambda: replies.append(module.app.test_client().get("/api/devices?refresh=1")))
+    thread.start()
+    try:
+        assert entered.wait(2)
+        assert client.delete("/api/history", json={"account_id": before["account_id"], "epoch": before["epoch"], "device_id": "lamp"}).status_code == 200
+    finally:
+        release.set()
+        thread.join(5)
+    assert replies[0].status_code == 200
+    assert client.get("/api/history?device_id=lamp").json["events"] == []
+    renamed = client.get("/api/history?device_id=other").json["events"]
+    assert [event["changes"][0]["after"] for event in renamed] == ["Other renamed"]
+
+
+@pytest.mark.parametrize("setting,value", [
+    ("HISTORY_RETENTION_DAYS", "0"), ("HISTORY_RETENTION_DAYS", "90d"), ("CHANGE_HISTORY", "enabled")])
+def test_invalid_history_settings_never_erase_saved_history(environment, monkeypatch, setting, value):
+    module, client, state = environment
+    refresh(client)
+    state["devices"][0].name = "Renamed"
+    refresh(client)
+    saved = history(client)
+    with monkeypatch.context() as patch:
+        patch.setenv(setting, value)
+        broken = importlib.reload(module).app.test_client()
+        assert broken.get("/api/state").status_code == 200   # every page load
+        response = broken.delete("/api/history", json={
+            "account_id": saved["account_id"], "epoch": saved["epoch"], "device_id": "lamp"})
+        assert response.status_code == 503 and response.json["error"] == "history_configuration"
+        assert broken.get("/api/history").json["error"] == "history_configuration"
+    restored = importlib.reload(module).app.test_client()
+    assert len(history(restored)["events"]) == 1
+
+
 def test_history_write_failure_is_reported_without_losing_live_devices(environment, monkeypatch):
     module, client, state = environment
     refresh(client)

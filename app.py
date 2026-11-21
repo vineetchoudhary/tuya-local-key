@@ -37,6 +37,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, render_template, request, send_file
 
@@ -359,13 +360,17 @@ def _update_status(manual):
                                           supervisor_token=token, manual=manual))
 
 
+def _from_ingress_proxy():
+    """Supervisor's proxy peer, never a client-supplied header alone."""
+    return request.remote_addr == "172.30.32.2" and bool(request.headers.get("X-Ingress-Path"))
+
+
 @app.before_request
 def _require_auth():
     if not (AUTH_USERNAME and AUTH_PASSWORD):
         return
 
-    # Trust Supervisor's proxy peer, never a client-supplied header alone.
-    if request.remote_addr == "172.30.32.2" and request.headers.get("X-Ingress-Path"):
+    if _from_ingress_proxy():
         return
 
     auth = request.authorization
@@ -376,6 +381,33 @@ def _require_auth():
     if not ok:
         return ("Authentication required.", 401,
                 {"WWW-Authenticate": 'Basic realm="Tuya Local Key"'})
+
+
+@app.before_request
+def _refuse_cross_site_changes():
+    """Refuse changes another website asks the browser to make (CSRF).
+
+    Browsers label every request with Sec-Fetch-Site, and older ones still
+    send Origin. A request with neither comes from a script or a tool, not
+    from a page on another site. Home Assistant's own session already guards
+    ingress, whose proxy may not keep the browser's Host.
+    """
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    site = request.headers.get("Sec-Fetch-Site")
+    if site is not None:
+        allowed = site in ("same-origin", "none")
+    else:
+        origin = request.headers.get("Origin")
+        if origin is None or _from_ingress_proxy():
+            return None
+        try:
+            allowed = urlsplit(origin).netloc.lower() == request.host.lower()
+        except ValueError:   # e.g. a malformed IPv6 address
+            allowed = False
+    if not allowed:
+        return jsonify({"error": "cross_site_request"}), 403
+    return None
 
 
 @app.after_request

@@ -431,6 +431,42 @@ def test_change_history_unreadable_data_requires_confirmed_reset(page, running_a
     assert not path.exists()
 
 
+def test_history_clear_dialog_closed_without_a_choice_never_reuses_an_earlier_confirmation(page, running_app, monkeypatch):
+    # Safari's Escape, like close() with no value in every browser, keeps the
+    # dialog's last returnValue. A cancel must not read as the earlier "clear".
+    clear_device_history(page)
+    clear_device_history(page, LAMP.id)
+    devices = copy.deepcopy(DEVICES)
+    devices[demo_devices.PLUG].name = "Plug renamed"
+    devices[demo_devices.LAMP].name = "Lamp renamed"
+    _serves(running_app, monkeypatch, devices)
+    refreshed(page, "#changesNotice")
+    open_panel(page, "Plug renamed")
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    page.locator("#historyClear").click()
+    page.locator("#historyClearDialog button[value=clear]").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(0)
+    page.locator("#panelClose").click()
+    open_panel(page, "Lamp renamed")
+    page.locator("#panelHistoryOpen").click()
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    sent = []
+    page.on("request", lambda request: sent.append(request.url) if request.method != "GET" else None)
+    for close in ("dialog => dialog.close()", "Escape"):
+        page.locator("#historyClear").click()
+        expect(page.locator("#historyClearDialog")).to_be_visible()
+        if close == "Escape":
+            page.keyboard.press("Escape")
+        else:
+            page.locator("#historyClearDialog").evaluate(close)
+        expect(page.locator("#historyClearDialog")).to_be_hidden()
+    page.wait_for_timeout(200)
+    assert not [url for url in sent if "api/history" in url]
+    expect(page.locator("#historyEntries .history-entry")).to_have_count(1)
+    assert len(page.request.get(page.url + "api/history?device_id=" + LAMP.id).json()["events"]) == 1
+
+
 @pytest.mark.parametrize("width,scheme", [(1440, "light"), (390, "dark"), (320, "light")])
 def test_change_history_compact_device_drawer_has_four_filters_in_requested_rows(page, width, scheme):
     clear_device_history(page)

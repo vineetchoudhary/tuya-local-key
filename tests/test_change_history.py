@@ -320,6 +320,26 @@ def test_individual_clears_remove_unshared_events_without_resetting_other_sequen
     assert events(store, device_id="lamp")[0]["sequence"] > before[0]["sequence"]
 
 
+def test_device_clear_drops_only_that_devices_part_of_running_observations(journal):
+    store, _ = journal
+    other = {"id": "other", "name": "Other"}
+    fleet = [device(), other]
+    cloud(store, fleet, "baseline")
+    lan(store, {"lamp": ok(), "other": ok("10.0.0.2")}, "first-check", fleet)
+    token = store.epoch(ACCOUNT)   # a refresh and a scan begin
+    store.clear(ACCOUNT, token, device_id="lamp")
+    renamed = [device("Lamp renamed"), dict(other, name="Other renamed")]
+    cloud(store, renamed, "running-refresh", epoch=token)
+    lan(store, {"lamp": ok("10.0.0.9"), "other": ok("10.0.0.8")}, "running-scan", fleet, epoch=token)
+    assert events(store, device_id="lamp") == []
+    assert [[c["kind"] for c in e["changes"]] for e in events(store, device_id="other")] == [
+        ["ip_changed"], ["renamed"]]
+    # The cleared device kept its earlier baseline, so a fresh refresh compares with it.
+    cloud(store, renamed, "next-refresh")
+    assert events(store, device_id="lamp")[0]["changes"] == [
+        {"kind": "renamed", "before": "Lamp", "after": "Lamp renamed"}]
+
+
 def test_device_clear_accepts_older_history_without_clear_markers(journal):
     store, _ = journal
     cloud(store, [device()], "a")
@@ -491,6 +511,59 @@ def test_remembered_gateway_key_source_still_detects_real_rotation(journal):
     cloud(store, updated, "rotated")
     assert any(e["device_id"] == "gw" and any(c["kind"] == "key_changed" for c in e["changes"])
                for e in events(store))
+    # One rotation, one entry: the sub-device whose key the hub uses is linked to it.
+    assert [(e["device_id"], e["related_device_ids"]) for e in events(store)] == [("gw", ["child"])]
+
+
+@pytest.mark.parametrize("change", ["node", "identity"])
+def test_dropped_gateway_key_source_stays_dropped_on_later_refreshes(journal, change):
+    store, _ = journal
+    first = [{"id": "gw-a", "name": "Hub A", "category": "wg2"},
+             {"id": "gw-b", "name": "Hub B", "category": "wg2"},
+             {"id": "child", "name": "Sensor", "sub": True, "local_key": KEY_A,
+              "gateway_id": None, "node_id": "one", "uuid": "old-identity"}]
+    cloud(store, first, "first")
+    store.observe_lan(ACCOUNT, {"gw-a": ok(key_from="child")}, first, "identified")
+    moved = copy.deepcopy(first)
+    moved[2]["local_key"] = KEY_B
+    moved[2]["node_id" if change == "node" else "uuid"] = "changed"
+    cloud(store, moved, "moved")
+    cloud(store, moved, "unchanged")
+    rotated = copy.deepcopy(moved)
+    rotated[2]["local_key"] = "private-key-00003"
+    cloud(store, rotated, "rotated")
+    assert not any(e["device_id"] == "gw-a" for e in events(store))
+    assert (events(store)[0]["device_id"], kinds(store)[0]) == ("child", ["key_changed"])
+
+
+def test_gateway_answering_to_its_own_key_no_longer_borrows_one(journal):
+    store, _ = journal
+    fleet = [{"id": "gw", "name": "Hub", "category": "wg2"},
+             {"id": "child", "name": "Sensor", "sub": True, "local_key": KEY_A}]
+    cloud(store, fleet, "first")
+    store.observe_lan(ACCOUNT, {"gw": ok(key_from="child")}, fleet, "borrowed")
+    store.observe_lan(ACCOUNT, {"gw": ok()}, fleet, "own-key")
+    rotated = copy.deepcopy(fleet)
+    rotated[1]["local_key"] = KEY_B
+    cloud(store, rotated, "rotated")
+    assert [(e["device_id"], [c["kind"] for c in e["changes"]]) for e in events(store)] == [
+        ("child", ["key_changed"])]
+
+
+def test_sub_device_moving_to_another_hub_or_off_it_is_recorded(journal):
+    store, _ = journal
+    hubs = [{"id": "hub-1", "name": "Hub 1", "category": "wg2", "local_key": KEY_A},
+            {"id": "hub-2", "name": "Hub 2", "category": "wg2", "local_key": KEY_B}]
+    sensor = {"id": "sensor", "name": "Sensor", "sub": True, "node_id": "n1", "local_key": KEY_A}
+    cloud(store, hubs + [sensor], "on-hub-1")
+    cloud(store, hubs + [dict(sensor, local_key=KEY_B)], "moved-to-hub-2")
+    cloud(store, hubs + [dict(sensor, local_key="private-key-00003")], "off-both-hubs")
+    cloud(store, hubs + [sensor], "back-on-hub-1")
+    cloud(store, hubs + [dict(sensor, local_key="")], "key-withdrawn")
+    assert kinds(store) == [["key_unavailable"], ["key_changed"], ["key_changed"], ["key_changed"]]
+    assert {e["device_id"] for e in events(store)} == {"sensor"}
+    decoded = Fernet(store.key_path.read_bytes()).decrypt(store.path.read_bytes())
+    assert KEY_A.encode() not in decoded and KEY_B.encode() not in decoded
 
 
 def test_different_child_supplies_same_gateway_key_without_rotation(journal):
@@ -542,6 +615,41 @@ def test_invalid_retention_preserves_existing_journal(journal):
     with pytest.raises(history.HistoryError, match="history_configuration"):
         invalid.view(ACCOUNT)
     assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("retention", [0, -1, 5000, None])
+def test_invalid_retention_never_prunes_clears_or_records(journal, retention):
+    store, now = journal
+    other = {"id": "other", "name": "Other"}
+    cloud(store, [device(), other], "a")
+    cloud(store, [device("B"), dict(other, name="Other B")], "b")
+    token = store.epoch(ACCOUNT)
+    before = store.path.read_bytes()
+    now[0] += 1
+    invalid = history.HistoryStore(store.path, store.key_path, retention_days=retention, clock=lambda: now[0])
+    invalid.activate(ACCOUNT)   # every page load
+    invalid.maintain()          # the hourly timer
+    with pytest.raises(history.HistoryError, match="history_configuration"):
+        invalid.clear(ACCOUNT, token, device_id="lamp")   # a page opened before the restart
+    with pytest.raises(history.HistoryError, match="history_configuration"):
+        invalid.observe_cloud(ACCOUNT, [device("C"), other], "c", epoch=token)
+    assert invalid.error == "history_configuration"
+    assert store.path.read_bytes() == before
+    assert len(events(store)) == 2
+    invalid.purge()   # logging out still deletes history, and the setting still needs fixing
+    assert not store.path.exists() and invalid.error == "history_configuration"
+
+
+def test_turning_history_or_saved_data_off_deletes_it_despite_invalid_retention(journal):
+    store, _ = journal
+    cloud(store, [device()], "a")
+    disabled = history.HistoryStore(store.path, store.key_path, enabled=False, retention_days=0)
+    assert not store.path.exists() and not store.key_path.exists()
+    assert disabled.error is None
+    cloud(store, [device()], "b")
+    temporary = history.HistoryStore(store.path, store.key_path, persist=False, retention_days="90d")
+    assert not store.path.exists() and not store.key_path.exists()
+    assert temporary.error == "history_configuration"
 
 
 def test_public_history_projects_fields_and_never_exports_key_values(journal):
