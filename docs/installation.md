@@ -14,9 +14,9 @@ Home Assistant OS users can install Tuya Local Key as a Home Assistant app.
 https://github.com/vineetchoudhary/tuya-local-key
 ```
 
-4. Install Tuya Local Key from the app store and open it from the sidebar.
+4. Install and start Tuya Local Key, then open it from the sidebar.
 
-The app uses Home Assistant ingress by default. The direct `8000/tcp` port is disabled unless you explicitly enable it in the app network settings.
+The app opens through Home Assistant ingress. The direct `8000/tcp` port stays disabled unless you enable it in the app's network settings.
 
 ## Web UI with Docker Compose
 
@@ -51,7 +51,7 @@ docker build -t tuya-local-key .
 docker run -d --name tuya-local-key -p 8000:8000 -v tuya-session:/data tuya-local-key
 ```
 
-Then open `http://localhost:8000`.
+Then open `http://localhost:8000`. The port is reachable from your network. To limit it to this machine, use `-p 127.0.0.1:8000:8000`, or set a login as described in [Security](configuration.md#security).
 
 ## Web UI from Source
 

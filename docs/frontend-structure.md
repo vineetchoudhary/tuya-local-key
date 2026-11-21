@@ -20,7 +20,7 @@ Styles live in `static/css/`. Load them in the order listed in the main template
 | `filters.js` | Home, room, status, and category filters, saved exclusions, selection state, and exclusion/restoration requests |
 | `notices.js` | Cloud and LAN change notices, scan summaries, and dismissal preferences |
 | `panel.js` | Panel navigation, back stack, focus, scroll, and disclosure state |
-| `device-menu.js` | The device options list, its six page entries and support report download action |
+| `device-menu.js` | The device options list, its page entries, the Restore device action for excluded devices, and the support report download |
 | `details.js` | Device fields, shared data point definitions, and masked raw JSON |
 | `setup.js` | Integration tabs, setup values, snippets, and inline guidance |
 | `network.js` | LAN results, scan/check requests, scan polling, and the Local network page |
@@ -31,7 +31,7 @@ Styles live in `static/css/`. Load them in the order listed in the main template
 | `updates.js` | Release checks, badges, and result dialogs |
 | `history.js` | Per-device change history in the side panel, four collapsed filters, pagination, device-scoped clearing, recovery dialogs, and stale-response rejection |
 
-Cross-feature data lives in `shared/state.js` as `appState`. Features keep their timers and private caches in their own modules. Modules in `shared/` provide the API helper, device/gateway/connection derivations, constants, HTML/field renderers, formatting, icons, and clipboard support.
+Cross-feature data lives in `shared/state.js` as `appState`. Features keep their timers and private caches in their own modules. Modules in `shared/` provide the API helper, DOM lookup, device/gateway/connection derivations, category labels, constants, HTML/field renderers, formatting, icons, and clipboard support.
 
 Feature controllers import shared modules directly. Actions from other controllers are passed to their `init…` function by `app.js`, avoiding circular feature imports. Importing a feature or shared module does not bind DOM events or start requests. The application entrypoint starts the UI. The table routes selection interactions to the filters controller, which updates selection state and asks the table to synchronize checkboxes and row classes.
 
@@ -43,10 +43,10 @@ The support report entry uses `data-support-report` to download directly without
 
 ## URLs and configuration
 
-Stylesheet and entrypoint URLs are relative to the document. JavaScript imports are relative to their module. The API helper keeps requests relative to the document by stripping leading slashes, preserving Home Assistant ingress prefixes. Avoid root-relative asset or API URLs.
+Stylesheet and entrypoint URLs are relative to the document. JavaScript imports are relative to their module. The API helper keeps requests relative to the document by stripping leading slashes, preserving Home Assistant ingress prefixes. It also sends `X-Requested-With: tuya-local-key`, which the server's cross-site check accepts behind a proxy that rewrites Host. Avoid root-relative asset or API URLs.
 
-Gateway categories come from Flask through the `app-config` JSON block. Static JavaScript is served unchanged and contains no Jinja expressions. Static assets use the same direct-access and ingress authentication rules as the rest of the app. Docker includes both the templates and static directories.
+Gateway categories and the update-check and change-history flags come from Flask through the `app-config` JSON block. Static JavaScript is served unchanged and contains no Jinja expressions. Static assets use the same direct-access and ingress authentication rules as the rest of the app. Docker includes both the templates and static directories.
 
 ## Verification
 
-Install `requirements-dev.txt`, then run `.venv/bin/python -m pytest`. Browser tests also need Playwright and a supported browser, and skip themselves without one. They exercise the real app with fake device data, including startup through a simulated ingress prefix. Tests that inspect internal state import the owning module instead of relying on browser globals. To regenerate screenshots, see [Tools](../tools/README.md).
+Install `requirements-dev.txt`, then run `.venv/bin/python -m pytest`. Browser tests also need Playwright and a supported browser, and skip themselves without one. They exercise the real app with fake device data, including startup through a simulated ingress prefix. Tests that inspect internal state import the owning module instead of relying on browser globals. `./tests/test.sh` runs the tests, then builds and starts the Docker image. To regenerate screenshots, see [Tools](../tools/README.md).

@@ -2,7 +2,7 @@
 
 Local integrations need a device's local IP, protocol version, and local key. A scan finds the IP and protocol.
 
-Choose **Scan network**, enter your IoT VLAN or subnet, such as `192.168.2.0/24`, and start the scan. Separate several subnets with commas, up to 1,024 addresses in total. A typical /24 scan takes about 30 seconds. Large device lists can take a few minutes.
+Choose **Scan network**, enter your IoT VLAN or subnet, such as `192.168.2.0/24`, or device IPs, and choose **Start scan**. Separate entries with commas. Only private IPv4 addresses are accepted, up to 1,024 in total. A typical /24 scan takes about 30 seconds. Large device lists can take a few minutes.
 
 Scans run only when you start one, and their results are saved. **Refresh** fetches device details from Tuya without scanning.
 
@@ -31,15 +31,15 @@ Local results are tagged **LAN** to distinguish them from Tuya's cloud status.
 | Status | Meaning |
 |---|---|
 | reachable | The device answered with its local key. |
-| via gateway | A sub-device reached through its gateway. See [Gateways](#gateways). |
+| via gateway | A sub-device reached through its gateway. Greyed out when the last scan did not find the gateway. See [Gateways](#gateways). |
 | offline | The gateway reports that its sub-device is offline. |
 | check needed | A gateway needs to be identified at its correct IP. |
-| busy | Another local client may be using the connection. Disconnect that client and retry. |
+| busy | The device refused the connection. Another local client may be connected, or the IP changed. Disconnect that client and retry. |
 | key mismatch | The device rejected the saved key. Refresh from Tuya and confirm the IP. |
 | unreachable | The device did not answer at its last known IP. |
 | not found | The scan did not find a matching device. |
 
-Protocol 3.1 replies show **Device found**, because they cannot verify the local key. A successful gateway check does not prove that its sub-devices are responding.
+With protocol 3.1, **Local network** shows **Device found**, because 3.1 replies cannot verify the local key. A successful gateway check does not prove that its sub-devices are responding.
 
 Checks close their connections after reading status. The scan summary lists refused, unmatched, and incomplete checks to help compare results with your router's client list.
 
@@ -53,4 +53,4 @@ If only one gateway lacks a key, the app can use the key supplied with its sub-d
 
 ## device22
 
-Some devices use tinytuya's `device22` quirk. The app shows the corresponding tuya-local version in the device details: **3.22** for protocol 3.3 with the quirk, or **3.42** for 3.4. Protocol 3.2 is reported as 3.3 with this quirk.
+Some devices use tinytuya's `device22` quirk. The device details and tuya-local setup show the matching tuya-local version: **3.22**, **3.42**, or **3.52** for protocol 3.3, 3.4, or 3.5 with the quirk. Protocol 3.2 is reported as 3.3 with the quirk.

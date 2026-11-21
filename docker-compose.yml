@@ -8,15 +8,15 @@ services:
       - tuya-session:/data
     environment:
       - QR_SCHEME=smartlife      # or "tuyaSmart"
-      # The device list is kept in the volume, encrypted, so it survives a restart. Set to "off" to hold it in memory only.
+      # The device list, scan results and change history are kept in the volume, encrypted. Set to "off" to keep them in memory only and delete the saved copies.
       # - DEVICE_CACHE=off
       # - CHECK_FOR_UPDATES=false   # disable all update checks
       # Change history is kept in the volume, encrypted. Set to "off" to stop recording and delete it.
       # - CHANGE_HISTORY=off
       # - HISTORY_RETENTION_DAYS=90   # 1 to 3650
-      # Prefills "Scan network" (local IPs and protocol versions over TCP 6668). Several subnets are fine, comma-separated.
+      # Prefills "Scan network" (local IPs and protocol versions over TCP 6668). Separate several with commas.
       # - LAN_SUBNET=192.168.2.0/24    # your IoT VLAN or subnet
-      # Optional login. Set BOTH to require a username + password (recommended when the port is reachable beyond localhost). Leave unset for no auth.
+      # Optional login. Set BOTH to require a username and password. The port above is reachable from your network, so set them or use "127.0.0.1:8000:8000". Leave unset for no auth.
       # - AUTH_USERNAME=admin
       # - AUTH_PASSWORD=change-me
     restart: unless-stopped

@@ -2,7 +2,7 @@
 
 ## Device List Cache
 
-The device list is saved for **3 days** and kept across restarts. Use **Refresh** to fetch the latest details from Tuya. Set `DEVICE_CACHE=off` to keep it in memory only.
+The device list is saved across restarts and reused for up to **3 days**. After that, the app fetches a new list from Tuya when you open it. Use **Refresh** to fetch it sooner. Set `DEVICE_CACHE=off` to keep it in memory only.
 
 These files are stored beside the session file:
 
@@ -12,7 +12,7 @@ These files are stored beside the session file:
 | `lan.cache` | Encrypted network scan results. |
 | `cache.key` | Key for both caches. |
 
-Logging out deletes the saved login, the caches, and their key. Each key is stored beside its encrypted file, so protect the data directory and its backups.
+Logging out deletes the saved login, the caches, and their key. A new QR login also deletes the caches, so scan again afterwards. Each key is stored beside its encrypted file, so protect the data directory and its backups.
 
 ### When Tuya Cannot Be Reached
 
@@ -20,7 +20,7 @@ If Tuya is unavailable or your login expires, the saved list stays visible with 
 
 ## Saved Device Exclusions
 
-[Device exclusions](usage.md#excluding-devices) are saved per account in `device-preferences.json`. Every browser using the same installation shares them, and they survive restarts and logout. Use **Restore all** in the excluded-devices view to clear them.
+[Device exclusions](usage.md#excluding-devices) are saved per account in `device-preferences.json`. Every browser using the same installation shares them, and they survive restarts and logout. **Restore all** in the excluded-devices view, or **Clear all** in **Filter**, clears them.
 
 Filter choices are remembered in your browser for each account. Use **Refresh** to pick up changes made in Smart Life.
 
@@ -50,7 +50,7 @@ Cache reads, exclusions, filters, and current value readings are not recorded. H
 
 The first refresh and the first check set a baseline, so earlier changes cannot be shown. After an upgrade, the saved device list and scan results become that baseline.
 
-Each entry shows when the app detected the change, its source, and the values before and after. The change itself may have happened earlier. A device is recorded as unreachable, busy, or rejecting its key only when its last known address was actually checked.
+Each entry shows when the app detected the change, its source, and the values before and after. The change itself may have happened earlier. A device is recorded as unreachable, busy, or rejecting its key only when its last known address was checked.
 
 Use **Filters** to narrow entries by change, source, and date. **Clear all** resets the filters without deleting anything.
 
@@ -72,8 +72,4 @@ History survives restarts, updates, expired logins, and a new QR login to the sa
 
 If history cannot be saved, the device list still updates and the app shows an error. The next successful refresh or check compares with the last saved state, so changes in between may be missed.
 
-Invalid history settings pause recording and keep saved history. See [Configuration](configuration.md).
-
 An unreadable history file is kept. **Reset saved history** deletes it for every device. To recover old entries, restore the matching `change-history.enc` and `history.key` from a backup first.
-
-Restoring a backup also restores its older history. Clearing history does not change existing backups.

@@ -4,6 +4,4 @@ Retrieve Smart Life / Tuya device local keys from Home Assistant using QR-code l
 
 Open the app from the Home Assistant sidebar, enter your Smart Life user code, scan the QR code with the Smart Life app, and confirm login.
 
-The app stores its cached login session in the app data volume at `/data/session.json`.
-
-The web UI caches the device list for 3 days. Click Refresh to get the latest list from Tuya.
+The app keeps its login, device list, scan results, and change history in `/data`. It reuses the saved device list for up to 3 days. Use Refresh to fetch it sooner.

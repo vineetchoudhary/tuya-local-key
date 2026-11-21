@@ -53,7 +53,7 @@ docker run -d --name tuya-local-key -p 8000:8000 -v tuya-session:/data ghcr.io/v
 
 Open [http://localhost:8000](http://localhost:8000) and [log in](docs/usage.md#web-login-flow).
 
-The web UI has no authentication by default. For access beyond localhost, set both `AUTH_USERNAME` and `AUTH_PASSWORD` and read the [security guidance](docs/configuration.md#security).
+The web UI has no authentication by default, and these commands make port 8000 reachable from your network. Set both `AUTH_USERNAME` and `AUTH_PASSWORD`, or use `-p 127.0.0.1:8000:8000` for local access only. See the [security guidance](docs/configuration.md#security).
 
 ### CLI
 

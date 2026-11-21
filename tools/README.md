@@ -44,9 +44,9 @@ python tools/screenshots.py setup-tuya-local setup-localtuya setup-tinytuya loca
 | `fix-connection-result` | `fix-connection-result-{light,dark}.png` | [Fix connection next steps](../docs/screenshots.md#next-steps) |
 | `current-values` | `current-values-{light,dark}.png` | [Current Values](../docs/screenshots.md#current-values) |
 | `support-report` | `support-report-{light,dark}.png` | [Support Report](../docs/screenshots.md#support-report) |
-| `filter` | `filter-{light,dark}.png` | [Filtering](../docs/screenshots.md#filtering) |
+| `filter` | `filter-{light,dark}.png` | [Search](../docs/screenshots.md#search) |
 
-Device panel previews are cropped to the panel so their contents remain readable. Their height adapts to the content, and Raw JSON keeps a scrollable viewport. Local network and the wizard result run a demo check. Current values uses a simulated local reply, and the support report preview exercises the real download with the fake account.
+Device panel previews are cropped to the panel so their contents remain readable. Their height adapts to the content, and Raw JSON keeps a scrollable viewport. Local network runs a demo scan, and the wizard result runs a demo check. Current values uses a simulated local reply, and the support report preview exercises the real download with the fake account.
 
 ## Dependency Updates
 
@@ -56,6 +56,8 @@ Device panel previews are cropped to the panel so their contents remain readable
 python tools/update_dependencies.py check
 ```
 
+Then move to a version that `check` reports:
+
 ```bash
-python tools/update_dependencies.py apply tinytuya==1.21.0
+python tools/update_dependencies.py apply tinytuya==X.Y.Z
 ```

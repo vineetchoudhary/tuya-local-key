@@ -1,6 +1,6 @@
 # Using the App
 
-Log in with your Smart Life account using a QR code. No Tuya IoT developer account or cloud project is needed.
+Log in with your Smart Life account using a QR code.
 
 ## Finding Your User Code
 
@@ -18,11 +18,11 @@ If the QR code expires, start the login again.
 2. Scan the QR code and confirm login in Smart Life.
 3. Select a device to view its details or copy its local integration settings.
 
-The device list is saved for 3 days. Use **Refresh** to fetch the latest details from Tuya. See [Caching and Changes](caching-and-changes.md).
+The saved device list is reused for up to 3 days. Use **Refresh** to fetch it from Tuya sooner. See [Caching and Changes](caching-and-changes.md).
 
 ## Filtering
 
-Use **Filter** to narrow the list. Filters combine with search, and **Clear all** resets both.
+Use **Filter** to narrow the list. Filters combine with search. **Clear all** resets filters and search, and restores excluded devices.
 
 - **Home** shows devices from one home.
 - **Room** shows devices in a room of the selected home. **No room** means unassigned. **Unknown room** means room information could not be loaded. Room groups are not supported.
@@ -35,11 +35,11 @@ Use **Refresh** after changing homes or rooms in Smart Life.
 
 1. Open **Filter > Select devices**.
 2. Select the devices to hide, then choose **Exclude selected**.
-3. To bring them back, open **Filter > Excluded devices**, select them, and choose **Restore selected**.
+3. To bring them back, open **Filter > Excluded devices**, then **Filter > Select devices**, select them, and choose **Restore selected**.
 
 Selecting a gateway does not select its sub-devices. Exclusions are saved per account and shared across browsers using the same installation. They hide devices in this app without removing them from Tuya or network scans.
 
-CSV export follows the current view, filters, and sort order.
+CSV export follows the current view, filters, search, and sort order.
 
 ## Device Details
 
@@ -50,7 +50,7 @@ Select a device to open its options:
 | Set up in… | Connection settings for tuya-local, localtuya, and tinytuya. |
 | Local network | Local IP, protocol version, and connection checks. |
 | Current values | Saved cloud values, local readings, and data point definitions. |
-| Change history | Saved configuration changes for the device and its gateway. |
+| Change history | Saved configuration changes for the device and its gateway. Hidden when `CHANGE_HISTORY=off`. |
 | Device information | Identity, keys, connectivity, and timestamps. |
 | Raw JSON | View or copy the saved device record. |
 | Download a support report | Save diagnostics for a bug report. |
@@ -65,7 +65,7 @@ Open **Set up in…**, choose your integration, and copy the settings into it. I
 
 ### Download a Support Report
 
-Support reports include app versions, device capabilities, and connection diagnostics. Keys, credentials, personal identifiers, and current readings are excluded. Downloading a report uses saved information without contacting the device.
+Reports include app and library versions, device capabilities, and connection diagnostics. Keys, credentials, identifiers, names, network addresses, and current readings are left out. A report uses saved data only, without contacting Tuya or the device.
 
 To report a problem:
 
@@ -77,7 +77,7 @@ If you cannot generate a report, explain why and include the app version or imag
 
 ### Read Current Values
 
-Open **Current values > Read from device** to compare the saved cloud snapshot with a local reading. These snapshots are taken at different times, so their values may differ. **Value definitions** contains the data point IDs, types, units, and ranges supplied by Tuya.
+Open **Current values > Read from device** to compare the saved cloud snapshot with a local reading. These snapshots are taken at different times, so their values may differ. **Value definitions** lists each data point's type, access, and range from Tuya.
 
 Local reads use the saved IP, protocol, and key. If these are missing, open **Local network** first. Sub-devices also need an identified gateway and a Node ID.
 
@@ -85,7 +85,7 @@ Reads are manual and do not change device settings. **Read again** takes another
 
 ### Browse Change History
 
-Open **Change history** to see the changes recorded for the device and its gateway. Use **Filters** to narrow them by change, source, and date. **Clear history** clears this device's history only. See [Change History](caching-and-changes.md#change-history).
+Open **Change history** to see the changes recorded for the device and its gateway. See [Change History](caching-and-changes.md#change-history).
 
 ## Bluetooth Devices
 

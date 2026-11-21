@@ -170,18 +170,18 @@ Saved cloud values and a manual local reading appear side by side, with data poi
 
 ## Support Report
 
-Choose **Download a support report** from the device menu, then [attach the file to a bug report](usage.md#download-a-support-report).
+Choose **Download a support report** from the device options, then [attach the file to a bug report](usage.md#download-a-support-report).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/support-report-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="screenshots/support-report-light.png">
-  <img alt="Device menu confirming the support report download" src="screenshots/support-report-light.png" width="440">
+  <img alt="Device options confirming the support report download" src="screenshots/support-report-light.png" width="440">
 </picture>
 
-## Filtering
+## Search
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/filter-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="screenshots/filter-light.png">
-  <img alt="Filtered device table" src="screenshots/filter-light.png">
+  <img alt="Device table filtered by a search for plug" src="screenshots/filter-light.png">
 </picture>
