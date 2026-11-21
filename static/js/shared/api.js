@@ -18,4 +18,12 @@ async function api(path, opts = {}) {
   return { ok: r.ok, status: r.status, body };
 }
 
-export { api };
+// The app's own errors are JSON with an "error" code. A proxy in front of it
+// can fail a request that never reached it. For example, Home Assistant
+// answers 401 in plain text while its ingress session is expired.
+function appError(body) { return typeof body.error === "string"; }
+
+// Only the app's own 401 means the Tuya login is gone.
+function loggedOut(status, body) { return status === 401 && appError(body); }
+
+export { api, appError, loggedOut };

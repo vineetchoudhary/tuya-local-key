@@ -3879,6 +3879,58 @@ def test_exclusions_refresh_on_wake_stops_retrying_while_the_page_is_hidden(page
     assert page.evaluate("window.exclusionErrorShown") is False
 
 
+FORCED_REFRESH = re.compile(r"/api/devices\?refresh=1$")
+
+
+@pytest.mark.parametrize("answer, message", [
+    ("ingress_session_expired", "Refresh failed. Try again."),
+    ("not_logged_in", "Please log in again."),
+    ("session_invalid", "Your login expired. Please scan the QR code again."),
+])
+def test_refresh_shows_the_login_screen_only_when_the_app_itself_answers_401(page, answer, message):
+    shown = listed_ids(page)
+
+    def unauthorized(route):
+        if answer == "ingress_session_expired":
+            ingress_session_expired(route)
+        else:
+            route.fulfill(status=401, json={"error": answer})
+
+    page.route(FORCED_REFRESH, unauthorized)
+    page.click("#refreshBtn")
+    expect(page.locator("#banner")).to_have_text(message)
+    if answer != "ingress_session_expired":
+        expect(page.locator("#login")).to_be_visible()
+        expect(page.locator("#devices")).to_be_hidden()
+        return
+    expect(page.locator("#devices")).to_be_visible()
+    expect(page.locator("#login")).to_be_hidden()
+    assert listed_ids(page) == shown
+    # Home Assistant has renewed the session.
+    page.unroute(FORCED_REFRESH, unauthorized)
+    refreshed(page, "#rows tr")
+    expect(page.locator("#banner")).to_be_hidden()
+    assert listed_ids(page) == shown
+
+
+def test_a_scan_keeps_watching_when_home_assistant_answers_a_poll_with_401(page, running_app, monkeypatch):
+    _scans(running_app, monkeypatch, FIRST_SCAN)
+    polls = []
+
+    def expired_once(route):
+        if route.request.method == "GET":
+            polls.append(route.request)
+            if len(polls) == 1:
+                ingress_session_expired(route)
+                return
+        route.continue_()
+
+    page.route("**/api/lan/scan", expired_once)
+    scanned(page, "192.168.1.0/30")
+    assert len(polls) >= 2
+    assert row(page, PLUG).locator("td[data-column='protocol_version']").inner_text() == "3.4"
+
+
 def test_exclusions_late_older_read_cannot_undo_a_successful_save(page):
     previous = page.request.get(page.url + "api/device-exclusions").json()
     held = []

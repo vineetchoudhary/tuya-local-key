@@ -1,5 +1,5 @@
 // Devices.
-import { api } from "../shared/api.js";
+import { api, loggedOut } from "../shared/api.js";
 import { CHANGE_BADGES, SPEC_KEYS, TIME_KEYS } from "../shared/constants.js";
 import { $ } from "../shared/dom.js";
 import { dash } from "../shared/fields.js";
@@ -108,7 +108,7 @@ async function loadDevices(msg, inline, refresh) {
     if (generation !== appState.deviceLoadGeneration) return;
     const { ok, status, body } = devicesResponse;
     if (!ok) {
-      if (status === 401) {
+      if (loggedOut(status, body)) {
         appState.deviceData = [];
         resetExclusions();
         appState.deviceChanges = appState.snapshotReason = null;
@@ -124,7 +124,8 @@ async function loadDevices(msg, inline, refresh) {
         show("login");
       } else {
         if (inline) refreshStatus("Refresh failed.", "error");
-        banner(body.error === "fetch_failed" ? "Could not load devices from Tuya. Try again." : (body.error || "Failed to load devices."));
+        banner(body.error === "fetch_failed" ? "Could not load devices from Tuya. Try again."
+          : body.error || (refresh ? "Refresh failed. Try again." : "Failed to load devices."));
         if (!appState.deviceData.length) stopCacheStatusTimer();
         show(appState.deviceData.length ? "devices" : "login");
       }

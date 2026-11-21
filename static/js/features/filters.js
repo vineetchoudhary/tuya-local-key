@@ -1,5 +1,5 @@
 // Filters.
-import { api } from "../shared/api.js";
+import { api, appError } from "../shared/api.js";
 import { categoryLabel, categoryOf } from "../shared/categories.js";
 import { $, views } from "../shared/dom.js";
 import { plural } from "../shared/format.js";
@@ -408,8 +408,8 @@ async function refreshExclusions(attempt = 0) {
   const result = await api("/api/device-exclusions");
   if (generation !== appState.exclusionLoadGeneration || session !== appState.accountGeneration) return;
   if (!result.ok || !validExclusions(result.body)) {
-    // An error from the app itself is final. Other failures may not have reached it.
-    if (typeof result.body.error !== "string" && attempt < REFRESH_RETRY_DELAYS.length) {
+    // An error from the app itself is final.
+    if (!appError(result.body) && attempt < REFRESH_RETRY_DELAYS.length) {
       // A newer load or save, or a hidden page, ends the retries.
       refreshRetry = setTimeout(() => {
         if (generation === appState.exclusionLoadGeneration && !document.hidden &&

@@ -1,5 +1,5 @@
 // Network.
-import { api } from "../shared/api.js";
+import { api, loggedOut } from "../shared/api.js";
 import { LAN_BADGES } from "../shared/constants.js";
 import { $ } from "../shared/dom.js";
 import { fieldList } from "../shared/fields.js";
@@ -226,7 +226,7 @@ function watchScan(showBox) {
   const poll = async () => {
     const { ok, status, body } = await api("/api/lan/scan");
     if (watch !== lanWatch || session !== appState.accountGeneration || expectedAccount !== appState.accountId) return;
-    if (!ok && status === 401) {
+    if (loggedOut(status, body)) {
       stopScanWatch();
       const previous = appState.lanData.job;
       if (previous) appState.lanData.job = { ...previous, state: "failed", error: "not_logged_in" };

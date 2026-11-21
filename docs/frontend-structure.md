@@ -45,6 +45,8 @@ The support report entry uses `data-support-report` to download directly without
 
 Stylesheet and entrypoint URLs are relative to the document. JavaScript imports are relative to their module. The API helper keeps requests relative to the document by stripping leading slashes, preserving Home Assistant ingress prefixes. It also sends `X-Requested-With: tuya-local-key`, which the server's cross-site check accepts behind a proxy that rewrites Host. Avoid root-relative asset or API URLs.
 
+Treat a 401 as a logout only through `loggedOut` in `shared/api.js`. Home Assistant answers 401 itself while its ingress session is expired, for up to a minute after the device wakes. Only the app's own JSON 401 means the Tuya login is gone.
+
 Gateway categories and the update-check and change-history flags come from Flask through the `app-config` JSON block. Static JavaScript is served unchanged and contains no Jinja expressions. Static assets use the same direct-access and ingress authentication rules as the rest of the app. Docker includes both the templates and static directories.
 
 ## Verification
