@@ -340,6 +340,21 @@ def test_device_clear_drops_only_that_devices_part_of_running_observations(journ
         {"kind": "renamed", "before": "Lamp", "after": "Lamp renamed"}]
 
 
+def test_device_cleared_during_the_first_refresh_is_not_reported_added_later(journal):
+    store, _ = journal
+    other = {"id": "other", "name": "Other"}
+    fleet = [device(), other]
+    # After an upgrade, network checks can be recorded before the first refresh.
+    lan(store, {"lamp": ok(), "other": ok("10.0.0.2")}, "first-check", fleet)
+    lan(store, {"lamp": ok("10.0.0.9"), "other": ok("10.0.0.2")}, "second-check", fleet)
+    token = store.epoch(ACCOUNT)   # the first refresh begins
+    store.clear(ACCOUNT, token, device_id="lamp")
+    cloud(store, fleet, "first-refresh", epoch=token)
+    cloud(store, fleet, "next-refresh")
+    assert events(store, device_id="lamp") == []
+    assert events(store, device_id="other") == []
+
+
 def test_device_clear_accepts_older_history_without_clear_markers(journal):
     store, _ = journal
     cloud(store, [device()], "a")

@@ -671,6 +671,8 @@ class HistoryStore:
                         child["owned_key_hash"] = listed
                     owners.setdefault(owner, []).append(device["id"])
             initial = doc["cloud_at"] is None or seed
+            if initial:
+                skip = frozenset()
             previous = doc["cloud"]
             current_ids = {d["id"] for d in projected}
             for device in projected:

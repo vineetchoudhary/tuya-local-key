@@ -2316,8 +2316,11 @@ def test_escape_and_the_backdrop_cancel_without_closing_the_panel(page, running_
 
 def test_confirming_logs_out(page, restores_session):
     page.click("#logoutBtn")
-    page.click("#logoutConfirm")
+    with page.expect_request(lambda r: r.url.endswith("/api/logout")) as logout:
+        page.click("#logoutConfirm")
 
+    # Behind a plain-HTTP proxy that rewrites Host, this header lets the page's own changes through.
+    assert logout.value.headers.get("x-requested-with") == "tuya-local-key"
     page.wait_for_selector("#login:not(.hidden)")
     assert not os.path.exists(restores_session.SESSION_FILE)
     assert page.locator("#headerActions").is_hidden()

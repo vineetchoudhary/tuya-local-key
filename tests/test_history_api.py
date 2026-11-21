@@ -398,6 +398,45 @@ def test_completed_scan_using_rotated_key_has_no_lan_history(environment, monkey
     assert all(e["source"] == "cloud" for e in history(client)["events"])
 
 
+def test_scan_started_before_a_sub_device_was_repaired_cannot_restore_its_key_link(environment, monkeypatch):
+    """A re-paired sub-device keeps its key but gets a new uuid. A scan that
+    began before that refresh must not hand its key back to the keyless hub."""
+    module, client, state = environment
+    hub = SimpleNamespace(id="hub", name="Hub", local_key="", category="wg2", sub=True)
+    child = SimpleNamespace(id="child", name="Sensor", local_key=KEY, category="mcs", sub=True,
+                            node_id="n1", uuid="first-pairing")
+    state["devices"] = [hub, child]
+    refresh(client)
+    found = {"results": {"hub": {"status": "ok", "ip": "10.0.0.5", "version": "3.3", "key_from": "child"},
+                         "child": {"status": "via_gateway", "ip": "10.0.0.5", "version": "3.3", "gateway_id": "hub"}},
+             "coverage": {"hub": True, "child": True}, "summary": {"cancelled": False, "finished_at": time.time()}}
+    monkeypatch.setattr(module.lan_scan, "scan", lambda *a, **kw: copy.deepcopy(found))
+    _run_scan(client, targets="10.0.0.5")
+
+    entered, release = threading.Event(), threading.Event()
+    def slow_scan(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return copy.deepcopy(found)
+    monkeypatch.setattr(module.lan_scan, "scan", slow_scan)
+    assert client.post("/api/lan/scan", json={"targets": "10.0.0.5"}).status_code == 202
+    try:
+        assert entered.wait(2)
+        child.uuid = "second-pairing"
+        refresh(client)
+    finally:
+        release.set()
+    deadline = time.monotonic() + 5
+    while client.get("/api/lan/scan").json["job"]["state"] == "running" and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    # With the link restored, the sub-device's next key would be charged to the hub.
+    child.local_key = "rotated-key-00002"
+    refresh(client)
+    hub_changes = [c["kind"] for e in history(client)["events"] if e["device_id"] == "hub" for c in e["changes"]]
+    assert "key_changed" not in hub_changes
+
+
 def test_logout_failure_does_not_claim_success_or_delete_history(environment, monkeypatch):
     module, client, _ = environment
     refresh(client)

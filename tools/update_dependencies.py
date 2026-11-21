@@ -12,12 +12,12 @@ day.
         BRANCH already proposes, or proposed and was closed without merging.
         In GitHub Actions it also writes the outputs the workflow needs.
 
-    python tools/update_dependencies.py apply tinytuya==1.21.0 ...
+    python tools/update_dependencies.py apply tinytuya==X.Y.Z ...
         Moves those packages to those versions in requirements.txt and
         pyproject.toml. Each keeps its operator: >= stays a minimum, and ==
         stays a pin.
 
-    python tools/update_dependencies.py verify tinytuya==1.21.0 ...
+    python tools/update_dependencies.py verify tinytuya==X.Y.Z ...
         Fails unless those are the versions installed.
 
 apply and verify use only the standard library, so they also run inside the

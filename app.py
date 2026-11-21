@@ -360,6 +360,9 @@ def _update_status(manual):
                                           supervisor_token=token, manual=manual))
 
 
+APP_REQUEST_HEADER_VALUE = "tuya-local-key"   # X-Requested-With, sent by static/js/shared/api.js
+
+
 def _from_ingress_proxy():
     """Supervisor's proxy peer, never a client-supplied header alone."""
     return request.remote_addr == "172.30.32.2" and bool(request.headers.get("X-Ingress-Path"))
@@ -387,10 +390,13 @@ def _require_auth():
 def _refuse_cross_site_changes():
     """Refuse changes another website asks the browser to make (CSRF).
 
-    Browsers label every request with Sec-Fetch-Site, and older ones still
-    send Origin. A request with neither comes from a script or a tool, not
-    from a page on another site. Home Assistant's own session already guards
-    ingress, whose proxy may not keep the browser's Host.
+    Browsers send Sec-Fetch-Site over HTTPS and to localhost. Over plain HTTP
+    they send only Origin, which no longer matches Host behind a reverse proxy
+    that rewrites it, so the app's own page also names itself in a header
+    (static/js/shared/api.js). Another site cannot send that header without a
+    CORS preflight, which the app never approves. A request with neither
+    Sec-Fetch-Site nor Origin comes from a script or a tool. Home Assistant's
+    own session already guards ingress.
     """
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return None
@@ -399,7 +405,8 @@ def _refuse_cross_site_changes():
         allowed = site in ("same-origin", "none")
     else:
         origin = request.headers.get("Origin")
-        if origin is None or _from_ingress_proxy():
+        if (origin is None or _from_ingress_proxy()
+                or request.headers.get("X-Requested-With") == APP_REQUEST_HEADER_VALUE):
             return None
         try:
             allowed = urlsplit(origin).netloc.lower() == request.host.lower()
@@ -814,7 +821,11 @@ def _key_digest(local_key):
 
 
 def _device_link(device):
-    """The cloud relationship used when checking a sub-device or lending a key."""
+    """The cloud relationship used when checking a sub-device or lending a key.
+
+    Saved scan evidence stores this, so a new field here would invalidate every
+    saved result after an upgrade. Check other fields per scan, like device_uuids.
+    """
     return {field: device.get(field) for field in ("gateway_id", "node_id", "sub", "category")}
 
 
@@ -1057,6 +1068,8 @@ def _merge_lan(job, outcome, current):
         if any(dep not in current
                or job["key_digests"].get(dep) != _key_digest(current[dep].get("local_key"))
                or job["device_links"].get(dep) != _device_link(current[dep])
+               # A re-paired device keeps its key but not its identity.
+               or job["device_uuids"].get(dep) != current[dep].get("uuid")
                for dep in dependencies):
             continue
         positive = result.get("status") == lan_scan.OK
@@ -1289,6 +1302,7 @@ def lan_scan_start():
         "history_epoch": _history_epoch(session),
         "key_digests": {d.get("id"): _key_digest(d.get("local_key")) for d in devices},
         "device_links": {d.get("id"): _device_link(d) for d in devices},
+        "device_uuids": {d.get("id"): d.get("uuid") for d in devices},
         "cancel": threading.Event(),
     }
     with _account_lock:

@@ -372,6 +372,9 @@ def test_ingress_headers_from_direct_clients_cannot_bypass_auth(tmp_path, monkey
 @pytest.mark.parametrize("headers", [
     {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"},
     {"Origin": "http://attacker.example"}, {"Origin": "null"}, {"Origin": "http://[::1"},
+    # The app's header never overrides the browser saying the request is cross-site.
+    {"Sec-Fetch-Site": "cross-site", "X-Requested-With": "tuya-local-key"},
+    {"Origin": "http://attacker.example", "X-Requested-With": "XMLHttpRequest"},
 ])
 def test_other_websites_cannot_log_out_or_trigger_update_checks(webapp, monkeypatch, headers):
     webapp.core.save_session(webapp.SESSION_FILE, {"user_code": "account"})
@@ -389,6 +392,20 @@ def test_other_websites_cannot_log_out_or_trigger_update_checks(webapp, monkeypa
 def test_the_page_itself_and_scripts_can_still_log_out(webapp, headers):
     webapp.core.save_session(webapp.SESSION_FILE, {"user_code": "account"})
     assert webapp.app.test_client().post("/api/logout", headers=headers).status_code == 200
+    assert not os.path.exists(webapp.SESSION_FILE)
+
+
+def test_the_page_still_works_behind_a_plain_http_proxy_that_rewrites_host(webapp):
+    """Over plain HTTP browsers send Origin but no Sec-Fetch-Site, and nginx's
+    default proxy_pass replaces Host, so only the page's own header gets through."""
+    webapp.core.save_session(webapp.SESSION_FILE, {"user_code": "account"})
+    client = webapp.app.test_client()
+    proxied = {"headers": {"Origin": "http://tuya.lan"}, "environ_overrides": {"HTTP_HOST": "127.0.0.1:8000"}}
+    assert client.post("/api/logout", **proxied).status_code == 403
+    assert os.path.isfile(webapp.SESSION_FILE)
+
+    proxied["headers"]["X-Requested-With"] = "tuya-local-key"
+    assert client.post("/api/logout", **proxied).status_code == 200
     assert not os.path.exists(webapp.SESSION_FILE)
 
 
