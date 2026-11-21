@@ -1,28 +1,32 @@
 configuration:
-  CHANGE_HISTORY:
-    name: Change history
-    description: >-
-      Record encrypted configuration changes from fresh device refreshes and network checks. Setting to off deletes saved history and its key. History is temporary when Device cache is off. Logging out or switching accounts deletes history.
-  HISTORY_RETENTION_DAYS:
-    name: History retention (days)
-    description: >-
-      Keep history for 1 to 3650 days (default 90), subject to the 10000-entry limit. Older entries may be removed sooner when storage limits are reached.
-  CHECK_FOR_UPDATES:
-    name: Check for updates
-    description: Enable update checks and notifications.
   QR_SCHEME:
     name: QR scheme
     description: >-
       Scheme used for the login QR code. Use "smartlife" for the Smart Life app or "tuyaSmart" for the Tuya Smart app. Switch schemes if scanning or confirmation does not work for your account.
-  LAN_SUBNET:
-    name: Network to scan
+  DEVICE_CACHE:
+    name: Device cache
     description: >-
-      Optional IoT VLAN or subnet that prefills the "Scan network" box, e.g. 192.168.2.0/24. Separate several with commas. The scan finds each device's local IP and protocol version over TCP port 6668, so the firewall must let this Home Assistant host reach port 6668 on those networks.
+      Keep the encrypted device list, scan results, and change history across restarts. Set to off to keep them in memory only.
+  CHECK_FOR_UPDATES:
+    name: Check for updates
+    description: Enable update checks and notifications.
+  CHANGE_HISTORY:
+    name: Change history
+    description: >-
+      Record encrypted configuration changes from device refreshes and network checks. Setting to off deletes saved history and its key. Logging out or switching accounts also deletes history.
+  HISTORY_RETENTION_DAYS:
+    name: History retention (days)
+    description: >-
+      Keep history for 1 to 3650 days, up to 10000 entries. Older entries may be removed sooner to stay within storage limits.
   AUTH_USERNAME:
     name: Basic Auth username
     description: >-
-      Optional username for HTTP Basic Auth. A login is required only when both username and password are set. (Not used in Home Assistant ingress acess)
+      Optional username for HTTP Basic Auth on the direct port. A login is required only when both username and password are set. Not used for Home Assistant ingress access.
   AUTH_PASSWORD:
     name: Basic Auth password
     description: >-
-      Optional password for HTTP Basic Auth. A login is required only when both username and password are set. (Not used in Home Assistant ingress acess)
+      Optional password for HTTP Basic Auth on the direct port. A login is required only when both username and password are set. Not used for Home Assistant ingress access.
+  LAN_SUBNET:
+    name: Network to scan
+    description: >-
+      Optional IoT VLAN or subnet that prefills "Scan network", e.g. 192.168.2.0/24. Separate several with commas. The firewall must let this Home Assistant host reach TCP port 6668 on those networks.
