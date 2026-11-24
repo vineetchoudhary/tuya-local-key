@@ -7,8 +7,9 @@
 .history-filter-options > summary { cursor: pointer; font-size: 14px; font-weight: 600; }
 .history-filter-label { display: inline-flex; align-items: center; gap: 6px; }
 .history-filter-reset { margin-left: 8px; font-size: 13px; font-weight: 400; white-space: nowrap; }
-.history-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.history-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; color-scheme: light dark; }
 .history-filters input, .history-filters select { width: 100%; min-width: 0; border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 8px; padding: 9px 10px; font: inherit; }
+.history-filters select { appearance: none; -webkit-appearance: none; padding-right: 40px; text-overflow: ellipsis; }
 .history-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
 .history-actions button { font-size: 13px; padding: 8px 10px; }
 .history-entries { display: grid; gap: 12px; }

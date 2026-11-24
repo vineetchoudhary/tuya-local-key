@@ -3,6 +3,7 @@ import { api } from "../shared/api.js";
 import { $ } from "../shared/dom.js";
 import { esc } from "../shared/html.js";
 import { localTime, plural } from "../shared/format.js";
+import { icon } from "../shared/icons.js";
 import { appState } from "../shared/state.js";
 
 const LABELS = {
@@ -237,6 +238,8 @@ function initHistory(actions) {
   if (initialized) return;
   initialized = true; ({ openPanel, renderPanel, focusPanelPage, renderNotices, loadDevices } = actions);
   $("historyKind").innerHTML += Object.entries(LABELS).map(([kind, label]) => `<option value="${kind}">${label}</option>`).join("");
+  $("historyKindChevron").innerHTML = icon("chevron");
+  $("historySourceChevron").innerHTML = icon("chevron");
   $("historyRefresh").onclick = () => expectedAccount ? loadHistory() : loadDevices();
   $("historyMore").onclick = () => loadHistory(true);
   $("historyFilters").onsubmit = e => { e.preventDefault(); loadHistory(); };
