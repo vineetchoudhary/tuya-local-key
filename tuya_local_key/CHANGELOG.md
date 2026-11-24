@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.2
+- Added **Change history** in the device options to see when a device's local key, IP, protocol, name, room, or gateway changed.
+- History is encrypted, never stores local keys, and is kept for 90 days. Change this with `HISTORY_RETENTION_DAYS`, or turn it off and delete it with `CHANGE_HISTORY=off`.
+- **Clear history** clears one device's history. Logging out or switching accounts deletes all of it.
+- A failed logout now shows an error instead of the login screen.
+- Reopening the app in Home Assistant after a while no longer shows a false exclusions error, the login screen, or a failed scan.
+- Dismissed change and scan notices are now remembered per account.
+- **Full Changelog**: https://github.com/vineetchoudhary/tuya-local-key/compare/v4.1...v4.2
+
 ## 4.1
 - Updated TinyTuya to 1.21.1 from 1.20.
 - CLI and source installations now require Python 3.10 or newer.
