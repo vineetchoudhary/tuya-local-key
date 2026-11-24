@@ -220,6 +220,44 @@ def test_history_write_failure_is_reported_without_losing_live_devices(environme
     assert history(client)["recording_error"] == "history_save_failed"
 
 
+def _history_bug(*args, **kwargs):
+    raise RuntimeError("unexpected history bug")
+
+
+@pytest.mark.parametrize("method", ["epoch", "view", "observe_cloud"])
+def test_unexpected_history_error_never_fails_a_refresh(environment, monkeypatch, method):
+    module, client, state = environment
+    refresh(client)
+    state["devices"][0].name = "Live result"
+    monkeypatch.setattr(module._history, method, _history_bug)
+    result = refresh(client)
+    assert result["devices"][0]["name"] == "Live result"
+    assert result["history_error"] == "history_save_failed"
+    # The fetched list is still saved.
+    assert client.get("/api/devices").json["devices"][0]["name"] == "Live result"
+
+
+@pytest.mark.parametrize("method", ["seed_lan_cache", "observe_lan"])
+def test_unexpected_history_error_never_fails_a_scan(environment, monkeypatch, method):
+    module, client, _ = environment
+    refresh(client)
+    found = {"status": "ok", "ip": "10.0.0.1", "version": "3.3"}
+    monkeypatch.setattr(module.lan_scan, "scan", lambda *a, **kw: outcome(found))
+    monkeypatch.setattr(module._history, method, _history_bug)
+    assert _run_scan(client)["state"] == "done"
+    lan = client.get("/api/lan").json
+    assert lan["results"]["lamp"]["ip"] == "10.0.0.1"
+    assert lan["history_error"] == "history_save_failed"
+
+
+def test_unexpected_history_error_never_shows_the_login_screen(environment, monkeypatch):
+    module, client, _ = environment
+    refresh(client)
+    monkeypatch.setattr(module._history, "activate", _history_bug)
+    response = client.get("/api/state")
+    assert response.status_code == 200 and response.json["logged_in"] is True
+
+
 def test_unreadable_history_requires_explicit_reset_and_invalidates_stale_reset_token(environment):
     module, client, _ = environment
     refresh(client)

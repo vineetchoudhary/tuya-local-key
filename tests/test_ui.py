@@ -487,7 +487,7 @@ def test_change_history_compact_device_drawer_has_four_filters_in_requested_rows
     page.locator("#historyFilterOptions .history-filter-label").click()
     expect(page.locator("#historyFilters")).to_be_visible()
     assert page.locator("#historyFilters label").all_inner_texts() == ["Changes", "Source", "From", "Through"]
-    assert page.locator("#historySource option").all_inner_texts() == ["All Sources", "Cloud", "Local"]
+    assert page.locator("#historySource option").all_inner_texts() == ["All sources", "Cloud", "Local"]
     boxes = {name: page.locator("#" + name).bounding_box() for name in (
         "historyKind", "historySource", "historySince", "historyUntil")}
     assert boxes["historyKind"]["y"] == pytest.approx(boxes["historySource"]["y"], abs=1)
@@ -673,6 +673,23 @@ def test_history_inherited_change_identifies_gateway_without_device_navigation_b
     expect(page.locator("#panelHistoryOpen")).to_be_focused()
     expect(page.locator("#menuBody")).to_be_visible()
     assert frontend_state(page, "selectedId") == PLUG.id
+
+
+def test_history_gateway_entry_counts_its_sub_devices(page, running_app):
+    account = clear_device_history(page)
+    snapshot = [running_app.core.web_dict(d) for d in DEVICES]
+    snapshot[demo_devices.PLUG].update(sub=True, gateway_id=LAMP.id)
+    running_app._history.observe_lan(account, {LAMP.id: {"status": "ok", "ip": "10.0.0.1", "version": "3.3"}},
+                                     snapshot, "history-count-before")
+    clear_device_history(page, LAMP.id)
+    running_app._history.observe_lan(account, {LAMP.id: {"status": "ok", "ip": "10.0.0.2", "version": "3.3"}},
+                                     snapshot, "history-count-after")
+    open_panel(page, LAMP.name)
+    page.locator("#panelHistoryOpen").click()
+    card = page.locator("#historyEntries .history-entry")
+    expect(card).to_have_count(1)
+    card.locator(".history-observation summary").click()
+    expect(card.locator(".history-observation p")).to_have_text("Also applies through this gateway to 1 sub-device.")
 
 
 def test_change_history_reopening_restores_filters_older_entries_observation_details_and_scroll(page, running_app):

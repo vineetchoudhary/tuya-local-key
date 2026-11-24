@@ -250,10 +250,21 @@ def _devices_response(body, session):
     return jsonify(response)
 
 
+def _history_unexpected(error):
+    """A bug in history must never fail a page load, refresh or scan."""
+    # The type only: a message could carry device data.
+    app.logger.warning("Change history failed: %s", type(error).__name__)
+    if CHANGE_HISTORY and _history.error is None:
+        _history.error = "history_save_failed"
+
+
 def _history_epoch(session):
     try:
         return _history.epoch(device_preferences.account_id(session))
     except (change_history.HistoryError, device_preferences.AccountIdentityError, OSError):
+        return "unavailable"
+    except Exception as error:
+        _history_unexpected(error)
         return "unavailable"
 
 
@@ -277,6 +288,8 @@ def _record_cloud_history(session, listed, operation, epoch, previous):
         # A history failure must not discard successfully fetched device data.
         if CHANGE_HISTORY and _history.error is None:
             _history.error = "history_save_failed"
+    except Exception as error:
+        _history_unexpected(error)
 
 
 def _purge_history():
@@ -439,6 +452,9 @@ def state():
                 _history.activate(device_preferences.account_id(session))
             except device_preferences.AccountIdentityError:
                 pass
+            except Exception as error:
+                # A failed reply here would show the login screen.
+                _history_unexpected(error)
     return jsonify({"logged_in": os.path.isfile(SESSION_FILE)})
 
 
@@ -1053,34 +1069,35 @@ def _merge_lan(job, outcome, current):
             if any(changes.values()) or not body.get("changes_at"):
                 body["changes_at"] = now   # something new: show the notice again
     _save_lan(key, body)
-    # History accepts only the part of this outcome that is supported by the
-    # same keys, relationships and actual scan coverage at commit time.
-    accepted = {}
-    coverage = outcome.get("coverage", {})
-    for dev_id, result in results.items():
-        dependencies = {dev_id}
-        gateway = result.get("gateway_id") or (current.get(dev_id) or {}).get("gateway_id")
-        if gateway:
-            dependencies.add(gateway)
-        source = result.get("key_from") or (merged.get(gateway) or {}).get("key_from")
-        if source:
-            dependencies.add(source)
-        if any(dep not in current
-               or job["key_digests"].get(dep) != _key_digest(current[dep].get("local_key"))
-               or job["device_links"].get(dep) != _device_link(current[dep])
-               # A re-paired device keeps its key but not its identity.
-               or job["device_uuids"].get(dep) != current[dep].get("uuid")
-               for dep in dependencies):
-            continue
-        positive = result.get("status") == lan_scan.OK
-        child_report = result.get("status") == lan_scan.VIA_GATEWAY and type(result.get("sub_online")) is bool
-        if not positive and not child_report:
-            ip = result.get("ip")
-            if (outcome["summary"].get("cancelled") or not coverage.get(dev_id)
-                    or not ip or ip != (previous.get(dev_id) or {}).get("ip")):
-                continue
-        accepted[dev_id] = result
+    # The results are saved, so a history failure must not fail the scan.
     try:
+        # History accepts only the part of this outcome that is supported by the
+        # same keys, relationships and actual scan coverage at commit time.
+        accepted = {}
+        coverage = outcome.get("coverage", {})
+        for dev_id, result in results.items():
+            dependencies = {dev_id}
+            gateway = result.get("gateway_id") or (current.get(dev_id) or {}).get("gateway_id")
+            if gateway:
+                dependencies.add(gateway)
+            source = result.get("key_from") or (merged.get(gateway) or {}).get("key_from")
+            if source:
+                dependencies.add(source)
+            if any(dep not in current
+                   or job["key_digests"].get(dep) != _key_digest(current[dep].get("local_key"))
+                   or job["device_links"].get(dep) != _device_link(current[dep])
+                   # A re-paired device keeps its key but not its identity.
+                   or job["device_uuids"].get(dep) != current[dep].get("uuid")
+                   for dep in dependencies):
+                continue
+            positive = result.get("status") == lan_scan.OK
+            child_report = result.get("status") == lan_scan.VIA_GATEWAY and type(result.get("sub_online")) is bool
+            if not positive and not child_report:
+                ip = result.get("ip")
+                if (outcome["summary"].get("cancelled") or not coverage.get(dev_id)
+                        or not ip or ip != (previous.get(dev_id) or {}).get("ip")):
+                    continue
+            accepted[dev_id] = result
         session = core.load_session(SESSION_FILE)
         account = device_preferences.account_id(session)
         # On upgrade, the displayed reachable result may predate LAN history.
@@ -1097,6 +1114,8 @@ def _merge_lan(job, outcome, current):
     except (change_history.HistoryError, device_preferences.AccountIdentityError, OSError):
         if CHANGE_HISTORY and _history.error is None:
             _history.error = "history_save_failed"
+    except Exception as error:
+        _history_unexpected(error)
 
 
 def _run_lan_job(job, targets, devices, known, only, routers):

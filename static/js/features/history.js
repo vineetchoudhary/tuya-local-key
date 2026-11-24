@@ -2,7 +2,7 @@
 import { api } from "../shared/api.js";
 import { $ } from "../shared/dom.js";
 import { esc } from "../shared/html.js";
-import { localTime } from "../shared/format.js";
+import { localTime, plural } from "../shared/format.js";
 import { appState } from "../shared/state.js";
 
 const LABELS = {
@@ -147,7 +147,7 @@ function eventHtml(entry) {
     (entry.previous_observed_at ? `<dt>Previous observation</dt><dd>${esc(localTime(entry.previous_observed_at))}</dd>` : "") +
     `${observations}</dl>` +
     (!inherited && entry.related_device_ids.length
-      ? `<p>Also applies through this gateway to ${entry.related_device_ids.length} sub-device(s).</p>` : "") +
+      ? `<p>Also applies through this gateway to ${plural(entry.related_device_ids.length, "sub-device")}.</p>` : "") +
     `</details></article>`;
 }
 
