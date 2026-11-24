@@ -168,6 +168,16 @@ Saved cloud values and a manual local reading appear side by side, with data poi
   <img alt="Current values comparing saved cloud values with a local device reply, followed by value definitions" src="screenshots/current-values-light.png" width="440">
 </picture>
 
+## Change History
+
+A local IP change found by a network scan, above a local key change found by a refresh, with the filters open. See [Change History](caching-and-changes.md#change-history).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/change-history-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="screenshots/change-history-light.png">
+  <img alt="Change history for a device with change, source and date filters, a local IP change from a scan, and a local key change from a refresh" src="screenshots/change-history-light.png" width="440">
+</picture>
+
 ## Support Report
 
 Choose **Download a support report** from the device options, then [attach the file to a bug report](usage.md#download-a-support-report).

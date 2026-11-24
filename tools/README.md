@@ -43,10 +43,11 @@ python tools/screenshots.py setup-tuya-local setup-localtuya setup-tinytuya loca
 | `fix-connection-test` | `fix-connection-test-{light,dark}.png` | [Fix connection test](../docs/screenshots.md#test) |
 | `fix-connection-result` | `fix-connection-result-{light,dark}.png` | [Fix connection next steps](../docs/screenshots.md#next-steps) |
 | `current-values` | `current-values-{light,dark}.png` | [Current Values](../docs/screenshots.md#current-values) |
+| `change-history` | `change-history-{light,dark}.png` | [Change History](../docs/screenshots.md#change-history) |
 | `support-report` | `support-report-{light,dark}.png` | [Support Report](../docs/screenshots.md#support-report) |
 | `filter` | `filter-{light,dark}.png` | [Search](../docs/screenshots.md#search) |
 
-Device panel previews are cropped to the panel so their contents remain readable. Their height adapts to the content, and Raw JSON keeps a scrollable viewport. Local network runs a demo scan, and the wizard result runs a demo check. Current values uses a simulated local reply, and the support report preview exercises the real download with the fake account.
+Device panel previews are cropped to the panel so their contents remain readable. Their height adapts to the content, and Raw JSON keeps a scrollable viewport. Local network runs a demo scan, and the wizard result runs a demo check. Current values uses a simulated local reply, and the support report preview exercises the real download with the fake account. Change history records two demo refreshes and two demo scans at fixed times.
 
 ## Dependency Updates
 

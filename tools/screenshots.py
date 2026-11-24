@@ -51,6 +51,12 @@ PANEL_TAIL = 28
 CHANGES_ROWS = 13
 # The same for the scan: the summary, the scan box and the first rows under them.
 SCAN_ROWS = 8
+# Change history: a baseline, then Bedroom Plug 02's re-pair shows up as a new
+# key in a refresh and a new IP in a scan. Fixed times, so the entries never move.
+HISTORY_STARTED = demo_fleet.UPDATED - 10 * 86400       # the first list and scan
+HISTORY_KEY_CHANGED = demo_fleet.UPDATED - 2 * 86400    # a refresh after the re-pair
+HISTORY_MOVED = demo_fleet.LAN_CHECKED                  # a scan finds the new IP
+HISTORY_NEW_IP = "192.168.2.86"
 
 
 def changed_fleet():
@@ -88,6 +94,7 @@ class Fixture:
         self.app.core.mint_qr_token = lambda user_code: DEMO_QR_TOKEN
         self.app.core.poll_login = lambda token, user_code: None   # stays pending
         self.app.lan_scan.scan = self._scan
+        self._moved = {}
         self.app.device_values.read = self._read
         self.app._update_checker.status = lambda current_version, **kwargs: {
             "current_version": current_version, "available": False, "check_after_seconds": 86400,
@@ -135,8 +142,34 @@ class Fixture:
                 "targets": demo_fleet.LAN_SUBNET, "changes": None, "changes_at": None,
             })
 
+    def history_at(self, when):
+        """Record change history as if it were this time."""
+        self.app._history.clock = lambda: when
+
+    def scan_now(self, page, moved=None):
+        """Run a scan the way Scan network does, and wait until it is saved.
+
+        moved: {device id: result fields} that this scan alone reports.
+        """
+        self._moved = moved or {}
+        try:
+            response = page.request.post(self.url + "api/lan/scan", data={"targets": demo_fleet.LAN_SUBNET})
+            assert response.status == 202, response.text()
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                job = page.request.get(self.url + "api/lan/scan").json()["job"]
+                if job and job["state"] != "running":
+                    assert job["state"] == "done", job
+                    return
+                time.sleep(0.05)
+            raise AssertionError("the demo scan did not finish")
+        finally:
+            self._moved = {}
+
     def _scan(self, targets, devices, known, progress=None, cancel=None, only=None, routers=None):
         results = demo_fleet.lan_results()
+        for device_id, fields in self._moved.items():
+            results[device_id].update(fields)
         checked_at = time.time()
         for result in results.values():
             result["checked_at"] = checked_at
@@ -251,14 +284,16 @@ def open_device_panel(page):
     }""")
 
 
-def fit_panel(page, body_id):
+def fit_panel(page, body_id, content=None):
     # The panel is a fixed, scrolling column: grow the window to fit it whole.
-    height = page.evaluate("""id => {
+    # content names the last visible part when a hidden dialog follows it.
+    height = page.evaluate("""([id, content]) => {
         const body = document.getElementById(id);
-        return Math.ceil(body.lastElementChild.getBoundingClientRect().bottom +
+        const last = content ? body.querySelector(content) : body.lastElementChild;
+        return Math.ceil(last.getBoundingClientRect().bottom +
             body.scrollTop + parseFloat(getComputedStyle(body).paddingBottom));
     }
-    """, body_id) + PANEL_TAIL
+    """, [body_id, content]) + PANEL_TAIL
     page.set_viewport_size({"width": WIDTH, "height": height})
     page.wait_for_timeout(300)      # panel and body width transitions settle
     body = page.locator(f"#{body_id}")
@@ -302,6 +337,31 @@ def shot_current_values(page, fx):
     page.wait_for_selector("#valuesBody [data-values-action='read']:text-is('Read again')")
     page.click("#valuesBody .values-specs summary")
     fit_panel(page, "valuesBody")
+    return panel_clip(page)
+
+
+def shot_change_history(page, fx):
+    fx.log_in()
+    fx.serve(demo_fleet.fleet())
+    fx.forget_devices()
+    fx.app._history.purge()     # so the light and dark runs record the same entries
+    refresh = fx.url + "api/devices?refresh=1"
+    fx.history_at(HISTORY_STARTED)
+    assert page.request.get(refresh).ok
+    fx.scan_now(page)
+    fx.history_at(HISTORY_KEY_CHANGED)
+    fx.serve(changed_fleet())
+    assert page.request.get(refresh).ok
+    fx.history_at(HISTORY_MOVED)
+    fx.scan_now(page, moved={demo_fleet.device_id(2): {"ip": HISTORY_NEW_IP}})
+    page.goto(fx.url, wait_until="networkidle")
+    page.wait_for_selector("#rows tr")
+    open_device_panel(page)
+    page.click("#panelHistoryOpen")
+    page.wait_for_selector("#historyEntries .history-entry")
+    page.click("#historyFilterOptions .history-filter-label")
+    page.wait_for_selector("#historyFilters", state="visible")
+    fit_panel(page, "historyBody", "#history")
     return panel_clip(page)
 
 
@@ -431,6 +491,7 @@ SHOTS = {
     "fix-connection-test": shot_fix_connection_test,
     "fix-connection-result": shot_fix_connection_result,
     "current-values": shot_current_values,
+    "change-history": shot_change_history,
     "support-report": shot_support_report,
     "filter": shot_filter,
 }
